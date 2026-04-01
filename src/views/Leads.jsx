@@ -1,0 +1,228 @@
+import React, { useState } from 'react';
+import {
+    Search, List, LayoutGrid, X, Phone, MessageSquare, Users
+} from 'lucide-react';
+import { useAppContext, formatDateStr } from '../context/AppContext.jsx';
+
+const STATUS_MAP = {
+    novo: { label: 'Novo', bg: '#eff6ff', color: '#3b82f6', dot: '#3b82f6' },
+    atendimento: { label: 'Em Atendimento', bg: '#fff7ed', color: '#d97706', dot: '#f59e0b' },
+    agendado: { label: 'Agendado', bg: '#f0fdf4', color: '#16a34a', dot: '#22c55e' },
+    fechado: { label: 'Fechado', bg: '#ecfdf5', color: '#059669', dot: '#10b981' },
+    perdido: { label: 'Perdido', bg: '#fef2f2', color: '#dc2626', dot: '#ef4444' },
+};
+
+const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
+    if (!lead) return null;
+    const s = STATUS_MAP[lead.status] || STATUS_MAP.novo;
+    return (
+        <div className="drawer-overlay" onClick={onClose}>
+            <div className="drawer-content" onClick={e => e.stopPropagation()}>
+                <div className="drawer-header">
+                    <h2>Detalhes do Lead</h2>
+                    <button className="close-btn" onClick={onClose}><X size={20} /></button>
+                </div>
+                <div className="drawer-body">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '2rem' }}>
+                        <div className="item-avatar" style={{ width: 56, height: 56, fontSize: '1.1rem' }}>{lead.avatar}</div>
+                        <div>
+                            <h3 style={{ fontWeight: 700, fontSize: '1.15rem' }}>{lead.name}</h3>
+                            <span className="status-badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem', marginBottom: '2rem' }}>
+                        {[
+                            ['Telefone', lead.phone],
+                            ['Cidade', lead.city],
+                            ['Interesse', lead.car],
+                            ['Renda Declarada', lead.income],
+                            ['Entrada Disponível', lead.entry],
+                            ['Captado em', formatDateStr(lead.date)]
+                        ].map(([label, value]) => (
+                            <div key={label}>
+                                <p className="text-muted" style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' }}>{label}</p>
+                                <p style={{ fontWeight: 600 }}>{value}</p>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.5rem' }}>Atualizar Status</label>
+                        <select value={lead.status} onChange={e => onStatusChange(lead.id, e.target.value)}
+                            style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: 12, border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
+                            {Object.entries(STATUS_MAP).map(([key, val]) => (
+                                <option key={key} value={key}>{val.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+                <div className="drawer-footer">
+                    <button className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }} onClick={() => alert('Simulação: Iniciando chamada telefônica...')}>
+                        <Phone size={16} /> Ligar
+                    </button>
+                    <button className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: '#25D366' }} onClick={() => alert(`Simulação: Iniciando conversa de WhatsApp com ${lead.phone}`)}>
+                        <MessageSquare size={16} /> WhatsApp
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const Leads = () => {
+    const { leads, updateLeadStatus, addToast } = useAppContext();
+    const [search, setSearch] = useState('');
+    const [filterStatus, setFilterStatus] = useState('todos');
+    const [view, setView] = useState('kanban');
+    const [selectedLead, setSelectedLead] = useState(null);
+    const [draggedId, setDraggedId] = useState(null);
+
+    const filtered = leads.filter(l => {
+        const matchSearch = `${l.name} ${l.car} ${l.phone} ${l.city}`.toLowerCase().includes(search.toLowerCase());
+        const matchStatus = filterStatus === 'todos' || l.status === filterStatus;
+        return matchSearch && matchStatus;
+    });
+
+    const handleStatusChange = (id, newStatus) => {
+        updateLeadStatus(id, newStatus);
+        addToast(`Lead atualizado para "${STATUS_MAP[newStatus]?.label}".`, 'info');
+        if (selectedLead?.id === id) setSelectedLead(prev => ({ ...prev, status: newStatus }));
+    };
+
+    const handleDragStart = (e, id) => { setDraggedId(id); e.dataTransfer.effectAllowed = 'move'; };
+    const handleDragOver = (e) => e.preventDefault();
+    const handleDrop = (e, newStatus) => {
+        e.preventDefault();
+        if (draggedId) { handleStatusChange(draggedId, newStatus); setDraggedId(null); }
+    };
+
+    const statusOrder = ['novo', 'atendimento', 'agendado', 'fechado', 'perdido'];
+
+    return (
+        <div className="view-content">
+            <header className="view-header-flex">
+                <div className="view-header">
+                    <h1>Central de Leads</h1>
+                    <p>{leads.length} contato{leads.length !== 1 ? 's' : ''} capturado{leads.length !== 1 ? 's' : ''} via WhatsApp e n8n.</p>
+                </div>
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                    <div className="search-box">
+                        <Search size={16} />
+                        <input type="text" placeholder="Buscar lead..." value={search} onChange={e => setSearch(e.target.value)} />
+                    </div>
+                    <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: '0.65rem 1rem', borderRadius: 8, border: '1px solid var(--color-border)', outline: 'none', background: 'white' }}>
+                        <option value="todos">Todos os Status</option>
+                        {Object.entries(STATUS_MAP).map(([key, val]) => (
+                            <option key={key} value={key}>{val.label}</option>
+                        ))}
+                    </select>
+                    <div className="view-toggle">
+                        <button className={`toggle-btn ${view === 'table' ? 'active' : ''}`} onClick={() => setView('table')} title="Tabela"><List size={18} /></button>
+                        <button className={`toggle-btn ${view === 'kanban' ? 'active' : ''}`} onClick={() => setView('kanban')} title="Kanban"><LayoutGrid size={18} /></button>
+                    </div>
+                </div>
+            </header>
+
+            {view === 'table' ? (
+                <div className="leads-container card" style={{ padding: 0, overflow: 'hidden' }}>
+                    <table className="modern-table">
+                        <thead>
+                            <tr>
+                                <th>Lead</th>
+                                <th>Interesse</th>
+                                <th>Cidade</th>
+                                <th>Status</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filtered.map(lead => {
+                                const s = STATUS_MAP[lead.status] || STATUS_MAP.novo;
+                                return (
+                                    <tr key={lead.id}>
+                                        <td>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }} onClick={() => setSelectedLead(lead)}>
+                                                <div className="item-avatar">{lead.avatar}</div>
+                                                <div>
+                                                    <p className="lead-name">{lead.name}</p>
+                                                    <p className="lead-phone">{lead.phone}</p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td><span className="lead-car">{lead.car}</span></td>
+                                        <td>{lead.city}</td>
+                                        <td>
+                                            <select value={lead.status} onChange={e => handleStatusChange(lead.id, e.target.value)}
+                                                style={{ background: s.bg, color: s.color, border: 'none', padding: '0.35rem 0.75rem', borderRadius: 20, fontWeight: 600, fontSize: '0.8rem', cursor: 'pointer' }}>
+                                                {Object.entries(STATUS_MAP).map(([key, val]) => (
+                                                    <option key={key} value={key}>{val.label}</option>
+                                                ))}
+                                            </select>
+                                        </td>
+                                        <td>
+                                            <div className="table-actions">
+                                                <button className="action-icon-btn" onClick={() => setSelectedLead(lead)} title="Ver detalhes"><Users size={16} /></button>
+                                                <button className="action-icon-btn whatsapp" title="Enviar mensagem" onClick={() => addToast('Simulação: Abrindo WhatsApp...', 'info')}><MessageSquare size={16} /></button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                    {filtered.length === 0 && (
+                        <div style={{ textAlign: 'center', padding: '3rem' }}>
+                            <p className="text-muted">Nenhum lead corresponde à busca.</p>
+                        </div>
+                    )}
+                </div>
+            ) : (
+                <div className="lead-kanban-board">
+                    {statusOrder.map(statusKey => {
+                        const info = STATUS_MAP[statusKey];
+                        const items = filtered.filter(l => l.status === statusKey);
+                        return (
+                            <div key={statusKey} className="lead-kanban-column"
+                                onDragOver={handleDragOver}
+                                onDrop={e => handleDrop(e, statusKey)}>
+                                <div className="lead-kanban-col-header">
+                                    <span className="column-dot" style={{ background: info.dot }}></span>
+                                    <h3>{info.label}</h3>
+                                    <span className="column-count">{items.length}</span>
+                                </div>
+                                <div className="lead-kanban-col-body">
+                                    {items.map(lead => (
+                                        <div key={lead.id} className="lead-kanban-card card"
+                                            draggable
+                                            onDragStart={e => handleDragStart(e, lead.id)}
+                                            onClick={() => setSelectedLead(lead)}
+                                            style={{ cursor: 'pointer' }}>
+                                            <div className="lead-kanban-header">
+                                                <strong>{lead.name}</strong>
+                                                <MessageSquare size={14} style={{ color: '#25D366', cursor: 'pointer' }} onClick={e => { e.stopPropagation(); addToast('Simulação: Abrindo WhatsApp...', 'info'); }} />
+                                            </div>
+                                            <p className="lead-kanban-car">{lead.car}</p>
+                                            <div className="lead-kanban-meta">
+                                                <span>{lead.phone}</span>
+                                                <span>{lead.city}</span>
+                                                <span>{formatDateStr(lead.date)}</span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {items.length === 0 && (
+                                        <div className="empty-column">Arraste leads para cá</div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {selectedLead && <LeadDrawer lead={selectedLead} onClose={() => setSelectedLead(null)} onStatusChange={handleStatusChange} />}
+        </div>
+    );
+};
+
+export default Leads;
