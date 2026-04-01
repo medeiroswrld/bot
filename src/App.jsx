@@ -6,16 +6,18 @@ import {
 } from 'lucide-react';
 import './App.css';
 
-import { AppProvider } from './context/AppContext.jsx';
+import { AppProvider, useAppContext } from './context/AppContext.jsx';
 import Dashboard from './views/Dashboard.jsx';
 import Inventory from './views/Inventory.jsx';
 import Leads from './views/Leads.jsx';
 import Agenda from './views/Agenda.jsx';
 import SoldCars from './views/SoldCars.jsx';
 import SettingsView from './views/Settings.jsx';
+import Login from './views/Login.jsx';
 
 const Sidebar = () => {
   const location = useLocation();
+  const { logout } = useAppContext();
   const menuItems = [
     { name: 'Início', icon: <LayoutDashboard size={20} />, path: '/' },
     { name: 'Estoque', icon: <CarFront size={20} />, path: '/estoque' },
@@ -49,7 +51,7 @@ const Sidebar = () => {
       </nav>
 
       <div className="sidebar-footer">
-        <button className="logout-btn">
+        <button className="logout-btn" onClick={logout}>
           <LogOut size={20} />
           <span>Sair</span>
         </button>
@@ -77,27 +79,37 @@ const Header = () => (
   </header>
 );
 
-function App() {
+const AuthenticatedApp = () => {
   const location = useLocation();
-  
+  return (
+    <div className="app-container">
+      <Sidebar />
+      <main className="main-content">
+        <Header />
+        <div key={location.pathname} className="page-transition">
+          <Routes location={location}>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/estoque" element={<Inventory />} />
+            <Route path="/vendidos" element={<SoldCars />} />
+            <Route path="/leads" element={<Leads />} />
+            <Route path="/agenda" element={<Agenda />} />
+            <Route path="/configuracoes" element={<SettingsView />} />
+          </Routes>
+        </div>
+      </main>
+    </div>
+  );
+};
+
+const AppContent = () => {
+  const { isAuthenticated } = useAppContext();
+  return isAuthenticated ? <AuthenticatedApp /> : <Login />;
+};
+
+function App() {
   return (
     <AppProvider>
-      <div className="app-container">
-        <Sidebar />
-        <main className="main-content">
-          <Header />
-          <div key={location.pathname} className="page-transition">
-            <Routes location={location}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/estoque" element={<Inventory />} />
-              <Route path="/vendidos" element={<SoldCars />} />
-              <Route path="/leads" element={<Leads />} />
-              <Route path="/agenda" element={<Agenda />} />
-              <Route path="/configuracoes" element={<SettingsView />} />
-            </Routes>
-          </div>
-        </main>
-      </div>
+      <AppContent />
     </AppProvider>
   );
 }

@@ -10,6 +10,7 @@ export const formatDateStr = (dateStr) => {
 };
 
 const INITIAL_STATE = {
+  isAuthenticated: false,
   company: {
     name: 'AutomaticGen Auto',
     address: 'Av. das Nações Unidas, 1234 - SP',
@@ -207,6 +208,22 @@ export const AppProvider = ({ children }) => {
     addToast(`Agendamento remarcado com sucesso.`, 'success');
   };
 
+  // Actions - Auth
+  const login = async (email, password) => {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        setData(prev => ({ ...prev, isAuthenticated: true }));
+        addToast('Login realizado com sucesso!', 'success');
+        resolve({ success: true });
+      }, 1500);
+    });
+  };
+
+  const logout = () => {
+    setData(prev => ({ ...prev, isAuthenticated: false }));
+    addToast('Sessão encerrada.', 'info');
+  };
+
   // Actions - Settings
   const updateCompany = (updates) => {
     setData(prev => ({ ...prev, company: updates }));
@@ -238,6 +255,10 @@ export const AppProvider = ({ children }) => {
     addAppointment,
     updateAppointmentStatus,
     updateAppointment,
+
+    // Auth
+    login,
+    logout,
 
     // Settings
     updateCompany,
