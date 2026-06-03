@@ -1,9 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
-    X, Gauge, Tag, CheckCircle2, ShoppingCart, MoreVertical, Package
+    X, Gauge, Tag, CheckCircle2, ShoppingCart, MoreVertical, Package, Camera
 } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
+
+const CarPlaceholder = () => (
+    <div className="car-placeholder">
+        <Camera size={36} strokeWidth={1.5} />
+        <span>Sem foto</span>
+    </div>
+);
 
 const StatusBadge = ({ status }) => {
     const map = {
@@ -14,37 +21,76 @@ const StatusBadge = ({ status }) => {
     return <span className="inv-status-badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>;
 };
 
-const EMPTY_CAR = { brand: '', model: '', version: '', year: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', status: 'disponivel', image: '' };
+const EMPTY_CAR = { brand: '', model: '', version: '', year: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', images: [] };
+
+// Parse preço no formato brasileiro ("198.000" ou "198.000,00" ou "198000") → número
+const parsePriceBR = (value) => {
+    if (typeof value === 'number') return value;
+    const cleaned = String(value).replace(/\./g, '').replace(',', '.');
+    return parseFloat(cleaned) || 0;
+};
 
 const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
     const { addToast } = useAppContext();
-    const [form, setForm] = useState(car ? { ...car } : { ...EMPTY_CAR });
-    const handleChange = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
+    const [form, setForm] = useState(car ? {
+        ...car,
+        price: car.price != null ? Number(car.price).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : '',
+        km:    car.km    != null ? Number(car.km).toLocaleString('pt-BR',    { maximumFractionDigits: 0 }) : '',
+        vehicle_type: car.vehicle_type || 'carro',
+        images: (car.images || (car.image ? [car.image] : [])).map(img => typeof img === 'string' ? { preview: img, file: null } : img),
+    } : { ...EMPTY_CAR });
+    const [errors, setErrors] = useState({});
+
+    const handleChange = (field, value) => {
+        setForm(prev => ({ ...prev, [field]: value }));
+        if (errors[field]) setErrors(prev => ({ ...prev, [field]: null }));
+    };
 
     const handleImageUpload = (e) => {
-        const file = e.target.files[0];
-        if (file) {
+        const files = Array.from(e.target.files);
+        const currentImagesCount = form.images?.length || 0;
+        
+        if (currentImagesCount + files.length > 8) {
+            addToast('Limite de 8 fotos atingido.', 'error');
+            return;
+        }
+
+        files.forEach(file => {
             if (file.size > 10 * 1024 * 1024) {
-                addToast('A imagem deve ter no máximo 10MB.', 'error');
+                addToast(`A imagem ${file.name} excede 10MB.`, 'error');
                 return;
             }
-            const reader = new FileReader();
-            reader.onloadend = () => handleChange('image', reader.result);
-            reader.readAsDataURL(file);
-        }
+            const preview = URL.createObjectURL(file);
+            setForm(prev => ({ ...prev, images: [...(prev.images || []), { preview, file }] }));
+        });
+    };
+
+    const removeImage = (index) => {
+        setForm(prev => ({
+            ...prev,
+            images: prev.images.filter((_, i) => i !== index)
+        }));
     };
 
     const handleSubmit = () => {
-        if (!form.brand || !form.model || !form.price || !form.year) {
-            addToast('Preencha os campos obrigatórios (*).', 'error');
+        const newErrors = {};
+        if (!form.brand) newErrors.brand = true;
+        if (!form.model) newErrors.model = true;
+        if (!form.price) newErrors.price = true;
+        if (!form.year) newErrors.year = true;
+
+        if (Object.keys(newErrors).length > 0) {
+            setErrors(newErrors);
+            addToast('Preencha os campos obrigatórios.', 'error');
             return;
         }
         
         onSave({
             ...form,
-            price: Number(form.price),
+            price: parsePriceBR(form.price),
+            km:    parsePriceBR(form.km),
             status: form.status || 'disponivel',
-            image: form.image || 'https://images.unsplash.com/photo-1583121274602-3e2820c69888?q=80&w=400&auto=format&fit=crop'
+            images: form.images?.length > 0 ? form.images : []
         });
         onClose();
     };
@@ -57,50 +103,35 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
                     <button className="close-btn" onClick={onClose}><X size={24} /></button>
                 </div>
                 <div className="settings-form">
-                    <div 
-                        className="image-upload-area" 
-                        onClick={() => document.getElementById('car-image-upload').click()}
-                        style={{
-                            cursor: 'pointer', 
-                            position: 'relative', 
-                            minHeight: '160px', 
-                            display: 'flex', 
-                            flexDirection: 'column', 
-                            alignItems: 'center', 
-                            justifyContent: 'center',
-                            overflow: 'hidden',
-                            border: '2px dashed #94a3b8',
-                            borderRadius: '12px',
-                            marginBottom: '1.5rem',
-                            background: '#f8fafc',
-                            padding: 0
-                        }}
-                    >
-                        <input id="car-image-upload" type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageUpload} />
-                        {form.image ? (
-                            <img src={form.image} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover', position: 'absolute', top: 0, left: 0 }} />
-                        ) : null}
-                        <div style={{
-                            position: 'relative', 
-                            zIndex: 1, 
-                            background: form.image ? 'rgba(255,255,255,0.9)' : 'transparent',
-                            padding: '1rem',
-                            borderRadius: '8px',
-                            textAlign: 'center',
-                            width: form.image ? 'auto' : '100%',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            boxShadow: form.image ? '0 4px 6px -1px rgba(0, 0, 0, 0.1)' : 'none'
-                        }}>
-                            <ImageIcon size={32} className="text-muted" style={{ marginBottom: '0.5rem' }} />
-                            <p className="font-600" style={{ margin: 0, color: '#0f172a' }}>{form.image ? 'Clique para alterar a foto' : 'Arraste fotos ou clique para enviar'}</p>
-                            {!form.image && <p className="text-muted" style={{ fontSize: '0.8rem', margin: 0, marginTop: '0.25rem' }}>PNG, JPG até 10MB</p>}
+                    <div className="form-group">
+                        <label>Fotos do Veículo ({form.images?.length || 0}/8)</label>
+                        <div className="image-upload-grid">
+                            {(form.images || []).map((img, index) => (
+                                <div key={index} className="image-preview-item">
+                                    <img src={img.preview || img} alt={`Preview ${index}`} />
+                                    <button className="remove-image-btn" onClick={() => removeImage(index)}><Trash2 size={14} /></button>
+                                </div>
+                            ))}
+                            {(!form.images || form.images.length < 8) && (
+                                <div className="upload-card-btn" onClick={() => document.getElementById('car-images-upload').click()}>
+                                    <Plus size={24} />
+                                    <span style={{ fontSize: '0.7rem', fontWeight: 600 }}>Adicionar</span>
+                                    <input id="car-images-upload" type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleImageUpload} />
+                                </div>
+                            )}
                         </div>
+                        {form.images?.length === 8 && <p className="error-message" style={{ color: '#f59e0b' }}>Limite de 8 fotos atingido.</p>}
                     </div>
+
                     <div className="form-row">
-                        <div className="form-group"><label>Marca *</label><input type="text" value={form.brand} onChange={e => handleChange('brand', e.target.value)} placeholder="Ex: Toyota" /></div>
-                        <div className="form-group"><label>Modelo *</label><input type="text" value={form.model} onChange={e => handleChange('model', e.target.value)} placeholder="Ex: Corolla" /></div>
+                        <div className={`form-group ${errors.brand ? 'has-error' : ''}`}>
+                            <label>Marca *</label>
+                            <input type="text" value={form.brand} onChange={e => handleChange('brand', e.target.value)} placeholder="Ex: Toyota" />
+                        </div>
+                        <div className={`form-group ${errors.model ? 'has-error' : ''}`}>
+                            <label>Modelo *</label>
+                            <input type="text" value={form.model} onChange={e => handleChange('model', e.target.value)} placeholder="Ex: Corolla" />
+                        </div>
                     </div>
                     <div className="form-row">
                         <div className="form-group"><label>Versão</label><input type="text" value={form.version} onChange={e => handleChange('version', e.target.value)} placeholder="Ex: XEi 2.0 Flex" /></div>
@@ -112,8 +143,22 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
                         </div>
                     </div>
                     <div className="form-row">
-                        <div className="form-group"><label>Ano *</label><input type="text" value={form.year} onChange={e => handleChange('year', e.target.value)} placeholder="Ex: 2024" /></div>
-                        <div className="form-group"><label>Valor (R$) *</label><input type="number" value={form.price} onChange={e => handleChange('price', e.target.value)} placeholder="148900" /></div>
+                        <div className="form-group"><label>Tipo de Veículo</label>
+                            <select value={form.vehicle_type || 'carro'} onChange={e => handleChange('vehicle_type', e.target.value)}>
+                                <option value="carro">🚗 Carro</option>
+                                <option value="moto">🏍 Moto</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div className="form-row">
+                        <div className={`form-group ${errors.year ? 'has-error' : ''}`}>
+                            <label>Ano *</label>
+                            <input type="text" value={form.year} onChange={e => handleChange('year', e.target.value)} placeholder="Ex: 2024" />
+                        </div>
+                        <div className={`form-group ${errors.price ? 'has-error' : ''}`}>
+                            <label>Valor (R$) *</label>
+                            <input type="text" inputMode="numeric" value={form.price} onChange={e => handleChange('price', e.target.value)} placeholder="Ex: 198000 ou 198.000" />
+                        </div>
                     </div>
                     <div className="form-row">
                         <div className="form-group"><label>Quilometragem</label><input type="text" value={form.km} onChange={e => handleChange('km', e.target.value)} placeholder="15.000" /></div>
@@ -144,9 +189,23 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
 };
 
 const SellModal = ({ car, onClose, onConfirm }) => {
+    const { addToast } = useAppContext();
     const [salePrice, setSalePrice] = useState(car ? car.price : 0);
     const [saleDate, setSaleDate] = useState(getTodayStr());
+    const [sellerName, setSellerName] = useState('');
+    const [error, setError] = useState(false);
+
     if (!car) return null;
+
+    const handleConfirm = () => {
+        if (!sellerName.trim()) {
+            setError(true);
+            addToast('O nome do vendedor é obrigatório.', 'error');
+            return;
+        }
+        onConfirm(car.id, salePrice, saleDate, sellerName);
+    };
+
     return (
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content modal-sm" onClick={e => e.stopPropagation()}>
@@ -156,7 +215,7 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                 </div>
                 <div className="sell-modal-body">
                     <div className="sell-car-info">
-                        <img src={car.image} alt={car.model} className="sell-car-thumb" />
+                        {car.images?.[0] ? <img src={car.images[0]} alt={car.model} className="sell-car-thumb" /> : <div className="sell-car-thumb" style={{display:'flex',alignItems:'center',justifyContent:'center',background:'#f1f5f9',borderRadius:'8px',width:'64px',height:'64px'}}><Camera size={24} color="#94a3b8" /></div>}
                         <div>
                             <h3>{car.brand} {car.model}</h3>
                             <p className="text-muted">{car.version} • {car.year}</p>
@@ -170,10 +229,20 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                         <label>Data da Venda</label>
                         <input type="date" value={saleDate} onChange={e => setSaleDate(e.target.value)} />
                     </div>
+                    <div className={`form-group ${error ? 'has-error' : ''}`}>
+                        <label>Vendedor *</label>
+                        <input 
+                            type="text" 
+                            placeholder="Nome do vendedor" 
+                            value={sellerName} 
+                            onChange={e => { setSellerName(e.target.value); if (error) setError(false); }} 
+                        />
+                        {error && <p className="error-message">Campo obrigatório</p>}
+                    </div>
                 </div>
                 <div className="modal-footer">
                     <button className="btn-secondary" onClick={onClose}>Cancelar</button>
-                    <button className="btn-primary" style={{ background: '#059669' }} onClick={() => onConfirm(car.id, salePrice, saleDate)}>
+                    <button className="btn-primary" style={{ background: '#059669' }} onClick={handleConfirm}>
                         <CheckCircle2 size={18} /> Confirmar Venda
                     </button>
                 </div>
@@ -183,6 +252,9 @@ const SellModal = ({ car, onClose, onConfirm }) => {
 };
 
 const DetailDrawer = ({ car, onClose }) => {
+    const images = car.images?.length > 0 ? car.images : [];
+    const [activeImg, setActiveImg] = useState(0);
+
     if (!car) return null;
     return (
         <div className="drawer-overlay" onClick={onClose}>
@@ -192,13 +264,37 @@ const DetailDrawer = ({ car, onClose }) => {
                     <button className="close-btn" onClick={onClose}><X size={20} /></button>
                 </div>
                 <div className="drawer-body">
-                    <img src={car.image} alt={car.model} style={{ width: '100%', height: 200, objectFit: 'cover', borderRadius: 12, marginBottom: '1.5rem' }} />
+                    <div className="detail-gallery">
+                        <div className="gallery-main">
+                            {images.length > 0 ? (
+                                <img src={images[activeImg]} alt={car.model} />
+                            ) : (
+                                <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'280px',background:'#f1f5f9',borderRadius:'12px',color:'#94a3b8',gap:'0.5rem'}}>
+                                    <Camera size={48} strokeWidth={1.5} />
+                                    <span style={{fontSize:'0.875rem',fontWeight:500}}>Nenhuma foto cadastrada</span>
+                                </div>
+                            )}
+                        </div>
+                        {images.length > 1 && (
+                            <div className="gallery-thumbs">
+                                {images.map((img, idx) => (
+                                    <div 
+                                        key={idx} 
+                                        className={`thumb-item ${activeImg === idx ? 'active' : ''}`}
+                                        onClick={() => setActiveImg(idx)}
+                                    >
+                                        <img src={img} alt={`Thumb ${idx}`} />
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                     <h3 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '0.25rem' }}>{car.brand} {car.model}</h3>
                     <p className="text-muted" style={{ marginBottom: '1.5rem' }}>{car.version} • {car.year}</p>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                         {[
                             ['Preço', `R$ ${Number(car.price).toLocaleString('pt-BR')}`],
-                            ['Quilometragem', `${car.km} km`],
+                            ['Quilometragem', `${Number(car.km).toLocaleString('pt-BR')} km`],
                             ['Câmbio', car.transmission],
                             ['Combustível', car.fuel],
                             ['Cor', car.color],
@@ -258,7 +354,7 @@ const Inventory = () => {
 
     const handleAddCar = (carData) => addInventoryCar(carData);
     const handleEditCar = (carData) => updateInventoryCar(editCar.id, carData);
-    const handleSell = (carId, price, date) => { sellCar(carId, price, date); setSellCarObj(null); };
+    const handleSell = (carId, price, date, seller) => { sellCar(carId, price, date, seller); setSellCarObj(null); };
     const handleDelete = (carId) => { if (window.confirm('Deseja realmente remover este veículo do estoque? Essa ação não pode ser desfeita.')) removeInventoryCar(carId); };
 
     return (
@@ -289,8 +385,16 @@ const Inventory = () => {
                 {filtered.map(car => (
                     <div key={car.id} className="inv-card card">
                         <div className="inv-card-img">
-                            <img src={car.image} alt={`${car.brand} ${car.model}`} />
+                            {car.images?.length > 0 ? (
+                                <img src={car.images[0]} alt={`${car.brand} ${car.model}`} />
+                            ) : (
+                                <CarPlaceholder />
+                            )}
                             <StatusBadge status={car.status} />
+                            {car.vehicle_type === 'moto' && (
+                                <span style={{ position: 'absolute', top: 8, left: 8, background: '#7c3aed', color: '#fff', fontSize: '0.65rem', fontWeight: 700, padding: '2px 7px', borderRadius: 4, letterSpacing: '0.04em' }}>MOTO</span>
+                            )}
+                            {car.images?.length > 1 && <div className="image-count-overlay"><ImageIcon size={12} /> {car.images.length}</div>}
                         </div>
                         <div className="inv-card-body">
                             <div className="inv-card-top">
@@ -302,7 +406,7 @@ const Inventory = () => {
                             </div>
                             <div className="inv-card-price">R$ {Number(car.price).toLocaleString('pt-BR')}</div>
                             <div className="inv-card-specs">
-                                <span><Gauge size={14} /> {car.km} km</span>
+                                <span><Gauge size={14} /> {Number(car.km).toLocaleString('pt-BR')} km</span>
                                 <span><Tag size={14} /> {car.transmission}</span>
                                 <span>{car.fuel}</span>
                             </div>

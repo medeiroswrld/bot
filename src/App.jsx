@@ -1,8 +1,8 @@
 import React from 'react';
-import { Routes, Route, Link, useLocation } from 'react-router-dom';
+import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, CarFront, Users, Calendar, Settings,
-  Search, Bell, LogOut, ShoppingCart
+  Search, Bell, LogOut, ShoppingCart, Loader2, MessageCircle, Bot
 } from 'lucide-react';
 import './App.css';
 
@@ -14,6 +14,8 @@ import Agenda from './views/Agenda.jsx';
 import SoldCars from './views/SoldCars.jsx';
 import SettingsView from './views/Settings.jsx';
 import Login from './views/Login.jsx';
+import Conversations from './views/Conversations.tsx';
+import BotSettings from './views/BotSettings.jsx';
 
 const Sidebar = () => {
   const location = useLocation();
@@ -24,8 +26,17 @@ const Sidebar = () => {
     { name: 'Vendidos', icon: <ShoppingCart size={20} />, path: '/vendidos' },
     { name: 'Leads', icon: <Users size={20} />, path: '/leads' },
     { name: 'Agenda', icon: <Calendar size={20} />, path: '/agenda' },
+    { name: 'Conversas', icon: <MessageCircle size={20} />, path: '/conversas' },
+    { name: 'Assistente', icon: <Bot size={20} />, path: '/assistente' },
     { name: 'Configurações', icon: <Settings size={20} />, path: '/configuracoes' },
   ];
+
+  const handleLogout = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('[SIDEBAR] Botão Sair clicado!');
+    logout();
+  };
 
   return (
     <aside className="sidebar">
@@ -51,7 +62,7 @@ const Sidebar = () => {
       </nav>
 
       <div className="sidebar-footer">
-        <button className="logout-btn" onClick={logout}>
+        <button type="button" className="logout-btn" onClick={handleLogout}>
           <LogOut size={20} />
           <span>Sair</span>
         </button>
@@ -60,24 +71,44 @@ const Sidebar = () => {
   );
 };
 
-const Header = () => (
-  <header className="main-header">
-    <div className="header-search">
-      <Search size={18} />
-      <input type="text" placeholder="Buscar carros, leads..." />
-    </div>
-    <div className="header-actions">
-      <button className="icon-btn"><Bell size={20} /></button>
-      <div className="user-profile">
-        <div className="profile-img">JD</div>
-        <div className="profile-info">
-          <p className="profile-name">John Doe</p>
-          <p className="profile-role">Administrador</p>
+const Header = () => {
+  const { company, profile, user } = useAppContext();
+  const navigate = useNavigate();
+
+  // Prioridade: perfil Supabase > company local > fallback
+  const displayName = profile?.company_name || company?.name || 'Minha Empresa';
+  const userEmail = user?.email || '';
+
+  const getInitials = (name) => {
+    if (!name) return 'ME';
+    const words = name.trim().split(/\s+/);
+    if (words.length === 0) return 'ME';
+    return words
+      .map(word => word[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
+  };
+
+  return (
+    <header className="main-header">
+      <div className="header-search">
+        <Search size={18} />
+        <input type="text" placeholder="Buscar carros, leads..." />
+      </div>
+      <div className="header-actions">
+        <button className="icon-btn"><Bell size={20} /></button>
+        <div className="user-profile" onClick={() => navigate('/configuracoes')} style={{ cursor: 'pointer' }}>
+          <div className="profile-img">{getInitials(displayName)}</div>
+          <div className="profile-info">
+            <p className="profile-name">{displayName}</p>
+            <p className="profile-role">Administrador</p>
+          </div>
         </div>
       </div>
-    </div>
-  </header>
-);
+    </header>
+  );
+};
 
 const AuthenticatedApp = () => {
   const location = useLocation();
@@ -93,6 +124,8 @@ const AuthenticatedApp = () => {
             <Route path="/vendidos" element={<SoldCars />} />
             <Route path="/leads" element={<Leads />} />
             <Route path="/agenda" element={<Agenda />} />
+            <Route path="/conversas" element={<Conversations />} />
+            <Route path="/assistente" element={<BotSettings />} />
             <Route path="/configuracoes" element={<SettingsView />} />
           </Routes>
         </div>
@@ -101,8 +134,23 @@ const AuthenticatedApp = () => {
   );
 };
 
+// Loading screen enquanto verifica sessão
+const LoadingScreen = () => (
+  <div className="login-layout" style={{ justifyContent: 'center', alignItems: 'center' }}>
+    <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+      <div className="logo-icon-large" style={{ animation: 'pulse 1.5s ease-in-out infinite' }}>A</div>
+      <Loader2 className="spinner" size={28} style={{ color: 'var(--primary)', animation: 'spin 1s linear infinite' }} />
+      <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Carregando...</p>
+    </div>
+  </div>
+);
+
 const AppContent = () => {
-  const { isAuthenticated } = useAppContext();
+  const { isAuthenticated, isLoading, session } = useAppContext();
+  console.log('[AppContent] render — isAuthenticated:', isAuthenticated, 'isLoading:', isLoading, 'session:', !!session);
+
+  if (isLoading) return <LoadingScreen />;
+
   return isAuthenticated ? <AuthenticatedApp /> : <Login />;
 };
 

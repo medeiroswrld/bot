@@ -7,8 +7,9 @@ import { useAppContext, formatDateStr } from '../context/AppContext.jsx';
 const STATUS_MAP = {
     novo: { label: 'Novo', bg: '#eff6ff', color: '#3b82f6', dot: '#3b82f6' },
     atendimento: { label: 'Em Atendimento', bg: '#fff7ed', color: '#d97706', dot: '#f59e0b' },
-    agendado: { label: 'Agendado', bg: '#f0fdf4', color: '#16a34a', dot: '#22c55e' },
-    fechado: { label: 'Fechado', bg: '#ecfdf5', color: '#059669', dot: '#10b981' },
+    proposta: { label: 'Proposta', bg: '#fef3c7', color: '#b45309', dot: '#d97706' },
+    negociacao: { label: 'Negociação', bg: '#e0e7ff', color: '#4338ca', dot: '#6366f1' },
+    vendido: { label: 'Vendido', bg: '#ecfdf5', color: '#059669', dot: '#10b981' },
     perdido: { label: 'Perdido', bg: '#fef2f2', color: '#dc2626', dot: '#ef4444' },
 };
 
@@ -97,7 +98,7 @@ const Leads = () => {
         if (draggedId) { handleStatusChange(draggedId, newStatus); setDraggedId(null); }
     };
 
-    const statusOrder = ['novo', 'atendimento', 'agendado', 'fechado', 'perdido'];
+    const statusOrder = ['novo', 'atendimento', 'proposta', 'negociacao', 'vendido', 'perdido'];
 
     return (
         <div className="view-content">
