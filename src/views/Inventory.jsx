@@ -312,6 +312,20 @@ const DetailDrawer = ({ car, onClose }) => {
     );
 };
 
+const ConfirmModal = ({ message, onConfirm, onCancel }) => (
+    <div className="modal-overlay" onClick={onCancel}>
+        <div className="modal-content modal-sm" onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+                <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.5rem', lineHeight: 1.4 }}>{message}</p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+                    <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+                    <button className="btn-primary" style={{ background: '#ef4444' }} onClick={onConfirm}>Excluir</button>
+                </div>
+            </div>
+        </div>
+    </div>
+);
+
 const DropdownMenu = ({ car, onView, onEdit, onSell, onDelete }) => {
     const [open, setOpen] = useState(false);
     const ref = useRef(null);
@@ -345,6 +359,7 @@ const Inventory = () => {
     const [editCar, setEditCar] = useState(null);
     const [sellCarObj, setSellCarObj] = useState(null);
     const [viewCar, setViewCar] = useState(null);
+    const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
     const filtered = inventory.filter(c => {
         const matchSearch = `${c.brand} ${c.model} ${c.version} ${c.year}`.toLowerCase().includes(search.toLowerCase());
@@ -355,7 +370,8 @@ const Inventory = () => {
     const handleAddCar = (carData) => addInventoryCar(carData);
     const handleEditCar = (carData) => updateInventoryCar(editCar.id, carData);
     const handleSell = (carId, price, date, seller) => { sellCar(carId, price, date, seller); setSellCarObj(null); };
-    const handleDelete = (carId) => { if (window.confirm('Deseja realmente remover este veículo do estoque? Essa ação não pode ser desfeita.')) removeInventoryCar(carId); };
+    const handleDelete = (carId) => setConfirmDeleteId(carId);
+    const confirmDelete = () => { removeInventoryCar(confirmDeleteId); setConfirmDeleteId(null); };
 
     return (
         <div className="view-content">
@@ -440,6 +456,13 @@ const Inventory = () => {
             {editCar && <CarFormModal car={editCar} isEdit onClose={() => setEditCar(null)} onSave={handleEditCar} />}
             {sellCarObj && <SellModal car={sellCarObj} onClose={() => setSellCarObj(null)} onConfirm={handleSell} />}
             {viewCar && <DetailDrawer car={viewCar} onClose={() => setViewCar(null)} />}
+            {confirmDeleteId && (
+                <ConfirmModal
+                    message="Tem certeza que deseja excluir este veículo do estoque? Essa ação não pode ser desfeita."
+                    onConfirm={confirmDelete}
+                    onCancel={() => setConfirmDeleteId(null)}
+                />
+            )}
         </div>
     );
 };

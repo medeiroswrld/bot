@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     Building2, Calendar, MapPin, Phone, MessageSquare, Save, CheckCircle,
-    User, Mail, ToggleLeft, ToggleRight, Plus, Trash2, CalendarOff
+    User, Mail, ToggleLeft, ToggleRight, Plus, Trash2, CalendarOff,
+    Image as ImageIcon, Upload, RefreshCw
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
@@ -84,6 +85,93 @@ const Settings = () => {
         setSavingSchedule(false);
         setSavedSchedule(true);
         setTimeout(() => setSavedSchedule(false), 2000);
+    };
+
+    // ── Perfil do WhatsApp ────────────────────────────────────────────────────
+    const [wpAbout,        setWpAbout]        = useState('');
+    const [wpPhotoPreview, setWpPhotoPreview] = useState(null);
+    const [wpPhotoFile,    setWpPhotoFile]    = useState(null);
+    const [wpPhoneId,      setWpPhoneId]      = useState('');
+    const [savingWp,       setSavingWp]       = useState(false);
+    const [savedWp,        setSavedWp]        = useState(false);
+    const [wpError,        setWpError]        = useState('');
+    const wpFileRef = useRef(null);
+
+    useEffect(() => {
+        if (!user?.id) return;
+        supabase
+            .from('company_settings')
+            .select('whatsapp_about, whatsapp_phone_number_id')
+            .eq('user_id', user.id)
+            .single()
+            .then(({ data }) => {
+                if (data?.whatsapp_about) setWpAbout(data.whatsapp_about);
+                if (data?.whatsapp_phone_number_id) setWpPhoneId(data.whatsapp_phone_number_id);
+            });
+    }, [user?.id]);
+
+    const handleWpPhotoChange = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        setWpPhotoFile(file);
+        setWpPhotoPreview(URL.createObjectURL(file));
+    };
+
+    const updateWhatsAppProfile = async () => {
+        if (!user?.id) return;
+        setSavingWp(true);
+        setSavedWp(false);
+        setWpError('');
+        try {
+            let photoUrl = null;
+
+            // 1. Upload da foto para Supabase Storage (se selecionada)
+            if (wpPhotoFile) {
+                const ext  = wpPhotoFile.name.split('.').pop();
+                const path = `${user.id}/profile.${ext}`;
+                const { error: upErr } = await supabase.storage
+                    .from('whatsapp-profiles')
+                    .upload(path, wpPhotoFile, { upsert: true, contentType: wpPhotoFile.type });
+                if (upErr) throw new Error(`Upload falhou: ${upErr.message}`);
+
+                const { data: urlData } = supabase.storage
+                    .from('whatsapp-profiles')
+                    .getPublicUrl(path);
+                photoUrl = urlData?.publicUrl;
+            }
+
+            // 2. Salva about na company_settings
+            await supabase
+                .from('company_settings')
+                .update({ whatsapp_about: wpAbout, updated_at: new Date().toISOString() })
+                .eq('user_id', user.id);
+
+            // 3. Chama edge function para atualizar perfil na API do WhatsApp
+            const { data: sessionData } = await supabase.auth.getSession();
+            const token = sessionData?.session?.access_token;
+            const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+
+            const res = await fetch(`${supabaseUrl}/functions/v1/update-whatsapp-profile`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ photo_url: photoUrl, about: wpAbout }),
+            });
+
+            if (!res.ok) {
+                const txt = await res.text();
+                throw new Error(txt || `Erro ${res.status}`);
+            }
+
+            setSavedWp(true);
+            setTimeout(() => setSavedWp(false), 3000);
+        } catch (err) {
+            setWpError(err.message || 'Erro ao atualizar perfil do WhatsApp.');
+        } finally {
+            setSavingWp(false);
+        }
     };
 
     // ── Exceções / Feriados ───────────────────────────────────────────────────
@@ -360,6 +448,94 @@ const Settings = () => {
                                 ? <><CheckCircle size={18} /> Salvo!</>
                                 : savingSchedule ? 'Salvando...'
                                 : <><Save size={18} /> Salvar Agenda</>}
+                        </button>
+                    </div>
+                </section>
+            </div>
+
+            {/* ── Perfil do WhatsApp ─────────────────────────────────────────── */}
+            <div style={{ marginTop: '2rem' }}>
+                <section className="settings-section card">
+                    <div className="section-title">
+                        <MessageSquare size={20} />
+                        <h2>Perfil do WhatsApp</h2>
+                    </div>
+                    <div className="settings-form">
+                        <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+                            Atualize a foto e a descrição que aparecem no perfil do número de WhatsApp da concessionária.
+                            Requer a API do WhatsApp Business (Meta Cloud API).
+                        </p>
+
+                        {/* Foto */}
+                        <div className="form-group">
+                            <label>Foto do Perfil</label>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                <div
+                                    onClick={() => wpFileRef.current?.click()}
+                                    style={{
+                                        width: 80, height: 80, borderRadius: '50%',
+                                        border: '2px dashed #cbd5e1', background: '#f8fafc',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        cursor: 'pointer', overflow: 'hidden', flexShrink: 0,
+                                    }}
+                                >
+                                    {wpPhotoPreview
+                                        ? <img src={wpPhotoPreview} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                        : <ImageIcon size={24} color="#94a3b8" />}
+                                </div>
+                                <div>
+                                    <button
+                                        className="btn-outline"
+                                        onClick={() => wpFileRef.current?.click()}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}
+                                    >
+                                        <Upload size={14} /> Escolher foto
+                                    </button>
+                                    <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '0.35rem' }}>
+                                        JPEG ou PNG, máx. 5 MB
+                                    </p>
+                                </div>
+                                <input
+                                    ref={wpFileRef}
+                                    type="file"
+                                    accept="image/jpeg,image/png"
+                                    style={{ display: 'none' }}
+                                    onChange={handleWpPhotoChange}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Descrição */}
+                        <div className="form-group">
+                            <label>Descrição (about)</label>
+                            <textarea
+                                rows={3}
+                                value={wpAbout}
+                                onChange={e => setWpAbout(e.target.value)}
+                                maxLength={139}
+                                placeholder="Ex: Sua concessionária de confiança. Carros novos e seminovos com as melhores condições."
+                                style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
+                            />
+                            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '-0.25rem' }}>
+                                {wpAbout.length}/139 caracteres
+                            </p>
+                        </div>
+
+                        {wpError && (
+                            <p style={{ fontSize: '0.85rem', color: '#ef4444', marginBottom: '0.5rem' }}>{wpError}</p>
+                        )}
+
+                        <button
+                            className="btn-primary"
+                            onClick={updateWhatsAppProfile}
+                            disabled={savingWp}
+                            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                            {savedWp
+                                ? <><CheckCircle size={18} /> Atualizado!</>
+                                : savingWp
+                                    ? <><RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> Atualizando...</>
+                                    : <><MessageSquare size={18} /> Atualizar no WhatsApp</>}
                         </button>
                     </div>
                 </section>

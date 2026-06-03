@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Bot, UserCheck, MessageCircle, Send, RefreshCw,
-  PhoneCall, Search, Loader2, AlertCircle,
+  PhoneCall, Search, Loader2, AlertCircle, Bell, BellOff, Trash2,
 } from 'lucide-react';
 import { supabaseTyped } from '../lib/supabase-typed';
 // useAppContext is from a .jsx file — cast to known shape below
@@ -177,6 +177,10 @@ export default function Conversations() {
   const [filter, setFilter]               = useState<FilterValue>('');
   const [search, setSearch]               = useState('');
   const [alertConvIds, setAlertConvIds]   = useState<Set<string>>(new Set());
+  const [notifPerm,      setNotifPerm]      = useState<NotificationPermission>(
+    'Notification' in window ? Notification.permission : 'denied',
+  );
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const messagesEndRef   = useRef<HTMLDivElement>(null);
   const conversationsRef = useRef<Conversation[]>([]);
@@ -228,12 +232,42 @@ export default function Conversations() {
   // Solicita permissão de notificação desktop na montagem
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
+      Notification.requestPermission().then((perm) => {
+        setNotifPerm(perm);
+        console.log('[notify] Notification.permission após request:', perm);
+      });
     }
   }, []);
 
   // Mantém ref sincronizada para detectar transições no realtime
   useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+
+  const deleteConversation = async () => {
+    const id = confirmDeleteId;
+    if (!id) return;
+    setConfirmDeleteId(null);
+    // Messages deletadas em cascade pelo Supabase (FK com ON DELETE CASCADE)
+    await supabaseTyped.from('messages').delete().eq('conversation_id', id);
+    await supabaseTyped.from('conversations').delete().eq('id', id);
+    setConversations((prev) => prev.filter((c) => c.id !== id));
+    if (selectedId === id) { setSelectedId(null); setMessages([]); }
+  };
+
+  const requestNotifPermission = async () => {
+    if (!('Notification' in window)) return;
+    const perm = await Notification.requestPermission();
+    setNotifPerm(perm);
+    console.log('[notify] Notification.permission após botão:', perm);
+  };
+
+  const testNotification = () => {
+    console.log('[notify] Notification.permission atual:', 'Notification' in window ? Notification.permission : 'não suportado');
+    if (!('Notification' in window)) { alert('Este navegador não suporta notificações.'); return; }
+    if (Notification.permission !== 'granted') { alert('Permissão não concedida. Clique em "Ativar Notificações" primeiro.'); return; }
+    new Notification('Teste', { body: 'Funcionou! As notificações estão ativas.' });
+    playDing();
+    console.log('[notify] Notificação de teste disparada');
+  };
 
   // ── fetch helpers ─────────────────────────────────────────────────────────
 
@@ -308,6 +342,7 @@ export default function Conversations() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'conversations', filter: `user_id=eq.${uid}` },
         (payload) => {
+          console.log('[realtime]', payload);
           const { eventType } = payload;
           if (eventType === 'INSERT') {
             const added = payload.new as Conversation;
@@ -321,6 +356,9 @@ export default function Conversations() {
               const convId = updated.id;
               const name   = updated.customer_name ?? updated.customer_phone;
 
+              console.log('[handoff]', convId, updated.status);
+              console.log('[notify] Notification.permission:', 'Notification' in window ? Notification.permission : 'não suportado');
+
               // 1. Notificação OS-level (funciona em segundo plano, persiste até o clique)
               if ('Notification' in window && Notification.permission === 'granted') {
                 const notif = new Notification(`${name} precisa de atendimento!`, {
@@ -328,6 +366,7 @@ export default function Conversations() {
                   tag: `handoff-${convId}`,
                   requireInteraction: true,
                 });
+                console.log('[notify]', updated);
                 notif.onclick = () => {
                   window.focus();
                   selectConversation(convId);
@@ -444,14 +483,44 @@ export default function Conversations() {
   const isHumanOrPending = selectedConv?.status === 'human' || selectedConv?.status === 'pending';
 
   return (
+    <>
     <div style={{ display: 'flex', height: 'calc(100vh - 80px)', overflow: 'hidden' }}>
 
       {/* ── lista ──────────────────────────────────────────────────────────── */}
       <div style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--bg-main)' }}>
         <div style={{ padding: '16px 16px 8px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <MessageCircle size={20} style={{ color: 'var(--primary)' }} />
-            <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>Conversas WhatsApp</h2>
+            <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, flex: 1 }}>Conversas WhatsApp</h2>
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <button
+              type="button"
+              title={`Notificações: ${notifPerm}`}
+              onClick={requestNotifPermission}
+              style={{
+                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                padding: '4px 8px', fontSize: '0.7rem', borderRadius: 5, cursor: 'pointer',
+                border: '1px solid var(--border)',
+                background: notifPerm === 'granted' ? '#ecfdf5' : notifPerm === 'denied' ? '#fef2f2' : 'transparent',
+                color: notifPerm === 'granted' ? '#10b981' : notifPerm === 'denied' ? '#ef4444' : 'var(--text-secondary)',
+                fontWeight: 600,
+              }}
+            >
+              {notifPerm === 'granted' ? <Bell size={12} /> : <BellOff size={12} />}
+              {notifPerm === 'granted' ? 'Notificações ativas' : notifPerm === 'denied' ? 'Bloqueadas' : 'Ativar Notificações'}
+            </button>
+            <button
+              type="button"
+              onClick={testNotification}
+              style={{
+                padding: '4px 8px', fontSize: '0.7rem', borderRadius: 5, cursor: 'pointer',
+                border: '1px solid var(--border)', background: 'transparent',
+                color: 'var(--text-secondary)', fontWeight: 600,
+              }}
+            >
+              Testar
+            </button>
           </div>
           <div style={{ position: 'relative', marginBottom: 8 }}>
             <Search size={14} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
@@ -522,6 +591,11 @@ export default function Conversations() {
                   <RefreshCw size={14} /> Devolver pro bot
                 </button>
               )}
+              <button type="button" onClick={() => setConfirmDeleteId(selectedConv.id)}
+                title="Excluir conversa"
+                style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderRadius: 6, cursor: 'pointer', background: '#fef2f2', border: '1px solid #fca5a5', color: '#dc2626', fontSize: '0.8rem' }}>
+                <Trash2 size={14} />
+              </button>
             </div>
           </div>
 
@@ -561,5 +635,22 @@ export default function Conversations() {
         </div>
       )}
     </div>
+
+    {confirmDeleteId && (
+      <div className="modal-overlay" onClick={() => setConfirmDeleteId(null)}>
+        <div className="modal-content modal-sm" onClick={(e) => e.stopPropagation()}>
+          <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+            <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.5rem', lineHeight: 1.4 }}>
+              Tem certeza que deseja excluir esta conversa e todas as mensagens? Essa ação não pode ser desfeita.
+            </p>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+              <button className="btn-secondary" onClick={() => setConfirmDeleteId(null)}>Cancelar</button>
+              <button className="btn-primary" style={{ background: '#ef4444' }} onClick={deleteConversation}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

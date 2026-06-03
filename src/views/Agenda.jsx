@@ -1,8 +1,22 @@
 import React, { useState } from 'react';
 import {
     Plus, X, Clock, User, CarFront, Phone, CheckCircle, AlertCircle,
-    XCircle, CalendarCheck, RotateCcw
+    XCircle, CalendarCheck, RotateCcw, Trash2
 } from 'lucide-react';
+
+const ConfirmModal = ({ message, onConfirm, onCancel }) => (
+    <div className="modal-overlay" onClick={onCancel}>
+        <div className="modal-content modal-sm" onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+                <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.5rem', lineHeight: 1.4 }}>{message}</p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+                    <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+                    <button className="btn-primary" style={{ background: '#ef4444' }} onClick={onConfirm}>Excluir</button>
+                </div>
+            </div>
+        </div>
+    </div>
+);
 import { useAppContext, getTodayStr, formatDateStr } from '../context/AppContext.jsx';
 
 const STATUS_CONFIG = {
@@ -138,12 +152,19 @@ const RescheduleModal = ({ appt, onClose, onSave }) => {
 };
 
 const Agenda = () => {
-    const { appointments, addAppointment, updateAppointmentStatus, updateAppointment } = useAppContext();
+    const { appointments, addAppointment, updateAppointmentStatus, updateAppointment, deleteAppointment } = useAppContext();
     const [showNewModal, setShowNewModal] = useState(false);
     const [filterStatus, setFilterStatus] = useState('todos');
     const [filterDate, setFilterDate] = useState('');
     const [selectedAppt, setSelectedAppt] = useState(null);
     const [rescheduleAppt, setRescheduleAppt] = useState(null);
+    const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+    const confirmDelete = () => {
+        deleteAppointment(confirmDeleteId);
+        if (selectedAppt?.id === confirmDeleteId) setSelectedAppt(null);
+        setConfirmDeleteId(null);
+    };
 
     const todayStr = getTodayStr();
 
@@ -245,6 +266,7 @@ const Agenda = () => {
                                                     <button className="agenda-action-btn done" title="Realizado" onClick={e => handleQuickStatus(e, appt.id, 'realizado')}><CalendarCheck size={16} /></button>
                                                     <button className="agenda-action-btn" title="Remarcar" onClick={e => { e.stopPropagation(); setRescheduleAppt(appt); }}><RotateCcw size={16} /></button>
                                                     <button className="agenda-action-btn cancel" title="Cancelar" onClick={e => handleQuickStatus(e, appt.id, 'cancelado')}><XCircle size={16} /></button>
+                                                    <button className="agenda-action-btn cancel" title="Excluir" onClick={e => { e.stopPropagation(); setConfirmDeleteId(appt.id); }}><Trash2 size={16} /></button>
                                                 </div>
                                             </div>
                                         </div>
@@ -273,6 +295,13 @@ const Agenda = () => {
             {showNewModal && <NewAppointmentModal onClose={() => setShowNewModal(false)} onSave={addAppointment} />}
             {selectedAppt && <AppointmentDetailModal appt={selectedAppt} onClose={() => setSelectedAppt(null)} onStatusChange={(id, status) => { updateAppointmentStatus(id, status); setSelectedAppt(prev => prev ? { ...prev, status } : null); }} />}
             {rescheduleAppt && <RescheduleModal appt={rescheduleAppt} onClose={() => setRescheduleAppt(null)} onSave={updateAppointment} />}
+            {confirmDeleteId && (
+                <ConfirmModal
+                    message="Tem certeza que deseja excluir este agendamento? Essa ação não pode ser desfeita."
+                    onConfirm={confirmDelete}
+                    onCancel={() => setConfirmDeleteId(null)}
+                />
+            )}
         </div>
     );
 };

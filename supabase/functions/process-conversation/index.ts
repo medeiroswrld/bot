@@ -29,12 +29,6 @@ function initAdmin() {
 
 // ─── utilidades de data/hora ──────────────────────────────────────────────────
 
-function getDayOfWeekPtBr(dateStr: string): string {
-  const d = new Date(`${dateStr}T12:00:00Z`);
-  const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
-  return days[d.getUTCDay()];
-}
-
 function generateTimeSlots(
   startTime: string,
   endTime: string,
@@ -75,8 +69,6 @@ function getBrazilDateInfo(): { label: string; iso: string } {
 }
 
 // ─── mescla mensagens consecutivas do mesmo papel ────────────────────────────
-// A API do Claude exige papéis alternados. Se o histórico tiver [user, user, user],
-// a requisição retorna 400. Aqui concatenamos blocos adjacentes do mesmo papel.
 
 function mergeConsecutiveRoles(
   messages: Array<{ role: 'user' | 'assistant'; content: string }>,
@@ -155,13 +147,40 @@ const TOOLS = [
     },
   },
   {
-    name: 'chamar_atendente',
+    name: 'salvar_nome_cliente',
     description:
-      'Chama um atendente humano. Use quando: (1) o cliente pedir explicitamente, (2) a conversa envolver preço, desconto ou negociação, (3) você não conseguir resolver a dúvida.',
+      'Salva o nome do cliente na conversa. Use imediatamente quando o cliente informar o próprio nome.',
     input_schema: {
       type: 'object',
       properties: {
-        motivo: { type: 'string', description: 'Motivo resumido (ex.: negociação de preço)' },
+        nome: { type: 'string', description: 'Nome que o cliente informou' },
+      },
+      required: ['nome'],
+    },
+  },
+  {
+    name: 'coletar_dados_financiamento',
+    description:
+      'Coleta os dados necessários para simulação de financiamento e registra no lead. Use após obter: nome completo, veículo de interesse, valor de entrada e prazo em meses.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        nome_completo:  { type: 'string',  description: 'Nome completo do cliente' },
+        veiculo_id:     { type: 'string',  description: 'ID do veículo de interesse (do consultar_estoque)' },
+        valor_entrada:  { type: 'number',  description: 'Valor de entrada em reais' },
+        prazo_meses:    { type: 'integer', description: 'Prazo desejado em meses (ex: 24, 36, 48, 60)' },
+      },
+      required: ['nome_completo', 'valor_entrada', 'prazo_meses'],
+    },
+  },
+  {
+    name: 'chamar_atendente',
+    description:
+      'Chama um atendente humano. Use quando: (1) o cliente pedir explicitamente, (2) a conversa envolver preço, desconto ou negociação, (3) você não conseguir resolver a dúvida, ou (4) após coletar dados de financiamento.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        motivo: { type: 'string', description: 'Motivo resumido (ex.: simulação de financiamento solicitada)' },
       },
       required: ['motivo'],
     },
@@ -169,11 +188,11 @@ const TOOLS = [
   {
     name: 'enviar_foto_carro',
     description:
-      'Envia a foto de um carro pelo WhatsApp. Use quando o cliente aceitar receber uma foto de um veículo específico do estoque.',
+      'Envia a foto de um carro pelo WhatsApp. Use quando o cliente aceitar receber uma foto de um veículo específico do estoque. O car_id DEVE ser exatamente um id retornado pela ferramenta consultar_estoque. NÃO invente, NÃO use ID parcial.',
     input_schema: {
       type: 'object',
       properties: {
-        car_id: { type: 'string', description: 'ID do carro (obtido via consultar_estoque)' },
+        car_id: { type: 'string', description: 'ID exato do carro retornado pelo consultar_estoque' },
       },
       required: ['car_id'],
     },
@@ -236,14 +255,12 @@ async function executeTool(
     const dateStr = String(input.data ?? '');
     if (!dateStr) return { erro: 'Data não fornecida' };
 
-    // Mapeia índice JS (0=Dom) para chave business_hours e rótulo legível
     const DOW_KEYS   = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
     const DOW_LABELS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
     const dateObj    = new Date(`${dateStr}T12:00:00Z`);
     const dayKey     = DOW_KEYS[dateObj.getUTCDay()];
     const dayLabel   = DOW_LABELS[dateObj.getUTCDay()];
 
-    // Configurações da concessionária
     const { data: settings } = await supabase
       .from('company_settings')
       .select('business_hours, appointment_duration, appointment_interval, max_appointments_per_slot')
@@ -253,7 +270,7 @@ async function executeTool(
     // Verifica exceção para esta data (feriado ou horário especial)
     const { data: exception } = await supabase
       .from('schedule_exceptions')
-      .select('closed, start_time, end_time')
+      .select('closed, start_time, end_time, note')
       .eq('user_id', userId)
       .eq('date', dateStr)
       .maybeSingle();
@@ -263,7 +280,12 @@ async function executeTool(
 
     if (exception) {
       if (exception.closed) {
-        return { disponivel: false, mensagem: `A concessionária está fechada em ${dateStr}. Tente outro dia.` };
+        // Item 8: retorna estrutura closed com reason para o bot informar ao cliente
+        return {
+          closed: true,
+          reason: exception.note || 'Loja fechada nesse dia',
+          mensagem: `A concessionária está fechada em ${dateStr}. Tente outro dia.`,
+        };
       }
       slotStart = String(exception.start_time ?? '09:00');
       slotEnd   = String(exception.end_time   ?? '18:00');
@@ -307,7 +329,6 @@ async function executeTool(
     const nomeCliente = String(input.nome_cliente ?? customerName ?? 'Cliente');
     const carId       = input.car_id ? String(input.car_id) : null;
 
-    // Revalida disponibilidade antes de gravar
     const { data: conflict } = await supabase
       .from('appointments')
       .select('id')
@@ -391,6 +412,85 @@ async function executeTool(
     return { sucesso: true, acao: 'criado', lead_id: newLead?.id };
   }
 
+  // Item 2: salva nome do cliente na conversa e no lead
+  if (name === 'salvar_nome_cliente') {
+    const nome = String(input.nome ?? '').trim();
+    if (!nome) return { sucesso: false, mensagem: 'Nome vazio.' };
+
+    // Atualiza o customer_name na conversa
+    await supabase
+      .from('conversations')
+      .update({ customer_name: nome })
+      .eq('id', conversationId);
+
+    // Atualiza também o lead se existir
+    await supabase
+      .from('leads')
+      .update({ name: nome, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('phone', customerPhone);
+
+    // Atualiza ctx para que o nome seja usado nas próximas ferramentas
+    ctx.customerName = nome;
+
+    return { sucesso: true, nome_salvo: nome };
+  }
+
+  // Item 3: coleta dados de financiamento e marca lead como Proposta
+  if (name === 'coletar_dados_financiamento') {
+    const nomeCompleto = String(input.nome_completo ?? customerName ?? 'Cliente');
+    const veiculoId    = input.veiculo_id ? String(input.veiculo_id) : null;
+    const valorEntrada = Number(input.valor_entrada ?? 0);
+    const prazoMeses   = Number(input.prazo_meses ?? 0);
+
+    const notasFinanciamento = [
+      `--- Dados de Financiamento ---`,
+      `Nome: ${nomeCompleto}`,
+      veiculoId ? `Veículo ID: ${veiculoId}` : null,
+      `Entrada: R$ ${valorEntrada.toLocaleString('pt-BR')}`,
+      `Prazo: ${prazoMeses} meses`,
+      `Coletado em: ${new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}`,
+    ].filter(Boolean).join('\n');
+
+    const { data: existing } = await supabase
+      .from('leads')
+      .select('id, notes')
+      .eq('user_id', userId)
+      .eq('phone', customerPhone)
+      .maybeSingle();
+
+    if (existing) {
+      const notasAtuais = existing.notes ? `${existing.notes}\n\n${notasFinanciamento}` : notasFinanciamento;
+      await supabase
+        .from('leads')
+        .update({
+          name: nomeCompleto,
+          status: 'proposta',
+          notes: notasAtuais,
+          ...(veiculoId ? { car_id: veiculoId } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id);
+      return { sucesso: true, lead_id: existing.id, mensagem: 'Dados de financiamento registrados.' };
+    }
+
+    // Cria lead se não existir
+    const { data: newLead } = await supabase
+      .from('leads')
+      .insert({
+        user_id: userId,
+        name: nomeCompleto,
+        phone: customerPhone,
+        car_id: veiculoId,
+        notes: notasFinanciamento,
+        status: 'proposta',
+      })
+      .select()
+      .single();
+
+    return { sucesso: true, lead_id: newLead?.id, mensagem: 'Dados de financiamento registrados e lead criado.' };
+  }
+
   if (name === 'chamar_atendente') {
     await supabase
       .from('conversations')
@@ -402,6 +502,8 @@ async function executeTool(
 
   if (name === 'enviar_foto_carro') {
     const carId = String(input.car_id ?? '');
+    console.log(`[enviar_foto_carro] car_id recebido: ${carId}`);
+
     if (!carId) return { sucesso: false, mensagem: 'ID do carro não fornecido.' };
 
     const { data: imgs } = await supabase
@@ -410,6 +512,8 @@ async function executeTool(
       .eq('car_id', carId)
       .eq('user_id', userId)
       .order('sort_order', { ascending: true });
+
+    console.log(`[enviar_foto_carro] image_urls encontradas para car_id=${carId}:`, imgs?.map((i: { image_url: string }) => i.image_url));
 
     if (!imgs?.length) {
       return { sucesso: false, mensagem: 'Não há foto cadastrada para este veículo.' };
@@ -441,7 +545,7 @@ async function executeTool(
 
 interface Faq { question: string; answer: string }
 
-function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], convStatus: string): string {
+function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], convStatus: string, customerName: string | null): string {
   const company = String(settings.company_name        ?? 'nossa concessionária');
   const address = String(settings.address             ?? 'não informado');
   const phone   = String(settings.phone_number        ?? 'não informado');
@@ -465,6 +569,11 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], convS
   }
   const { label: todayLabel } = getBrazilDateInfo();
 
+  const nomeCliente = customerName ? customerName.split(' ')[0] : null;
+  const nomeInfo = nomeCliente
+    ? `\n- Nome do cliente nesta conversa: ${nomeCliente} (use este nome ao se dirigir a ele)`
+    : '';
+
   return `Você é o assistente virtual de atendimento da **${company}**, uma concessionária de veículos. Você conversa com clientes pelo WhatsApp.
 
 ## Informações da concessionária
@@ -473,7 +582,7 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], convS
 - Endereço: ${address}
 - Telefone: ${phone}
 - Horário de funcionamento: ${horarios}
-- Data de hoje: ${todayLabel}
+- Data de hoje: ${todayLabel}${nomeInfo}
 
 Use a data de hoje como referência sempre que o cliente falar em datas relativas ("hoje", "amanhã", "sexta que vem", "fim de semana").
 
@@ -487,11 +596,16 @@ Você atende os clientes de forma cordial e eficiente, ajudando com:
 
 Seu objetivo é entender o que o cliente procura, mostrar as opções que a concessionária tem, e conduzi-lo a agendar uma visita.
 
+## Nome do cliente
+
+- **Se você ainda não souber o nome do cliente, pergunte ANTES de qualquer outra coisa.** Exemplo: "Pra começar, qual o seu nome?"
+- Quando o cliente informar o nome, chame imediatamente a ferramenta \`salvar_nome_cliente\`.
+- **SEMPRE chame o cliente pelo primeiro nome quando souber.** Use-o de forma natural na conversa.
+
 ## Tom e estilo de conversa
 
 - Fale como um bom atendente humano: cordial, prestativo, próximo, mas profissional.
 - Escreva como no WhatsApp: mensagens curtas e naturais. Nada de textão corporativo.
-- Use o nome do cliente quando souber.
 - Emojis com moderação — no máximo um de vez em quando, não em toda mensagem.
 - Não use formatação de markdown (como \`**\` ou \`##\`). Se precisar destacar algo, use o negrito do WhatsApp (\`*texto*\` com um asterisco só), com parcimônia.
 - Não despeje informação. Responda o que foi perguntado e conduza a conversa com naturalidade.
@@ -500,11 +614,26 @@ Seu objetivo é entender o que o cliente procura, mostrar as opções que a conc
 ## Ferramentas que você pode usar
 
 - **consultar_estoque** — quando o cliente perguntar sobre veículos (carros ou motos). O estoque pode conter carros e motos — diferencie corretamente ao apresentar cada veículo. Sempre baseie suas respostas no que essa ferramenta retornar.
-- **enviar_foto_carro** — quando o cliente demonstrar interesse específico em um carro e quiser ver uma foto. Ofereça: "Quer que eu te mande uma foto dele?" e, se ele aceitar, use esta ferramenta com o id do carro. Só use ids que vieram do consultar_estoque.
-- **ver_horarios_disponiveis** — quando o cliente quiser saber quando pode visitar.
+- **enviar_foto_carro** — quando o cliente demonstrar interesse específico em um carro e quiser ver uma foto. Ofereça: "Quer que eu te mande uma foto dele?" e, se ele aceitar, use esta ferramenta com o id EXATO do carro retornado por consultar_estoque. Nunca invente um car_id, nunca use ID parcial.
+- **ver_horarios_disponiveis** — quando o cliente quiser saber quando pode visitar. Se retornar \`closed: true\`, informe ao cliente o motivo (campo \`reason\`) e ofereça outra data: "Infelizmente no dia X estaremos fechados por causa de {reason}. Posso te oferecer outro dia?"
 - **agendar_visita** — quando o cliente confirmar que quer agendar. Confirme os dados (nome, dia, horário, carro) antes de agendar de fato.
+- **salvar_nome_cliente** — assim que o cliente informar o nome.
 - **registrar_interesse** — quando o cliente demonstrar interesse de compra ou pedir contato.
+- **coletar_dados_financiamento** — quando o cliente quiser simular financiamento (ver regras abaixo).
 - **chamar_atendente** — para passar a conversa para uma pessoa (ver regras abaixo).
+
+## Financiamento e formas de pagamento
+
+Quando o cliente perguntar sobre pagamento ou financiamento:
+1. Mencione as formas disponíveis (financiamento, PIX com desconto, etc.) conforme o FAQ e as instruções específicas desta concessionária.
+2. Se o cliente quiser simular um financiamento, COLETE os seguintes dados (um por vez, de forma natural):
+   - Nome completo
+   - Valor de entrada que pretende dar
+   - Prazo desejado em meses
+   - (Opcional) qual veículo tem interesse
+3. NÃO peça CPF — dados sensíveis são coletados pessoalmente pelo atendente.
+4. Após coletar todos os dados, chame \`coletar_dados_financiamento\` e em seguida \`chamar_atendente\`.
+5. Diga ao cliente: "Já anotei seus dados, [Nome]. Em instantes um especialista vai entrar em contato com a simulação exata!"
 
 ## Regras que você NUNCA quebra
 
@@ -512,14 +641,16 @@ Seu objetivo é entender o que o cliente procura, mostrar as opções que a conc
 - **Nunca invente condições de financiamento, valor de troca, garantia ou políticas da loja.** Se o cliente perguntar e você não tiver certeza, passe para um atendente humano.
 - **Antes de agendar, confirme os detalhes com o cliente** e respeite o horário de funcionamento da concessionária. Nunca agende fora do horário de funcionamento.
 - **Nunca prometa nada em nome da concessionária** que você não tenha como garantir.
+- **O car_id para enviar_foto_carro DEVE ser exatamente um id retornado pela ferramenta consultar_estoque. NÃO invente, NÃO use ID parcial.**
 
 ## Quando passar para um atendente humano (chamar_atendente)
 
-Use essa ferramenta em três situações:
+Use essa ferramenta em quatro situações:
 
 1. Quando o cliente pedir explicitamente para falar com uma pessoa.
 2. Quando você não conseguir resolver a dúvida do cliente (não tem a informação, ou a conversa travou).
 3. Quando a conversa entrar em **preço, desconto ou negociação** — isso é assunto de um humano.
+4. Após coletar dados de financiamento com \`coletar_dados_financiamento\`.
 
 Ao passar para um atendente, avise o cliente de forma natural que alguém da equipe vai dar continuidade ao atendimento.
 
@@ -616,7 +747,6 @@ serve(async (req) => {
   }
 
   // ── 2. Debounce: evita execuções paralelas por mensagens rápidas ───────────
-  // Registra o ID da última mensagem do cliente AGORA (antes de esperar).
   const { data: lastMsgBefore } = await supabase
     .from('messages')
     .select('id')
@@ -626,10 +756,8 @@ serve(async (req) => {
     .limit(1)
     .maybeSingle();
 
-  // Aguarda possíveis mensagens subsequentes do mesmo cliente
   await new Promise<void>((resolve) => setTimeout(resolve, 2500));
 
-  // Re-verifica se chegou uma mensagem mais nova
   const { data: lastMsgAfter } = await supabase
     .from('messages')
     .select('id')
@@ -640,15 +768,14 @@ serve(async (req) => {
     .maybeSingle();
 
   if (lastMsgAfter?.id !== lastMsgBefore?.id) {
-    // Mensagem mais recente existe — esta execução está desatualizada, aborta.
     return new Response('OK', { status: 200 });
   }
 
   const userId        = conv.user_id        as string;
   const customerPhone = conv.customer_phone as string;
-  const customerName  = conv.customer_name  as string | null;
+  let   customerName  = conv.customer_name  as string | null;
 
-  // ── 3. Boas-vindas: se ainda não há mensagem do bot, envia menu inicial ────
+  // ── 3. Boas-vindas: se ainda não há mensagem do bot, envia mensagem inicial perguntando nome ──
   const { count: botCount } = await supabase
     .from('messages')
     .select('id', { count: 'exact', head: true })
@@ -664,8 +791,10 @@ serve(async (req) => {
 
     const companyName = String(wSettings?.company_name ?? 'nossa concessionária');
     const wPid        = String(wSettings?.whatsapp_phone_number_id ?? '');
+
+    // Item 2: boas-vindas já pergunta o nome
     const welcomeText =
-      `Olá! 👋 Bem-vindo à ${companyName}.\n\nComo posso te ajudar hoje? Posso:\n\n🚗 Te mostrar os carros disponíveis\n📅 Agendar uma visita\n\nÉ só me dizer o que prefere!`;
+      `Olá! 👋 Bem-vindo à ${companyName}.\n\nPra começar, qual o seu nome?`;
 
     const now = new Date().toISOString();
     await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: welcomeText });
@@ -678,8 +807,6 @@ serve(async (req) => {
   }
 
   // ── 4. Carrega as 20 mensagens mais recentes em ordem cronológica ──────────
-  // Ordena DESC para pegar as mais recentes com .limit(20), depois inverte
-  // para que o Claude receba o histórico em ordem crescente.
   const { data: rawMessages } = await supabase
     .from('messages')
     .select('role, content')
@@ -689,7 +816,7 @@ serve(async (req) => {
 
   const orderedMessages = (rawMessages ?? []).reverse();
 
-  // ── 4. Carrega configurações e FAQs da concessionária ─────────────────────
+  // ── 5. Carrega configurações e FAQs da concessionária ─────────────────────
   const { data: settings } = await supabase
     .from('company_settings')
     .select('*')
@@ -707,22 +834,22 @@ serve(async (req) => {
     (settings ?? {}) as Record<string, unknown>,
     faqRows ?? [],
     String(conv.status ?? 'bot'),
+    customerName,
   );
 
-  // ── 5. Monta histórico para o Claude (customer→user, bot/agent→assistant) ──
+  // ── 6. Monta histórico para o Claude ──────────────────────────────────────
   const rawHistory = orderedMessages.map((m) => ({
     role: (m.role === 'customer' ? 'user' : 'assistant') as 'user' | 'assistant',
     content: String(m.content),
   }));
 
-  // Mescla mensagens consecutivas do mesmo papel (Claude exige papéis alternados)
   const history = mergeConsecutiveRoles(rawHistory);
 
   if (!history.length) {
     return new Response('OK', { status: 200 });
   }
 
-  // ── 6. Loop de chamadas ao Claude ─────────────────────────────────────────
+  // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
   const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
   const ctx = { userId, conversationId, customerPhone, customerName, phoneNumberId };
   let finalText = '';
@@ -765,13 +892,13 @@ serve(async (req) => {
     finalText = 'Desculpe, não consegui processar sua mensagem. Tente novamente.';
   }
 
-  // ── 7. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────
+  // ── 8. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────
   const sent = await sendMessage(customerPhone, finalText, phoneNumberId || undefined);
   if (!sent) {
     console.error(`[PC] Falha ao enviar WhatsApp para ${customerPhone} — mensagem salva no banco mesmo assim`);
   }
 
-  // ── 8. Salva resposta do bot e atualiza last_message_at ────────────────────
+  // ── 9. Salva resposta do bot e atualiza last_message_at ────────────────────
   const now = new Date().toISOString();
   await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: finalText });
   await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);

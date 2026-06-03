@@ -1,5 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { Bot, Save, CheckCircle, Plus, Trash2, HelpCircle, ToggleLeft, ToggleRight } from 'lucide-react';
+
+const ConfirmModal = ({ message, onConfirm, onCancel }) => (
+    <div className="modal-overlay" onClick={onCancel}>
+        <div className="modal-content modal-sm" onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+                <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.5rem', lineHeight: 1.4 }}>{message}</p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+                    <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+                    <button className="btn-primary" style={{ background: '#ef4444' }} onClick={onConfirm}>Excluir</button>
+                </div>
+            </div>
+        </div>
+    </div>
+);
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
 
@@ -18,6 +32,7 @@ const BotSettings = () => {
     const [newQ, setNewQ] = useState('');
     const [newA, setNewA] = useState('');
     const [addingFaq, setAddingFaq] = useState(false);
+    const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
     useEffect(() => {
         if (!user?.id) return;
@@ -45,13 +60,16 @@ const BotSettings = () => {
     const saveInstructions = async () => {
         if (!user?.id) return;
         setSavingInstr(true);
-        await supabase
+        const { error } = await supabase
             .from('company_settings')
             .update({ bot_custom_instructions: instructions, updated_at: new Date().toISOString() })
             .eq('user_id', user.id);
         setSavingInstr(false);
-        setSavedInstr(true);
-        setTimeout(() => setSavedInstr(false), 2000);
+        if (!error) {
+            // Atualiza o estado local com o valor salvo — sem precisar recarregar
+            setSavedInstr(true);
+            setTimeout(() => setSavedInstr(false), 2000);
+        }
     };
 
     const addFaq = async () => {
@@ -80,6 +98,11 @@ const BotSettings = () => {
     const deleteFaq = async (id) => {
         setFaqs(prev => prev.filter(f => f.id !== id));
         await supabase.from('bot_faqs').delete().eq('id', id);
+    };
+
+    const confirmDeleteFaq = async () => {
+        await deleteFaq(confirmDeleteId);
+        setConfirmDeleteId(null);
     };
 
     return (
@@ -240,7 +263,7 @@ const BotSettings = () => {
                                         </button>
                                         <button
                                             title="Excluir"
-                                            onClick={() => deleteFaq(faq.id)}
+                                            onClick={() => setConfirmDeleteId(faq.id)}
                                             style={{
                                                 background: 'none',
                                                 border: 'none',
@@ -261,6 +284,13 @@ const BotSettings = () => {
                     )}
                 </section>
             </div>
+            {confirmDeleteId && (
+                <ConfirmModal
+                    message="Tem certeza que deseja excluir esta FAQ? Essa ação não pode ser desfeita."
+                    onConfirm={confirmDeleteFaq}
+                    onCancel={() => setConfirmDeleteId(null)}
+                />
+            )}
         </div>
     );
 };

@@ -1,8 +1,22 @@
 import React, { useState } from 'react';
 import {
-    Search, List, LayoutGrid, X, Phone, MessageSquare, Users
+    Search, List, LayoutGrid, X, Phone, MessageSquare, Users, Trash2
 } from 'lucide-react';
 import { useAppContext, formatDateStr } from '../context/AppContext.jsx';
+
+const ConfirmModal = ({ message, onConfirm, onCancel }) => (
+    <div className="modal-overlay" onClick={onCancel}>
+        <div className="modal-content modal-sm" onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '1.5rem', textAlign: 'center' }}>
+                <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.5rem', lineHeight: 1.4 }}>{message}</p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+                    <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+                    <button className="btn-primary" style={{ background: '#ef4444' }} onClick={onConfirm}>Excluir</button>
+                </div>
+            </div>
+        </div>
+    </div>
+);
 
 const STATUS_MAP = {
     novo: { label: 'Novo', bg: '#eff6ff', color: '#3b82f6', dot: '#3b82f6' },
@@ -72,12 +86,21 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
 };
 
 const Leads = () => {
-    const { leads, updateLeadStatus, addToast } = useAppContext();
+    const { leads, updateLeadStatus, deleteLead, addToast } = useAppContext();
     const [search, setSearch] = useState('');
     const [filterStatus, setFilterStatus] = useState('todos');
     const [view, setView] = useState('kanban');
     const [selectedLead, setSelectedLead] = useState(null);
     const [draggedId, setDraggedId] = useState(null);
+    const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+
+    const handleDeleteLead = (id) => { setConfirmDeleteId(id); };
+    const confirmDelete = () => {
+        deleteLead(confirmDeleteId);
+        if (selectedLead?.id === confirmDeleteId) setSelectedLead(null);
+        setConfirmDeleteId(null);
+        addToast('Lead excluído.', 'success');
+    };
 
     const filtered = leads.filter(l => {
         const matchSearch = `${l.name} ${l.car} ${l.phone} ${l.city}`.toLowerCase().includes(search.toLowerCase());
@@ -165,6 +188,7 @@ const Leads = () => {
                                             <div className="table-actions">
                                                 <button className="action-icon-btn" onClick={() => setSelectedLead(lead)} title="Ver detalhes"><Users size={16} /></button>
                                                 <button className="action-icon-btn whatsapp" title="Enviar mensagem" onClick={() => addToast('Simulação: Abrindo WhatsApp...', 'info')}><MessageSquare size={16} /></button>
+                                                <button className="action-icon-btn" title="Excluir lead" onClick={e => { e.stopPropagation(); handleDeleteLead(lead.id); }} style={{ color: '#ef4444' }}><Trash2 size={16} /></button>
                                             </div>
                                         </td>
                                     </tr>
@@ -201,7 +225,10 @@ const Leads = () => {
                                             style={{ cursor: 'pointer' }}>
                                             <div className="lead-kanban-header">
                                                 <strong>{lead.name}</strong>
-                                                <MessageSquare size={14} style={{ color: '#25D366', cursor: 'pointer' }} onClick={e => { e.stopPropagation(); addToast('Simulação: Abrindo WhatsApp...', 'info'); }} />
+                                                <div style={{ display: 'flex', gap: 4 }}>
+                                                    <MessageSquare size={14} style={{ color: '#25D366', cursor: 'pointer' }} onClick={e => { e.stopPropagation(); addToast('Simulação: Abrindo WhatsApp...', 'info'); }} />
+                                                    <Trash2 size={14} style={{ color: '#ef4444', cursor: 'pointer' }} onClick={e => { e.stopPropagation(); handleDeleteLead(lead.id); }} />
+                                                </div>
                                             </div>
                                             <p className="lead-kanban-car">{lead.car}</p>
                                             <div className="lead-kanban-meta">
@@ -222,6 +249,13 @@ const Leads = () => {
             )}
 
             {selectedLead && <LeadDrawer lead={selectedLead} onClose={() => setSelectedLead(null)} onStatusChange={handleStatusChange} />}
+            {confirmDeleteId && (
+                <ConfirmModal
+                    message="Tem certeza que deseja excluir este lead? Essa ação não pode ser desfeita."
+                    onConfirm={confirmDelete}
+                    onCancel={() => setConfirmDeleteId(null)}
+                />
+            )}
         </div>
     );
 };
