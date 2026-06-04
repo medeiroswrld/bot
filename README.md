@@ -1,4 +1,4 @@
-# AutomaticGen Auto
+# Amply
 
 Sistema SaaS para concessionárias gerenciarem estoque de veículos, leads e agendamentos com integração futura com WhatsApp.
 
@@ -18,7 +18,7 @@ Sistema SaaS para concessionárias gerenciarem estoque de veículos, leads e age
 1. Certifique-se de ter o Node.js instalado na sua máquina.
 2. Clone o repositório ou navegue até o diretório do projeto:
    ```bash
-   cd crm-automaticgen
+   cd amply
    ```
 3. Instale as dependências:
    ```bash

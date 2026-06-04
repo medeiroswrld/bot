@@ -128,21 +128,28 @@ function Bubble({ msg }: { msg: Message }) {
   const isCustomer = msg.role === 'customer';
   const isBot      = msg.role === 'bot';
   const time = new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  const bg    = isCustomer ? 'var(--bg-card)' : isBot ? '#e8f5e9' : '#e3f2fd';
   const align: React.CSSProperties['justifyContent'] = isCustomer ? 'flex-start' : 'flex-end';
+
+  // Cores explícitas para garantir contraste independente do tema
+  // Cliente: fundo adapta ao tema (claro=branco, escuro=cinza), texto adapta
+  // Bot/Atendente: fundo pastel fixo + texto ESCURO hardcoded (nunca herda branco do dark mode)
+  const bgColor   = isCustomer ? 'var(--input-bg)' : isBot ? '#dcfce7' : '#dbeafe';
+  const textColor = isCustomer ? 'var(--text-primary)' : '#0A0A0B';
+  const timeColor = isCustomer ? 'var(--text-secondary)' : 'rgba(0,0,0,0.45)';
+  const labelColor = isBot ? '#15803d' : '#1e40af';
 
   return (
     <div style={{ display: 'flex', justifyContent: align, marginBottom: 8 }}>
-      <div style={{ maxWidth: '75%', background: bg, borderRadius: 12, padding: '8px 12px', boxShadow: '0 1px 2px rgba(0,0,0,0.06)' }}>
+      <div style={{ maxWidth: '75%', background: bgColor, borderRadius: 12, padding: '8px 12px', boxShadow: '0 1px 2px rgba(0,0,0,0.06)' }}>
         {!isCustomer && (
-          <div style={{ fontSize: '0.65rem', fontWeight: 600, color: isBot ? '#388e3c' : '#1976d2', marginBottom: 2 }}>
+          <div style={{ fontSize: '0.65rem', fontWeight: 700, color: labelColor, marginBottom: 2 }}>
             {isBot ? 'Bot' : 'Atendente'}
           </div>
         )}
-        <p style={{ margin: 0, fontSize: '0.875rem', lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <p style={{ margin: 0, fontSize: '0.875rem', lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: textColor }}>
           {msg.content}
         </p>
-        <p style={{ margin: '4px 0 0', fontSize: '0.65rem', color: 'var(--text-secondary)', textAlign: 'right' }}>
+        <p style={{ margin: '4px 0 0', fontSize: '0.65rem', color: timeColor, textAlign: 'right' }}>
           {time}
         </p>
       </div>

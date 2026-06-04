@@ -135,7 +135,7 @@ const Leads = () => {
                         <Search size={16} />
                         <input type="text" placeholder="Buscar lead..." value={search} onChange={e => setSearch(e.target.value)} />
                     </div>
-                    <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: '0.65rem 1rem', borderRadius: 8, border: '1px solid var(--color-border)', outline: 'none', background: 'white' }}>
+                    <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: '0.65rem 1rem', borderRadius: 8, border: '1px solid var(--border)', outline: 'none', background: 'var(--card-bg)', color: 'var(--text-primary)' }}>
                         <option value="todos">Todos os Status</option>
                         {Object.entries(STATUS_MAP).map(([key, val]) => (
                             <option key={key} value={key}>{val.label}</option>

@@ -185,7 +185,7 @@ const Dashboard = () => {
                                     }}>
                                         {label}
                                     </span>
-                                    <div style={{ flex: 1, height: 8, borderRadius: 4, background: '#f1f5f9', overflow: 'hidden' }}>
+                                    <div style={{ flex: 1, height: 8, borderRadius: 4, background: 'var(--input-bg)', overflow: 'hidden' }}>
                                         <div style={{
                                             height: '100%', borderRadius: 4, background: color,
                                             width: `${Math.min(100, (count / Math.max(leads.length, 1)) * 100)}%`,

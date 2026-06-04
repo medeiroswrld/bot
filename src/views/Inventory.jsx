@@ -215,7 +215,7 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                 </div>
                 <div className="sell-modal-body">
                     <div className="sell-car-info">
-                        {car.images?.[0] ? <img src={car.images[0]} alt={car.model} className="sell-car-thumb" /> : <div className="sell-car-thumb" style={{display:'flex',alignItems:'center',justifyContent:'center',background:'#f1f5f9',borderRadius:'8px',width:'64px',height:'64px'}}><Camera size={24} color="#94a3b8" /></div>}
+                        {car.images?.[0] ? <img src={car.images[0]} alt={car.model} className="sell-car-thumb" /> : <div className="sell-car-thumb" style={{display:'flex',alignItems:'center',justifyContent:'center',background:'var(--input-bg)',borderRadius:'8px',width:'64px',height:'64px'}}><Camera size={24} color="#94a3b8" /></div>}
                         <div>
                             <h3>{car.brand} {car.model}</h3>
                             <p className="text-muted">{car.version} • {car.year}</p>
@@ -269,7 +269,7 @@ const DetailDrawer = ({ car, onClose }) => {
                             {images.length > 0 ? (
                                 <img src={images[activeImg]} alt={car.model} />
                             ) : (
-                                <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'280px',background:'#f1f5f9',borderRadius:'12px',color:'#94a3b8',gap:'0.5rem'}}>
+                                <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'280px',background:'var(--input-bg)',borderRadius:'12px',color:'#94a3b8',gap:'0.5rem'}}>
                                     <Camera size={48} strokeWidth={1.5} />
                                     <span style={{fontSize:'0.875rem',fontWeight:500}}>Nenhuma foto cadastrada</span>
                                 </div>
@@ -444,7 +444,7 @@ const Inventory = () => {
                     </div>
                 ))}
                 {filtered.length === 0 && (
-                    <div className="empty-state" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '5rem 2rem', background: 'white', borderRadius: '16px', border: '1px dashed #cbd5e1' }}>
+                    <div className="empty-state" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '5rem 2rem', background: 'var(--card-bg)', borderRadius: '16px', border: '1px dashed var(--border)' }}>
                         <Package size={56} style={{ color: '#94a3b8', marginBottom: '1.5rem', opacity: 0.8 }} />
                         <h3 style={{ fontWeight: 700, marginBottom: '0.5rem', fontSize: '1.25rem', color: '#1e293b' }}>Nenhum veículo encontrado</h3>
                         <p className="text-muted" style={{ maxWidth: '400px', margin: '0 auto' }}>Tente ajustar os filtros de busca ou clique em "Novo Veículo" para adicionar um ao seu pátio.</p>

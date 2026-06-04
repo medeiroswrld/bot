@@ -379,8 +379,8 @@ const Settings = () => {
                                                     onChange={e => setDayField(key, 'start', e.target.value)}
                                                     style={{
                                                         padding: '0.35rem 0.5rem', borderRadius: '8px',
-                                                        border: '1px solid #cbd5e1', fontSize: '0.875rem',
-                                                        background: '#f8fafc', flex: 1,
+                                                        border: '1px solid var(--border)', fontSize: '0.875rem',
+                                                        background: 'var(--input-bg)', color: 'var(--text-primary)', flex: 1,
                                                     }}
                                                 />
                                                 <span style={{ color: '#94a3b8', fontSize: '0.8rem', flexShrink: 0 }}>às</span>
@@ -390,8 +390,8 @@ const Settings = () => {
                                                     onChange={e => setDayField(key, 'end', e.target.value)}
                                                     style={{
                                                         padding: '0.35rem 0.5rem', borderRadius: '8px',
-                                                        border: '1px solid #cbd5e1', fontSize: '0.875rem',
-                                                        background: '#f8fafc', flex: 1,
+                                                        border: '1px solid var(--border)', fontSize: '0.875rem',
+                                                        background: 'var(--input-bg)', color: 'var(--text-primary)', flex: 1,
                                                     }}
                                                 />
                                             </div>
@@ -474,7 +474,7 @@ const Settings = () => {
                                     onClick={() => wpFileRef.current?.click()}
                                     style={{
                                         width: 80, height: 80, borderRadius: '50%',
-                                        border: '2px dashed #cbd5e1', background: '#f8fafc',
+                                        border: '2px dashed var(--border)', background: 'var(--input-bg)',
                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                                         cursor: 'pointer', overflow: 'hidden', flexShrink: 0,
                                     }}
@@ -562,7 +562,7 @@ const Settings = () => {
 
                     {/* Formulário de nova exceção */}
                     {showExForm && (
-                        <div style={{ marginBottom: '1.5rem', padding: '1rem', borderRadius: '10px', border: '1px dashed #cbd5e1', background: '#f8fafc' }}>
+                        <div style={{ marginBottom: '1.5rem', padding: '1rem', borderRadius: '10px', border: '1px dashed var(--border)', background: 'var(--input-bg)' }}>
                             <div className="form-row">
                                 <div className="form-group">
                                     <label>Data</label>
@@ -648,7 +648,7 @@ const Settings = () => {
                                     style={{
                                         display: 'flex', alignItems: 'center', gap: '1rem',
                                         padding: '0.75rem 1rem', borderRadius: '10px',
-                                        border: '1px solid #e2e8f0', background: '#f8fafc',
+                                        border: '1px solid var(--border)', background: 'var(--card-bg)',
                                     }}
                                 >
                                     <div style={{ flex: 1 }}>

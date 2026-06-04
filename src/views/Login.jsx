@@ -70,8 +70,8 @@ const Login = () => {
       {/* Esquerda: Parte decorativa / Branding */}
       <div className="login-visuals">
         <div className="login-brand">
-          <div className="logo-icon-large">A</div>
-          <h1>Automatic<span>Gen</span></h1>
+          <img src="/logo.png" className="login-logo-img" alt="Amply" />
+          <h1>Amply</h1>
           <p>Potencialize as vendas e a gestão da sua concessionária com a plataforma definitiva.</p>
         </div>
       </div>

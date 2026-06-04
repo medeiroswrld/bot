@@ -108,11 +108,11 @@ const SoldCars = () => {
             </header>
 
             <div className="inv-toolbar" style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                <div className="inv-search" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'white', border: '1px solid var(--color-border)', padding: '0.65rem 1rem', borderRadius: 'var(--radius-md)' }}>
+                <div className="inv-search" style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'var(--card-bg)', border: '1px solid var(--border)', padding: '0.65rem 1rem', borderRadius: 'var(--radius-md)' }}>
                     <Search size={18} />
-                    <input type="text" placeholder="Buscar veículo vendido..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: '0.9rem' }} />
+                    <input type="text" placeholder="Buscar veículo vendido..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: 'none', background: 'transparent', outline: 'none', width: '100%', fontSize: '0.9rem', color: 'var(--text-primary)' }} />
                 </div>
-                <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={{ padding: '0.65rem 1rem', borderRadius: 8, border: '1px solid var(--color-border)', outline: 'none', background: 'white', minWidth: '150px' }}>
+                <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={{ padding: '0.65rem 1rem', borderRadius: 8, border: '1px solid var(--border)', outline: 'none', background: 'var(--card-bg)', color: 'var(--text-primary)', minWidth: '150px' }}>
                     <option value="todos">Todos os meses</option>
                     {availableMonths.map(month => {
                         const [y, m] = month.split('-');

@@ -168,7 +168,7 @@ const BotSettings = () => {
 
                     {/* Formulário de nova FAQ */}
                     {showAddForm && (
-                        <div style={{ marginBottom: '1.25rem', padding: '1rem', borderRadius: '10px', border: '1px dashed #cbd5e1', background: '#f8fafc' }}>
+                        <div style={{ marginBottom: '1.25rem', padding: '1rem', borderRadius: '10px', border: '1px dashed var(--border)', background: 'var(--input-bg)' }}>
                             <div className="form-group">
                                 <label>Pergunta</label>
                                 <input
@@ -229,7 +229,7 @@ const BotSettings = () => {
                                         padding: '0.875rem 1rem',
                                         borderRadius: '10px',
                                         border: '1px solid #e2e8f0',
-                                        background: faq.enabled ? '#f8fafc' : '#f1f5f9',
+                                        background: faq.enabled ? 'var(--input-bg)' : 'var(--bg-app)',
                                         opacity: faq.enabled ? 1 : 0.55,
                                         transition: 'all 0.2s',
                                     }}

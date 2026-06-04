@@ -113,7 +113,7 @@ export const AppProvider = ({ children }) => {
   // ========== Data Persistence (Isolated per User) ==========
   useEffect(() => {
     if (user?.id) {
-      const userKey = `automaticGenData_${user.id}`;
+      const userKey = `amplyData_${user.id}`;
       const saved = localStorage.getItem(userKey);
       if (saved) {
         try {
@@ -142,7 +142,7 @@ export const AppProvider = ({ children }) => {
   useEffect(() => {
     // Só salva se houver um usuário logado
     if (user?.id && data) {
-      const userKey = `automaticGenData_${user.id}`;
+      const userKey = `amplyData_${user.id}`;
       localStorage.setItem(userKey, JSON.stringify(data));
     }
   }, [data, user?.id]);
