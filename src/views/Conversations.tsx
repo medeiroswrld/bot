@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   Bot, UserCheck, MessageCircle, Send, RefreshCw,
   PhoneCall, Search, Loader2, AlertCircle, Bell, BellOff, Trash2,
@@ -39,7 +39,7 @@ function initials(name: string | null, phone: string): string {
 
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: Conversation['status'] }) {
+const StatusBadge = React.memo(function StatusBadge({ status }: { status: Conversation['status'] }) {
   const map: Record<string, { label: string; color: string }> = {
     bot:     { label: 'Bot',       color: 'var(--primary)' },
     pending: { label: 'Pendente',  color: '#f59e0b' },
@@ -57,11 +57,11 @@ function StatusBadge({ status }: { status: Conversation['status'] }) {
       {cfg.label}
     </span>
   );
-}
+});
 
 // ─── ConvItem ─────────────────────────────────────────────────────────────────
 
-function ConvItem({
+const ConvItem = React.memo(function ConvItem({
   conv, lastMsg, active, isAlert, onClick,
 }: {
   conv: Conversation;
@@ -120,11 +120,11 @@ function ConvItem({
       )}
     </button>
   );
-}
+});
 
 // ─── Bubble ───────────────────────────────────────────────────────────────────
 
-function Bubble({ msg }: { msg: Message }) {
+const Bubble = React.memo(function Bubble({ msg }: { msg: Message }) {
   const isCustomer = msg.role === 'customer';
   const isBot      = msg.role === 'bot';
   const time = new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -155,7 +155,7 @@ function Bubble({ msg }: { msg: Message }) {
       </div>
     </div>
   );
-}
+});
 
 // ─── filter options ───────────────────────────────────────────────────────────
 
@@ -182,8 +182,10 @@ export default function Conversations() {
   const [sending, setSending]             = useState(false);
   const [agentInput, setAgentInput]       = useState('');
   const [filter, setFilter]               = useState<FilterValue>('');
+  const [searchRaw, setSearchRaw]         = useState('');
   const [search, setSearch]               = useState('');
   const [alertConvIds, setAlertConvIds]   = useState<Set<string>>(new Set());
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [notifPerm,      setNotifPerm]      = useState<NotificationPermission>(
     'Notification' in window ? Notification.permission : 'denied',
   );
@@ -196,11 +198,16 @@ export default function Conversations() {
   const supabaseUrl      = import.meta.env.VITE_SUPABASE_URL as string;
 
   const selectedConv = conversations.find((c) => c.id === selectedId) ?? null;
+  const pendingCount = useMemo(
+    () => conversations.filter((c) => c.status === 'pending').length,
+    [conversations],
+  );
 
   // ── AudioContext: inicializa/resume na primeira interação ─────────────────
 
   useEffect(() => {
     const unlock = () => {
+      setAudioUnlocked(true);
       if (!audioCtxRef.current) {
         try {
           const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -235,6 +242,21 @@ export default function Conversations() {
       osc.stop(ctx.currentTime + 0.5);
     } catch { /* ignora se AudioContext foi fechado */ }
   }, []);
+
+  // ── Search debounce (300ms) ──────────────────────────────────────────────
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchRaw), 300);
+    return () => clearTimeout(timer);
+  }, [searchRaw]);
+
+  // ── Pending notification loop: toca ding a cada 5s enquanto houver conversas pendentes ──
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    if (pendingCount > 0 && audioUnlocked) {
+      interval = setInterval(playDing, 5000);
+    }
+    return () => { if (interval) clearInterval(interval); };
+  }, [pendingCount, audioUnlocked, playDing]);
 
   // Solicita permissão de notificação desktop na montagem
   useEffect(() => {
@@ -532,8 +554,8 @@ export default function Conversations() {
           <div style={{ position: 'relative', marginBottom: 8 }}>
             <Search size={14} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
             <input
-              type="text" placeholder="Buscar nome ou telefone..." value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              type="text" placeholder="Buscar nome ou telefone..." value={searchRaw}
+              onChange={(e) => setSearchRaw(e.target.value)}
               style={{ width: '100%', boxSizing: 'border-box', paddingLeft: 28, paddingRight: 8, paddingTop: 6, paddingBottom: 6, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-card)', fontSize: '0.8rem', color: 'var(--text-primary)' }}
             />
           </div>

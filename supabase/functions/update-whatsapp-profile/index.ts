@@ -59,36 +59,55 @@ serve(async (req) => {
 
     let fileHandle: string | undefined;
 
-    // 1. Se tiver foto, faz upload via WhatsApp Media API para obter file_handle
+    // 1. Foto → Resumable Upload API (3 passos exigidos pela Meta para profile picture)
     if (photo_url) {
-      // Baixa a imagem do Supabase Storage
+      const appId = Deno.env.get('META_APP_ID') ?? '';
+      if (!appId) {
+        return new Response(
+          JSON.stringify({ error: 'META_APP_ID não configurado nos Secrets do Supabase.' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+        );
+      }
+
+      // a) Baixa a imagem do Supabase Storage
       const imgRes = await fetch(photo_url);
       if (!imgRes.ok) throw new Error('Falha ao baixar imagem do Storage');
-      const imgBlob = await imgRes.blob();
-      const contentType = imgBlob.type || 'image/jpeg';
+      const imgBytes   = await imgRes.arrayBuffer();
+      const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
 
-      // Upload para a Media API do WhatsApp
-      const formData = new FormData();
-      formData.append('file', imgBlob, 'profile.jpg');
-      formData.append('type', contentType);
-      formData.append('messaging_product', 'whatsapp');
-
-      const uploadRes = await fetch(
-        `https://graph.facebook.com/v18.0/${phoneNumberId}/media`,
+      // b) Cria sessão de upload (retorna { "id": "upload:..." })
+      const createRes = await fetch(
+        `https://graph.facebook.com/v25.0/${appId}/uploads?file_length=${imgBytes.byteLength}&file_type=${encodeURIComponent(contentType)}`,
         {
           method: 'POST',
           headers: { Authorization: `Bearer ${waToken}` },
-          body: formData,
         },
       );
+      if (!createRes.ok) {
+        const errBody = await createRes.text();
+        throw new Error(`Criação de sessão de upload falhou: ${errBody}`);
+      }
+      const { id: uploadId } = await createRes.json() as { id: string };
 
+      // c) Envia os bytes da imagem (retorna { "h": "..." } — esse é o handle real)
+      const uploadRes = await fetch(
+        `https://graph.facebook.com/v25.0/${uploadId}`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `OAuth ${waToken}`,
+            'file_offset': '0',
+            'Content-Type': contentType,
+          },
+          body: new Uint8Array(imgBytes),
+        },
+      );
       if (!uploadRes.ok) {
         const errBody = await uploadRes.text();
-        throw new Error(`Upload de mídia falhou: ${errBody}`);
+        throw new Error(`Upload de bytes falhou: ${errBody}`);
       }
-
-      const uploadJson = await uploadRes.json() as { id?: string };
-      fileHandle = uploadJson.id;
+      const { h: handle } = await uploadRes.json() as { h: string };
+      fileHandle = handle;
     }
 
     // 2. Atualiza o perfil do WhatsApp Business
@@ -97,7 +116,7 @@ serve(async (req) => {
     if (fileHandle) profilePayload.profile_picture_handle = fileHandle;
 
     const profileRes = await fetch(
-      `https://graph.facebook.com/v18.0/${phoneNumberId}/whatsapp_business_profile`,
+      `https://graph.facebook.com/v25.0/${phoneNumberId}/whatsapp_business_profile`,
       {
         method: 'POST',
         headers: {

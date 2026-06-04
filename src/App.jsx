@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, CarFront, Users, Calendar, Settings,
@@ -8,15 +8,16 @@ import {
 import './App.css';
 
 import { AppProvider, useAppContext } from './context/AppContext.jsx';
-import Dashboard    from './views/Dashboard.jsx';
-import Inventory    from './views/Inventory.jsx';
-import Leads        from './views/Leads.jsx';
-import Agenda       from './views/Agenda.jsx';
-import SoldCars     from './views/SoldCars.jsx';
-import SettingsView from './views/Settings.jsx';
-import Login        from './views/Login.jsx';
-import Conversations from './views/Conversations.tsx';
-import BotSettings  from './views/BotSettings.jsx';
+
+const Dashboard    = lazy(() => import('./views/Dashboard.jsx'));
+const Inventory    = lazy(() => import('./views/Inventory.jsx'));
+const Leads        = lazy(() => import('./views/Leads.jsx'));
+const Agenda       = lazy(() => import('./views/Agenda.jsx'));
+const SoldCars     = lazy(() => import('./views/SoldCars.jsx'));
+const SettingsView = lazy(() => import('./views/Settings.jsx'));
+const Login        = lazy(() => import('./views/Login.jsx'));
+const Conversations = lazy(() => import('./views/Conversations.tsx'));
+const BotSettings  = lazy(() => import('./views/BotSettings.jsx'));
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
@@ -116,12 +117,6 @@ const Header = () => {
 
   return (
     <header className="main-header">
-      <div className="header-search">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--text-secondary)', flexShrink: 0 }}>
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <input type="text" placeholder="Buscar carros, leads..." />
-      </div>
       <div className="header-actions">
         <button className="icon-btn"><Bell size={18} /></button>
         <div
@@ -142,6 +137,12 @@ const Header = () => {
 
 // ─── Authenticated app ────────────────────────────────────────────────────────
 
+const PageLoader = () => (
+  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: 60 }}>
+    <Loader2 size={24} style={{ color: 'var(--accent)', animation: 'spin 1s linear infinite' }} />
+  </div>
+);
+
 const AuthenticatedApp = () => {
   const location = useLocation();
   return (
@@ -149,18 +150,20 @@ const AuthenticatedApp = () => {
       <Sidebar />
       <main className="main-content">
         <Header />
-        <div key={location.pathname} className="page-transition">
-          <Routes location={location}>
-            <Route path="/"              element={<Dashboard />} />
-            <Route path="/estoque"       element={<Inventory />} />
-            <Route path="/vendidos"      element={<SoldCars />} />
-            <Route path="/leads"         element={<Leads />} />
-            <Route path="/agenda"        element={<Agenda />} />
-            <Route path="/conversas"     element={<Conversations />} />
-            <Route path="/assistente"    element={<BotSettings />} />
-            <Route path="/configuracoes" element={<SettingsView />} />
-          </Routes>
-        </div>
+        <Suspense fallback={<PageLoader />}>
+          <div key={location.pathname} className="page-transition">
+            <Routes location={location}>
+              <Route path="/"              element={<Dashboard />} />
+              <Route path="/estoque"       element={<Inventory />} />
+              <Route path="/vendidos"      element={<SoldCars />} />
+              <Route path="/leads"         element={<Leads />} />
+              <Route path="/agenda"        element={<Agenda />} />
+              <Route path="/conversas"     element={<Conversations />} />
+              <Route path="/assistente"    element={<BotSettings />} />
+              <Route path="/configuracoes" element={<SettingsView />} />
+            </Routes>
+          </div>
+        </Suspense>
       </main>
     </div>
   );
@@ -182,7 +185,14 @@ const LoadingScreen = () => (
 const AppContent = () => {
   const { isAuthenticated, isLoading } = useAppContext();
   if (isLoading) return <LoadingScreen />;
-  return isAuthenticated ? <AuthenticatedApp /> : <Login />;
+  if (!isAuthenticated) {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <Login />
+      </Suspense>
+    );
+  }
+  return <AuthenticatedApp />;
 };
 
 function App() {
