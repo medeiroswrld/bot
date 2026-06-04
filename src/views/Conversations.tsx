@@ -251,11 +251,21 @@ export default function Conversations() {
 
   // ── Pending notification loop: toca ding a cada 5s enquanto houver conversas pendentes ──
   useEffect(() => {
+    console.log('[loop-effect]', 'pendingCount:', pendingCount, 'audioUnlocked:', audioUnlocked);
     let interval: ReturnType<typeof setInterval> | null = null;
     if (pendingCount > 0 && audioUnlocked) {
-      interval = setInterval(playDing, 5000);
+      console.log('[loop-effect] STARTING interval');
+      interval = setInterval(() => {
+        console.log('[loop-effect] TICK');
+        playDing();
+      }, 5000);
     }
-    return () => { if (interval) clearInterval(interval); };
+    return () => {
+      if (interval) {
+        console.log('[loop-effect] CLEARING interval');
+        clearInterval(interval);
+      }
+    };
   }, [pendingCount, audioUnlocked, playDing]);
 
   // Solicita permissão de notificação desktop na montagem
@@ -371,7 +381,11 @@ export default function Conversations() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'conversations', filter: `user_id=eq.${uid}` },
         (payload) => {
-          console.log('[realtime]', payload);
+          console.log('[realtime-event]', payload.eventType,
+            (payload.new as Conversation | undefined)?.id,
+            'status:', (payload.old as Conversation | undefined)?.status,
+            '->', (payload.new as Conversation | undefined)?.status,
+          );
           const { eventType } = payload;
           if (eventType === 'INSERT') {
             const added = payload.new as Conversation;
@@ -663,6 +677,17 @@ export default function Conversations() {
           )}
         </div>
       )}
+    </div>
+
+    {/* DEBUG — remover após investigação */}
+    <div style={{
+      position: 'fixed', bottom: 16, right: 16, zIndex: 9999,
+      background: '#fef08a', border: '2px solid #ca8a04',
+      borderRadius: 8, padding: '8px 14px',
+      fontSize: '1rem', fontWeight: 700, color: '#78350f',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+    }}>
+      Pending: {pendingCount} | Audio: {audioUnlocked ? '✓' : '✗'}
     </div>
 
     {confirmDeleteId && (

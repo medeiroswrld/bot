@@ -860,11 +860,21 @@ serve(async (req) => {
     for (let iteration = 0; iteration < 10; iteration++) {
       const response = await callClaude(systemPrompt, claudeMessages);
 
+      console.log('[CLAUDE_RESPONSE]', JSON.stringify({
+        iteration,
+        stop_reason: response.stop_reason,
+        content_types: response.content.map((c) => c.type),
+        content_preview: response.content.slice(0, 2),
+      }));
+
       const toolUseBlocks = response.content.filter((b) => b.type === 'tool_use');
       const textBlocks    = response.content.filter((b) => b.type === 'text');
 
       if (!toolUseBlocks.length) {
         finalText = textBlocks.map((b) => b.text ?? '').join('\n').trim();
+        if (!finalText) {
+          console.error('[NO_TEXT_FROM_CLAUDE]', JSON.stringify(response.content));
+        }
         break;
       }
 
@@ -884,11 +894,14 @@ serve(async (req) => {
       claudeMessages.push({ role: 'user', content: toolResults });
     }
   } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    console.error('[FALLBACK]', err.message, err.stack);
     console.error('[PC] Erro ao chamar Claude:', e);
     finalText = 'Desculpe, tivemos um problema técnico momentâneo. Por favor, tente novamente em instantes.';
   }
 
   if (!finalText) {
+    console.error('[FALLBACK] finalText vazio após loop — sem text blocks na última resposta do Claude');
     finalText = 'Desculpe, não consegui processar sua mensagem. Tente novamente.';
   }
 
