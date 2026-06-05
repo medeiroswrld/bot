@@ -157,6 +157,15 @@ const Bubble = React.memo(function Bubble({ msg }: { msg: Message }) {
   );
 });
 
+// ─── Emoji list ───────────────────────────────────────────────────────────────
+
+const EMOJIS = [
+  '😀','😊','😂','🤣','😍','😎','🤔','😅','👍','👎',
+  '🙏','💪','🤝','👋','🎉','❤️','🔥','⭐','✅','❌',
+  '📞','📅','💰','🚗','🏍','🔑','📝','💬','⚡','✨',
+  '🏆','👏','🥳','😬','😢','😡','🤩','🤑','🎯','🛠',
+];
+
 // ─── filter options ───────────────────────────────────────────────────────────
 
 const FILTER_OPTIONS: Array<{ label: string; value: FilterValue }> = [
@@ -190,8 +199,10 @@ export default function Conversations() {
     'Notification' in window ? Notification.permission : 'denied',
   );
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [showEmoji, setShowEmoji] = useState(false);
 
   const messagesEndRef   = useRef<HTMLDivElement>(null);
+  const emojiRef         = useRef<HTMLDivElement>(null);
   const conversationsRef = useRef<Conversation[]>([]);
   // AudioContext criado na primeira interação do usuário para respeitar política de autoplay
   const audioCtxRef      = useRef<AudioContext | null>(null);
@@ -242,6 +253,18 @@ export default function Conversations() {
       osc.stop(ctx.currentTime + 0.5);
     } catch { /* ignora se AudioContext foi fechado */ }
   }, []);
+
+  // ── Fecha emoji picker ao clicar fora ────────────────────────────────────
+  useEffect(() => {
+    if (!showEmoji) return;
+    const handler = (e: MouseEvent) => {
+      if (emojiRef.current && !emojiRef.current.contains(e.target as Node)) {
+        setShowEmoji(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showEmoji]);
 
   // ── Search debounce (300ms) ──────────────────────────────────────────────
   useEffect(() => {
@@ -441,7 +464,15 @@ export default function Conversations() {
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${selectedId}` },
         (payload) => {
           const newMsg = payload.new as Message;
-          setMessages((prev) => prev.some((m) => m.id === newMsg.id) ? prev : [...prev, newMsg]);
+          setMessages((prev) => {
+            // Remove mensagem otimista correspondente, depois adiciona a real
+            const withoutOptimistic = prev.filter(
+              (m) => !(m.id.startsWith('opt-') && m.role === newMsg.role && m.content === newMsg.content),
+            );
+            return withoutOptimistic.some((m) => m.id === newMsg.id)
+              ? withoutOptimistic
+              : [...withoutOptimistic, newMsg];
+          });
           setLastMessages((prev) => ({ ...prev, [selectedId]: newMsg }));
         },
       )
@@ -471,6 +502,19 @@ export default function Conversations() {
     if (!text || !selectedId || !session?.access_token) return;
     setSending(true);
     setAgentInput('');
+
+    // Optimistic update: aparece imediatamente, substituído pelo real quando realtime chegar
+    const optimisticId = `opt-${Date.now()}`;
+    const optimisticMsg: Message = {
+      id: optimisticId,
+      conversation_id: selectedId,
+      role: 'agent',
+      content: text,
+      wa_message_id: null,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
+
     try {
       const res = await fetch(`${supabaseUrl}/functions/v1/send-agent-message`, {
         method: 'POST',
@@ -479,10 +523,12 @@ export default function Conversations() {
       });
       if (!res.ok) {
         console.error('[Conversations] Erro ao enviar mensagem');
+        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
         setAgentInput(text);
       }
     } catch (e) {
       console.error('[Conversations] Erro de rede:', e);
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
       setAgentInput(text);
     } finally {
       setSending(false);
@@ -651,6 +697,41 @@ export default function Conversations() {
                 placeholder="Digite sua mensagem... (Enter para enviar)" rows={2}
                 style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-main)', fontSize: '0.875rem', color: 'var(--text-primary)', resize: 'none', outline: 'none', fontFamily: 'inherit' }}
               />
+              {/* Emoji picker */}
+              <div ref={emojiRef} style={{ position: 'relative', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowEmoji((p) => !p)}
+                  title="Emojis"
+                  style={{ width: 40, height: 40, borderRadius: 8, border: '1px solid var(--border)', background: showEmoji ? 'var(--input-bg)' : 'transparent', cursor: 'pointer', fontSize: '1.15rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  😊
+                </button>
+                {showEmoji && (
+                  <div style={{
+                    position: 'absolute', bottom: '100%', right: 0, marginBottom: 6,
+                    background: 'var(--bg-card)', border: '1px solid var(--border)',
+                    borderRadius: 10, padding: 8,
+                    display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 2,
+                    width: 268,
+                    boxShadow: '0 8px 28px rgba(0,0,0,0.22)',
+                    zIndex: 50,
+                  }}>
+                    {EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => { setAgentInput((p) => p + emoji); setShowEmoji(false); }}
+                        style={{ fontSize: '1.2rem', background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 4, padding: 4, lineHeight: 1 }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--input-bg)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <button type="button" onClick={sendAgentMessage} disabled={sending || !agentInput.trim()}
                 style={{ padding: '10px 14px', borderRadius: 8, cursor: 'pointer', background: 'var(--primary)', border: 'none', color: '#fff', display: 'flex', alignItems: 'center', gap: 4, opacity: (sending || !agentInput.trim()) ? 0.5 : 1 }}>
                 {sending ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Send size={16} />}

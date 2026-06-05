@@ -21,7 +21,7 @@ const StatusBadge = ({ status }) => {
     return <span className="inv-status-badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>;
 };
 
-const EMPTY_CAR = { brand: '', model: '', version: '', year: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', images: [] };
+const EMPTY_CAR = { brand: '', model: '', version: '', year: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', description: '', images: [] };
 
 // Parse preço no formato brasileiro ("198.000" ou "198.000,00" ou "198000") → número
 const parsePriceBR = (value) => {
@@ -182,6 +182,16 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
                             </select>
                         </div>
                         <div className="form-group"><label>Cor</label><input type="text" value={form.color} onChange={e => handleChange('color', e.target.value)} placeholder="Prata" /></div>
+                    </div>
+                    <div className="form-group">
+                        <label>Observações / Descrição</label>
+                        <textarea
+                            rows={3}
+                            value={form.description || ''}
+                            onChange={e => handleChange('description', e.target.value)}
+                            placeholder="Ex: Único dono, revisado, chave reserva, IPVA 2026 pago..."
+                            style={{ resize: 'vertical', fontFamily: 'inherit' }}
+                        />
                     </div>
                     <div className="modal-footer" style={{ marginTop: '1rem' }}>
                         <button className="btn-secondary" onClick={onClose}>Cancelar</button>

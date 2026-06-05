@@ -223,7 +223,8 @@ export const AppProvider = ({ children }) => {
           ...c,
           images: sortedImages.map(img => img.image_url),
           km: c.mileage || 0,
-          status: c.status === 'sold' ? 'vendido' : 'disponivel'
+          status: c.status === 'sold' ? 'vendido' : 'disponivel',
+          description: c.description || '',
         };
       });
 
@@ -616,6 +617,7 @@ export const AppProvider = ({ children }) => {
         fuel: car.fuel || 'Flex',
         color: car.color || '',
         vehicle_type: car.vehicle_type || 'carro',
+        description: car.description || null,
         status: 'available'
       };
       console.log('[INVENTORY] Inserindo no Supabase:', insertData);
