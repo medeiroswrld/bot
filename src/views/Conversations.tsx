@@ -204,6 +204,7 @@ export default function Conversations() {
   const messagesEndRef   = useRef<HTMLDivElement>(null);
   const emojiRef         = useRef<HTMLDivElement>(null);
   const conversationsRef = useRef<Conversation[]>([]);
+  const selectedIdRef    = useRef<string | null>(null);
   // AudioContext criado na primeira interação do usuário para respeitar política de autoplay
   const audioCtxRef      = useRef<AudioContext | null>(null);
   const supabaseUrl      = import.meta.env.VITE_SUPABASE_URL as string;
@@ -362,6 +363,28 @@ export default function Conversations() {
     setMsgLoading(false);
   }, []);
 
+  // Refresh silencioso (sem spinner) — usado pelo polling de fallback
+  const refreshMessages = useCallback(async (convId: string) => {
+    const { data } = await supabaseTyped
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', convId)
+      .order('created_at', { ascending: true });
+    if (!data) return;
+    setMessages((prev) => {
+      // Preserva mensagens otimistas ainda não refletidas no servidor
+      const optimistic = prev.filter(
+        (m) => m.id.startsWith('opt-') && !data.some((d) => d.role === m.role && d.content === m.content),
+      );
+      const merged = [...data, ...optimistic];
+      // Evita re-render se nada mudou (mesma quantidade e mesma última msg)
+      if (merged.length === prev.length && merged[merged.length - 1]?.id === prev[prev.length - 1]?.id) {
+        return prev;
+      }
+      return merged;
+    });
+  }, []);
+
   // ── effects ───────────────────────────────────────────────────────────────
 
   useEffect(() => { fetchConversations(); }, [fetchConversations]);
@@ -371,6 +394,7 @@ export default function Conversations() {
   }, [conversations.length, fetchLastMessages]);
 
   useEffect(() => {
+    selectedIdRef.current = selectedId;
     if (selectedId) fetchMessages(selectedId);
     else setMessages([]);
   }, [selectedId, fetchMessages]);
@@ -378,6 +402,40 @@ export default function Conversations() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
+
+  // ── Polling de fallback + refetch ao focar a aba ──────────────────────────
+  // Garante que as conversas e mensagens atualizem mesmo se o realtime cair.
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const refreshList = () => {
+      fetchConversations();
+      const ids = conversationsRef.current.map((c) => c.id);
+      if (ids.length) fetchLastMessages(ids);
+    };
+
+    // Lista de conversas a cada 8s; mensagens da conversa aberta a cada 4s
+    const listInterval = setInterval(refreshList, 8000);
+    const msgInterval = setInterval(() => {
+      if (selectedIdRef.current) refreshMessages(selectedIdRef.current);
+    }, 4000);
+
+    // Ao voltar o foco para a aba (ou trocar de aba), atualiza na hora
+    const onFocus = () => {
+      if (document.visibilityState === 'hidden') return;
+      refreshList();
+      if (selectedIdRef.current) refreshMessages(selectedIdRef.current);
+    };
+    document.addEventListener('visibilitychange', onFocus);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      clearInterval(listInterval);
+      clearInterval(msgInterval);
+      document.removeEventListener('visibilitychange', onFocus);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [user?.id, fetchConversations, fetchLastMessages, refreshMessages]);
 
   const selectConversation = useCallback((id: string) => {
     setSelectedId(id);
@@ -476,10 +534,15 @@ export default function Conversations() {
           setLastMessages((prev) => ({ ...prev, [selectedId]: newMsg }));
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        // Se o canal cair, refaz o fetch para não perder mensagens
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          refreshMessages(selectedId);
+        }
+      });
 
     return () => { supabaseTyped.removeChannel(channel); };
-  }, [selectedId]);
+  }, [selectedId, refreshMessages]);
 
   // ── actions ───────────────────────────────────────────────────────────────
 
