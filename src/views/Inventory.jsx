@@ -130,6 +130,17 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
                         {form.images?.length === 8 && <p className="error-message" style={{ color: '#f59e0b' }}>Limite de 8 fotos atingido.</p>}
                     </div>
 
+                    <div className="form-group">
+                        <label>Observações / Descrição</label>
+                        <textarea
+                            rows={2}
+                            value={form.description || ''}
+                            onChange={e => handleChange('description', e.target.value)}
+                            placeholder="Ex: Único dono, revisado, IPVA 2026 pago, chave reserva..."
+                            style={{ resize: 'vertical', fontFamily: 'inherit' }}
+                        />
+                    </div>
+
                     <div className="form-row">
                         <div className={`form-group ${errors.brand ? 'has-error' : ''}`}>
                             <label>Marca *</label>
@@ -182,16 +193,6 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
                             </select>
                         </div>
                         <div className="form-group"><label>Cor</label><input type="text" value={form.color} onChange={e => handleChange('color', e.target.value)} placeholder="Prata" /></div>
-                    </div>
-                    <div className="form-group">
-                        <label>Observações / Descrição</label>
-                        <textarea
-                            rows={3}
-                            value={form.description || ''}
-                            onChange={e => handleChange('description', e.target.value)}
-                            placeholder="Ex: Único dono, revisado, chave reserva, IPVA 2026 pago..."
-                            style={{ resize: 'vertical', fontFamily: 'inherit' }}
-                        />
                     </div>
                     <div className="modal-footer" style={{ marginTop: '1rem' }}>
                         <button className="btn-secondary" onClick={onClose}>Cancelar</button>
