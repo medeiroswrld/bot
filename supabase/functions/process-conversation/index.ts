@@ -718,26 +718,49 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
 async function callClaude(
   systemPrompt: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string | unknown[] }>,
+  attempt = 0,
 ): Promise<ClaudeResponse> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages,
-      tools: TOOLS,
-    }),
-  });
+  const MAX_RETRIES = 3;
+
+  let res: Response;
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages,
+        tools: TOOLS,
+      }),
+    });
+  } catch (netErr) {
+    // Erro de rede → retry com backoff
+    if (attempt < MAX_RETRIES) {
+      const delay = 1000 * Math.pow(2, attempt);
+      console.warn(`[CLAUDE] erro de rede — retry ${attempt + 1}/${MAX_RETRIES} em ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+      return callClaude(systemPrompt, messages, attempt + 1);
+    }
+    throw netErr;
+  }
 
   if (!res.ok) {
     const body = await res.text();
+    // Erros transitórios (rate limit, sobrecarga, instabilidade) → retry com backoff
+    const retriable = [408, 409, 429, 500, 502, 503, 504, 529].includes(res.status);
+    if (retriable && attempt < MAX_RETRIES) {
+      const delay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+      console.warn(`[CLAUDE] ${res.status} — retry ${attempt + 1}/${MAX_RETRIES} em ${delay}ms`);
+      await new Promise((r) => setTimeout(r, delay));
+      return callClaude(systemPrompt, messages, attempt + 1);
+    }
     throw new Error(`Claude API error ${res.status}: ${body}`);
   }
   return res.json() as Promise<ClaudeResponse>;
@@ -819,6 +842,36 @@ serve(async (req) => {
     if (lastMsgAfter?.created_at !== lastMsgBefore?.created_at) {
       return new Response('OK', { status: 200 });
     }
+  }
+
+  // ── 3.5. Lock atômico: garante que só UMA invocação processa este lote ────
+  //    Resolve a corrida quando o cliente manda várias mensagens quase juntas.
+  const { data: latestCustomerMsg } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('conversation_id', conversationId)
+    .eq('role', 'customer')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const batchKey = latestCustomerMsg?.id ?? `welcome-${conversationId}`;
+
+  const { data: claimed, error: claimErr } = await supabase
+    .from('conversations')
+    .update({ last_handled_msg_id: batchKey })
+    .eq('id', conversationId)
+    .or(`last_handled_msg_id.is.null,last_handled_msg_id.neq.${batchKey}`)
+    .select('id')
+    .maybeSingle();
+
+  if (claimErr) {
+    // A coluna last_handled_msg_id pode ainda não existir — não bloqueia o bot,
+    // apenas registra. A dedupe passa a valer assim que a coluna for criada.
+    console.warn('[PC] Claim ignorado (coluna last_handled_msg_id existe?):', claimErr.message);
+  } else if (!claimed) {
+    console.log('[PC] Lote já assumido por outra invocação — abortando.', batchKey);
+    return new Response('OK', { status: 200 });
   }
 
   // ── 4. Boas-vindas: primeira mensagem da conversa ─────────────────────────
@@ -935,13 +988,21 @@ serve(async (req) => {
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
     console.error('[FALLBACK]', err.message, err.stack);
-    console.error('[PC] Erro ao chamar Claude:', e);
-    finalText = 'Desculpe, tivemos um problema técnico momentâneo. Por favor, tente novamente em instantes.';
+    console.error('[PC] Erro ao chamar Claude (após retries):', e);
+
+    // Falha persistente após os retries → em vez de mandar mensagem de erro
+    // técnica (que polui o chat) ou ficar em silêncio, passa a conversa para
+    // um atendente humano. O frontend notifica o atendente (status 'pending').
+    await supabase.from('conversations').update({ status: 'pending' }).eq('id', conversationId);
+    console.error('[PC] Conversa marcada como pending (handoff) após falha do Claude.');
+    return new Response('OK', { status: 200 });
   }
 
-  if (!finalText) {
-    console.error('[FALLBACK] finalText vazio após loop — sem text blocks na última resposta do Claude');
-    finalText = 'Desculpe, não consegui processar sua mensagem. Tente novamente.';
+  // Resposta vazia sem erro (ex.: Claude só fez tool calls e não gerou texto):
+  // aborta em silêncio, sem poluir o chat com mensagem de erro.
+  if (!finalText.trim()) {
+    console.error('[PC] Resposta vazia do Claude — abortando sem enviar nada ao cliente.');
+    return new Response('OK', { status: 200 });
   }
 
   // ── 8. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────
