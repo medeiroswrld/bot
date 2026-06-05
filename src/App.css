@@ -255,11 +255,14 @@
    VIEW CONTENT
 ══════════════════════════════════════════ */
 .view-content {
-  padding: 24px;
+  padding: 28px 32px;
   max-width: 1400px;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
 }
-.view-header { margin-bottom: 24px; }
+.view-header { margin-bottom: 0; }
 .view-header h1 {
   font-size: 1.75rem;
   font-weight: 800;
@@ -285,8 +288,8 @@
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 14px;
-  margin-bottom: 24px;
+  gap: 16px;
+  margin-bottom: 0;
 }
 .metric-card { display: flex; align-items: center; gap: 16px; }
 .metric-icon {
@@ -318,11 +321,11 @@
 .dashboard-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 14px;
+  gap: 20px;
 }
 .section-title {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 .section-title h2 { font-size: 0.95rem; font-weight: 700; }
 
@@ -817,7 +820,7 @@
 }
 @media (max-width: 768px) {
   .main-content { margin-left: calc(var(--sidebar-w) + 8px); }
-  .view-content { padding: 16px; }
+  .view-content { padding: 16px 20px; gap: 1.25rem; }
   .header-search { width: 180px; }
   .view-header-flex { flex-direction: column; align-items: flex-start; gap: 12px; }
   .inv-toolbar { flex-direction: column; align-items: stretch; }

@@ -251,30 +251,17 @@ export default function Conversations() {
 
   // ── Pending notification loop: toca ding a cada 5s enquanto houver conversas pendentes ──
   useEffect(() => {
-    console.log('[loop-effect]', 'pendingCount:', pendingCount, 'audioUnlocked:', audioUnlocked);
     let interval: ReturnType<typeof setInterval> | null = null;
     if (pendingCount > 0 && audioUnlocked) {
-      console.log('[loop-effect] STARTING interval');
-      interval = setInterval(() => {
-        console.log('[loop-effect] TICK');
-        playDing();
-      }, 5000);
+      interval = setInterval(playDing, 5000);
     }
-    return () => {
-      if (interval) {
-        console.log('[loop-effect] CLEARING interval');
-        clearInterval(interval);
-      }
-    };
+    return () => { if (interval) clearInterval(interval); };
   }, [pendingCount, audioUnlocked, playDing]);
 
   // Solicita permissão de notificação desktop na montagem
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().then((perm) => {
-        setNotifPerm(perm);
-        console.log('[notify] Notification.permission após request:', perm);
-      });
+      Notification.requestPermission().then(setNotifPerm);
     }
   }, []);
 
@@ -296,38 +283,43 @@ export default function Conversations() {
     if (!('Notification' in window)) return;
     const perm = await Notification.requestPermission();
     setNotifPerm(perm);
-    console.log('[notify] Notification.permission após botão:', perm);
   };
 
   const testNotification = () => {
-    console.log('[notify] Notification.permission atual:', 'Notification' in window ? Notification.permission : 'não suportado');
     if (!('Notification' in window)) { alert('Este navegador não suporta notificações.'); return; }
     if (Notification.permission !== 'granted') { alert('Permissão não concedida. Clique em "Ativar Notificações" primeiro.'); return; }
     new Notification('Teste', { body: 'Funcionou! As notificações estão ativas.' });
     playDing();
-    console.log('[notify] Notificação de teste disparada');
   };
 
   // ── fetch helpers ─────────────────────────────────────────────────────────
 
   const fetchConversations = useCallback(async () => {
-    if (!user?.id) return;
-    const { data } = await supabaseTyped
-      .from('conversations')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('last_message_at', { ascending: false });
-    setConversations(data ?? []);
-    setLoading(false);
+    if (!user?.id) { setLoading(false); return; }
+    try {
+      const { data, error } = await supabaseTyped
+        .from('conversations')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('last_message_at', { ascending: false });
+      if (error) throw error;
+      setConversations(data ?? []);
+    } catch (e) {
+      console.error('[Conversations] fetchConversations:', e);
+    } finally {
+      setLoading(false);
+    }
   }, [user?.id]);
 
   const fetchLastMessages = useCallback(async (convIds: string[]) => {
     if (!convIds.length) return;
+    // Limit agressivo: apenas as colunas necessárias e no máximo 3× o nº de conversas
     const { data } = await supabaseTyped
       .from('messages')
-      .select('*')
+      .select('id, conversation_id, role, content, wa_message_id, created_at')
       .in('conversation_id', convIds)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(Math.max(convIds.length * 3, 60));
     if (!data) return;
     const map: Record<string, Message> = {};
     for (const msg of data) {
@@ -381,11 +373,6 @@ export default function Conversations() {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'conversations', filter: `user_id=eq.${uid}` },
         (payload) => {
-          console.log('[realtime-event]', payload.eventType,
-            (payload.new as Conversation | undefined)?.id,
-            'status:', (payload.old as Conversation | undefined)?.status,
-            '->', (payload.new as Conversation | undefined)?.status,
-          );
           const { eventType } = payload;
           if (eventType === 'INSERT') {
             const added = payload.new as Conversation;
@@ -393,32 +380,32 @@ export default function Conversations() {
           } else if (eventType === 'UPDATE') {
             const updated = payload.new as Conversation;
 
-            // Dispara alerta quando status muda para 'pending' (atendente solicitado)
+            // Atualiza preview da última mensagem para esta conversa
+            supabaseTyped
+              .from('messages')
+              .select('id, conversation_id, role, content, wa_message_id, created_at')
+              .eq('conversation_id', updated.id)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle()
+              .then(({ data }) => {
+                if (data) setLastMessages((prev) => ({ ...prev, [updated.id]: data as Message }));
+              });
+
+            // Dispara alerta quando status muda para 'pending'
             const prevConv = conversationsRef.current.find((c) => c.id === updated.id);
             if (prevConv && prevConv.status !== 'pending' && updated.status === 'pending') {
               const convId = updated.id;
               const name   = updated.customer_name ?? updated.customer_phone;
-
-              console.log('[handoff]', convId, updated.status);
-              console.log('[notify] Notification.permission:', 'Notification' in window ? Notification.permission : 'não suportado');
-
-              // 1. Notificação OS-level (funciona em segundo plano, persiste até o clique)
               if ('Notification' in window && Notification.permission === 'granted') {
                 const notif = new Notification(`${name} precisa de atendimento!`, {
                   body: 'Clique para abrir a conversa',
                   tag: `handoff-${convId}`,
                   requireInteraction: true,
                 });
-                console.log('[notify]', updated);
-                notif.onclick = () => {
-                  window.focus();
-                  selectConversation(convId);
-                  notif.close();
-                };
+                notif.onclick = () => { window.focus(); selectConversation(convId); notif.close(); };
               }
-              // 2. Web Audio ding (bônus)
               playDing();
-              // 3. Destaque visual na lista
               setAlertConvIds((prev) => new Set([...prev, convId]));
             }
 
@@ -433,10 +420,14 @@ export default function Conversations() {
           }
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          fetchConversations();
+        }
+      });
 
     return () => { supabaseTyped.removeChannel(channel); };
-  }, [user?.id, playDing, selectConversation]);
+  }, [user?.id, playDing, selectConversation, fetchConversations]);
 
   // ── realtime: messages for selected conversation ──────────────────────────
 
@@ -677,17 +668,6 @@ export default function Conversations() {
           )}
         </div>
       )}
-    </div>
-
-    {/* DEBUG — remover após investigação */}
-    <div style={{
-      position: 'fixed', bottom: 16, right: 16, zIndex: 9999,
-      background: '#fef08a', border: '2px solid #ca8a04',
-      borderRadius: 8, padding: '8px 14px',
-      fontSize: '1rem', fontWeight: 700, color: '#78350f',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-    }}>
-      Pending: {pendingCount} | Audio: {audioUnlocked ? '✓' : '✗'}
     </div>
 
     {confirmDeleteId && (

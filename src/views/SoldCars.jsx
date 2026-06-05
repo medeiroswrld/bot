@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, TrendingUp, ShoppingCart, X, Package } from 'lucide-react';
+import { Search, TrendingUp, ShoppingCart, X, Package, Camera } from 'lucide-react';
 import { useAppContext, formatDateStr } from '../context/AppContext.jsx';
 
 const DetailDrawer = ({ car, onClose }) => {
@@ -17,7 +17,14 @@ const DetailDrawer = ({ car, onClose }) => {
                 <div className="drawer-body">
                     <div className="detail-gallery">
                         <div className="gallery-main">
-                            <img src={images[activeImg]} alt={car.model} />
+                            {images.length > 0 ? (
+                                <img src={images[activeImg]} alt={`${car.brand} ${car.model}`} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 12 }} />
+                            ) : (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 240, background: 'var(--input-bg)', borderRadius: 12, color: '#94a3b8', gap: 8 }}>
+                                    <Camera size={40} strokeWidth={1.5} />
+                                    <span style={{ fontSize: '0.85rem' }}>Sem foto cadastrada</span>
+                                </div>
+                            )}
                         </div>
                         {images.length > 1 && (
                             <div className="gallery-thumbs">
@@ -126,7 +133,30 @@ const SoldCars = () => {
             <div className="sold-list">
                 {filtered.map(car => (
                     <div key={car.id} className="sold-card card" onClick={() => setViewCar(car)} style={{ cursor: 'pointer' }}>
-                        <img src={car.images?.[0] || car.image} alt={car.model} className="sold-card-img" />
+                        {car.images?.[0] ? (
+                            <img
+                                src={car.images[0]}
+                                alt={`${car.brand} ${car.model}`}
+                                className="sold-card-img"
+                                onError={(e) => {
+                                    e.currentTarget.style.display = 'none';
+                                    e.currentTarget.nextSibling.style.display = 'flex';
+                                }}
+                            />
+                        ) : null}
+                        <div
+                            className="sold-card-img"
+                            style={{
+                                display: car.images?.[0] ? 'none' : 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                background: 'var(--input-bg)',
+                                color: '#94a3b8',
+                                flexShrink: 0,
+                            }}
+                        >
+                            <Camera size={26} strokeWidth={1.5} />
+                        </div>
                         <div className="sold-card-info">
                             <h3 style={{ fontWeight: 700, fontSize: '1.05rem' }}>{car.brand} {car.model}</h3>
                             <p className="text-muted" style={{ fontSize: '0.85rem' }}>{car.version} • {car.year} • {car.color}</p>

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
-    X, Gauge, Tag, CheckCircle2, ShoppingCart, MoreVertical, Package, Camera
+    X, Gauge, Tag, CheckCircle2, ShoppingCart, Package, Camera
 } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 
@@ -46,18 +46,25 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
         if (errors[field]) setErrors(prev => ({ ...prev, [field]: null }));
     };
 
+    const ALLOWED_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    const MAX_SIZE_BYTES = 5 * 1024 * 1024;
+
     const handleImageUpload = (e) => {
         const files = Array.from(e.target.files);
         const currentImagesCount = form.images?.length || 0;
-        
+
         if (currentImagesCount + files.length > 8) {
             addToast('Limite de 8 fotos atingido.', 'error');
             return;
         }
 
         files.forEach(file => {
-            if (file.size > 10 * 1024 * 1024) {
-                addToast(`A imagem ${file.name} excede 10MB.`, 'error');
+            if (!ALLOWED_TYPES.includes(file.type)) {
+                addToast(`Formato não suportado (${file.name}). Use JPEG, PNG ou WEBP.`, 'error');
+                return;
+            }
+            if (file.size > MAX_SIZE_BYTES) {
+                addToast(`Imagem muito grande (${file.name}). Máx 5 MB.`, 'error');
                 return;
             }
             const preview = URL.createObjectURL(file);
@@ -116,7 +123,7 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
                                 <div className="upload-card-btn" onClick={() => document.getElementById('car-images-upload').click()}>
                                     <Plus size={24} />
                                     <span style={{ fontSize: '0.7rem', fontWeight: 600 }}>Adicionar</span>
-                                    <input id="car-images-upload" type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleImageUpload} />
+                                    <input id="car-images-upload" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" multiple style={{ display: 'none' }} onChange={handleImageUpload} />
                                 </div>
                             )}
                         </div>
@@ -326,30 +333,6 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
     </div>
 );
 
-const DropdownMenu = ({ car, onView, onEdit, onSell, onDelete }) => {
-    const [open, setOpen] = useState(false);
-    const ref = useRef(null);
-
-    useEffect(() => {
-        const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-        document.addEventListener('mousedown', handler);
-        return () => document.removeEventListener('mousedown', handler);
-    }, []);
-
-    return (
-        <div ref={ref} style={{ position: 'relative' }}>
-            <button className="inv-action-btn" onClick={() => setOpen(!open)} title="Mais ações"><MoreVertical size={16} /></button>
-            {open && (
-                <div className="dropdown-menu" style={{ top: '100%', right: 0 }}>
-                    <button className="dropdown-item" onClick={() => { onView(); setOpen(false); }}><Eye size={14} /> Ver Detalhes</button>
-                    <button className="dropdown-item" onClick={() => { onEdit(); setOpen(false); }}><Pencil size={14} /> Editar</button>
-                    <button className="dropdown-item" onClick={() => { onSell(); setOpen(false); }}><ShoppingCart size={14} /> Marcar Vendido</button>
-                    <button className="dropdown-item danger" onClick={() => { onDelete(); setOpen(false); }}><Trash2 size={14} /> Excluir</button>
-                </div>
-            )}
-        </div>
-    );
-};
 
 const Inventory = () => {
     const { inventory, addInventoryCar, updateInventoryCar, removeInventoryCar, sellCar } = useAppContext();
@@ -432,13 +415,14 @@ const Inventory = () => {
                                 </button>
                                 <button className="inv-action-btn" onClick={() => setViewCar(car)} title="Ver detalhes"><Eye size={16} /></button>
                                 <button className="inv-action-btn" onClick={() => setEditCar(car)} title="Editar"><Pencil size={16} /></button>
-                                <DropdownMenu
-                                    car={car}
-                                    onView={() => setViewCar(car)}
-                                    onEdit={() => setEditCar(car)}
-                                    onSell={() => setSellCarObj(car)}
-                                    onDelete={() => handleDelete(car.id)}
-                                />
+                                <button
+                                    className="inv-action-btn"
+                                    onClick={() => handleDelete(car.id)}
+                                    title="Excluir veículo"
+                                    style={{ color: '#ef4444' }}
+                                >
+                                    <Trash2 size={16} />
+                                </button>
                             </div>
                         </div>
                     </div>

@@ -188,7 +188,7 @@ const TOOLS = [
   {
     name: 'enviar_foto_carro',
     description:
-      'Envia a foto de um carro pelo WhatsApp. Use quando o cliente aceitar receber uma foto de um veículo específico do estoque. O car_id DEVE ser exatamente um id retornado pela ferramenta consultar_estoque. NÃO invente, NÃO use ID parcial.',
+      'Envia a foto de um carro pelo WhatsApp. Use quando o cliente aceitar receber uma foto de um veículo específico do estoque. O parâmetro car_id DEVE ser EXATAMENTE o valor do campo "id" retornado pela ferramenta consultar_estoque para aquele veículo específico. Nunca invente um ID. Nunca use ID parcial, truncado ou aproximado. Se não tiver certeza do id exato, chame consultar_estoque novamente.',
     input_schema: {
       type: 'object',
       properties: {
@@ -263,7 +263,7 @@ async function executeTool(
 
     const { data: settings } = await supabase
       .from('company_settings')
-      .select('business_hours, appointment_duration, appointment_interval, max_appointments_per_slot')
+      .select('business_hours, appointment_duration, appointment_interval, max_appointments_per_slot, working_days, business_hours_start, business_hours_end')
       .eq('user_id', userId)
       .single();
 
@@ -293,11 +293,30 @@ async function executeTool(
       type DayHours = { open?: boolean; start?: string; end?: string };
       const bh = settings?.business_hours as Record<string, DayHours> | null;
       const dayHours = bh?.[dayKey];
+
       if (!dayHours?.open) {
-        return { disponivel: false, mensagem: `A concessionária não funciona às ${dayLabel}. Tente outro dia.` };
+        if (!bh) {
+          // business_hours não configurado no novo formato — usa campos legados ou padrões
+          const LEGACY_MAP: Record<string, string> = {
+            sun: 'Dom', mon: 'Seg', tue: 'Ter', wed: 'Qua', thu: 'Qui', fri: 'Sex', sat: 'Sáb',
+          };
+          const workingDays = String(settings?.working_days ?? 'Seg,Ter,Qua,Qui,Sex')
+            .split(',').map((s: string) => s.trim());
+          const legacyLabel = LEGACY_MAP[dayKey] ?? '';
+          console.log('[AGENDA] business_hours null — fallback legacy, dia:', legacyLabel, 'workingDays:', workingDays);
+          if (!workingDays.includes(legacyLabel)) {
+            return { disponivel: false, mensagem: `A concessionária não funciona às ${dayLabel}. Tente outro dia.` };
+          }
+          slotStart = String(settings?.business_hours_start ?? '09:00');
+          slotEnd   = String(settings?.business_hours_end   ?? '18:00');
+        } else {
+          console.log('[AGENDA] Dia fechado no business_hours:', dayKey, dayHours);
+          return { disponivel: false, mensagem: `A concessionária não funciona às ${dayLabel}. Tente outro dia.` };
+        }
+      } else {
+        slotStart = dayHours.start ?? '09:00';
+        slotEnd   = dayHours.end   ?? '18:00';
       }
-      slotStart = dayHours.start ?? '09:00';
-      slotEnd   = dayHours.end   ?? '18:00';
     }
 
     const duration = Number(settings?.appointment_duration ?? 60);
@@ -329,6 +348,13 @@ async function executeTool(
     const nomeCliente = String(input.nome_cliente ?? customerName ?? 'Cliente');
     const carId       = input.car_id ? String(input.car_id) : null;
 
+    console.log('[AGENDA] agendar_visita chamado:', { dateStr, horario, nomeCliente, carId, userId });
+
+    if (!dateStr || !horario) {
+      console.error('[AGENDA] data ou horario ausente:', { dateStr, horario });
+      return { sucesso: false, mensagem: 'Data ou horário não informado.' };
+    }
+
     const { data: conflict } = await supabase
       .from('appointments')
       .select('id')
@@ -339,6 +365,7 @@ async function executeTool(
       .maybeSingle();
 
     if (conflict) {
+      console.log('[AGENDA] Conflito de horário detectado:', conflict.id);
       return { sucesso: false, mensagem: 'Este horário não está mais disponível. Escolha outro horário.' };
     }
 
@@ -349,6 +376,7 @@ async function executeTool(
       .single();
 
     const appointmentStatus = settings?.booking_mode === 'confirm' ? 'scheduled' : 'confirmed';
+    console.log('[AGENDA] booking_mode:', settings?.booking_mode, '→ status:', appointmentStatus);
 
     const { data: appt, error } = await supabase
       .from('appointments')
@@ -364,7 +392,11 @@ async function executeTool(
       .select()
       .single();
 
-    if (error) return { sucesso: false, mensagem: 'Erro ao criar agendamento.' };
+    if (error) {
+      console.error('[AGENDA] Erro ao inserir agendamento:', JSON.stringify(error));
+      return { sucesso: false, mensagem: 'Erro ao criar agendamento.' };
+    }
+    console.log('[AGENDA] Agendamento criado com sucesso:', appt.id, appt.appointment_date, appt.appointment_time);
 
     return {
       sucesso: true,
@@ -502,7 +534,8 @@ async function executeTool(
 
   if (name === 'enviar_foto_carro') {
     const carId = String(input.car_id ?? '');
-    console.log(`[enviar_foto_carro] car_id recebido: ${carId}`);
+    console.log('[FOTO] car_id recebido:', carId);
+    console.log('[FOTO] user_id:', userId);
 
     if (!carId) return { sucesso: false, mensagem: 'ID do carro não fornecido.' };
 
@@ -513,14 +546,15 @@ async function executeTool(
       .eq('user_id', userId)
       .order('sort_order', { ascending: true });
 
-    console.log(`[enviar_foto_carro] image_urls encontradas para car_id=${carId}:`, imgs?.map((i: { image_url: string }) => i.image_url));
+    const imageUrls = imgs?.map((i: { image_url: string }) => i.image_url) ?? [];
+    console.log('[FOTO] imagens encontradas:', imageUrls.length, imageUrls);
 
-    if (!imgs?.length) {
+    if (!imageUrls.length) {
       return { sucesso: false, mensagem: 'Não há foto cadastrada para este veículo.' };
     }
 
     let sentCount = 0;
-    for (const img of imgs) {
+    for (const img of imgs!) {
       const imageUrl = String(img.image_url);
       const sent = await sendImage(customerPhone, imageUrl, phoneNumberId || undefined);
       if (sent) {
@@ -746,43 +780,49 @@ serve(async (req) => {
     return new Response('OK', { status: 200 });
   }
 
-  // ── 2. Debounce: evita execuções paralelas por mensagens rápidas ───────────
-  const { data: lastMsgBefore } = await supabase
-    .from('messages')
-    .select('id')
-    .eq('conversation_id', conversationId)
-    .eq('role', 'customer')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  await new Promise<void>((resolve) => setTimeout(resolve, 2500));
-
-  const { data: lastMsgAfter } = await supabase
-    .from('messages')
-    .select('id')
-    .eq('conversation_id', conversationId)
-    .eq('role', 'customer')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (lastMsgAfter?.id !== lastMsgBefore?.id) {
-    return new Response('OK', { status: 200 });
-  }
-
   const userId        = conv.user_id        as string;
   const customerPhone = conv.customer_phone as string;
   let   customerName  = conv.customer_name  as string | null;
 
-  // ── 3. Boas-vindas: se ainda não há mensagem do bot, envia mensagem inicial perguntando nome ──
+  // ── 2. Verifica se é a primeira mensagem (boas-vindas) — sem debounce ─────
   const { count: botCount } = await supabase
     .from('messages')
     .select('id', { count: 'exact', head: true })
     .eq('conversation_id', conversationId)
     .eq('role', 'bot');
 
-  if ((botCount ?? 0) === 0) {
+  const isFirstMessage = (botCount ?? 0) === 0;
+
+  // ── 3. Debounce 3s: aguarda e aborta se cliente enviou nova mensagem ───────
+  //    Pulado para boas-vindas (primeira mensagem → resposta imediata sem delay)
+  if (!isFirstMessage) {
+    const { data: lastMsgBefore } = await supabase
+      .from('messages')
+      .select('created_at')
+      .eq('conversation_id', conversationId)
+      .eq('role', 'customer')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+
+    const { data: lastMsgAfter } = await supabase
+      .from('messages')
+      .select('created_at')
+      .eq('conversation_id', conversationId)
+      .eq('role', 'customer')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (lastMsgAfter?.created_at !== lastMsgBefore?.created_at) {
+      return new Response('OK', { status: 200 });
+    }
+  }
+
+  // ── 4. Boas-vindas: primeira mensagem da conversa ─────────────────────────
+  if (isFirstMessage) {
     const { data: wSettings } = await supabase
       .from('company_settings')
       .select('company_name, whatsapp_phone_number_id')
@@ -792,7 +832,6 @@ serve(async (req) => {
     const companyName = String(wSettings?.company_name ?? 'nossa concessionária');
     const wPid        = String(wSettings?.whatsapp_phone_number_id ?? '');
 
-    // Item 2: boas-vindas já pergunta o nome
     const welcomeText =
       `Olá! 👋 Bem-vindo à ${companyName}.\n\nPra começar, qual o seu nome?`;
 

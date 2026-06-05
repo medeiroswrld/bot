@@ -724,8 +724,15 @@ export const AppProvider = ({ children }) => {
 
       if (error) throw error;
 
+      // Preserva as imagens do carro que estava no estoque (o .select() do update não faz join com car_images)
+      const inventoryCar = inventory.find(c => c.id === inventoryId);
       setInventory(prev => prev.filter(c => c.id !== inventoryId));
-      setSoldCars(prev => [{ ...updatedCar, km: updatedCar.mileage, status: 'vendido' }, ...prev]);
+      setSoldCars(prev => [{
+        ...updatedCar,
+        km: updatedCar.mileage,
+        status: 'vendido',
+        images: inventoryCar?.images ?? [],
+      }, ...prev]);
       addToast('Venda registrada com sucesso! Analise o histórico.', 'success');
     } catch (error) {
       console.error('Erro ao vender', error);
