@@ -337,7 +337,9 @@ async function executeTool(
       const t = String(a.appointment_time).substring(0, 5);
       slotCount.set(t, (slotCount.get(t) ?? 0) + 1);
     }
+    // Slot disponível enquanto count < max_appointments_per_slot
     const free = slots.filter((s) => (slotCount.get(s) ?? 0) < maxPerSlot);
+    console.log('[slot] ver_horarios:', { data: dateStr, maxPerSlot, ocupacao: Object.fromEntries(slotCount), livres: free.length });
 
     return { data: dateStr, dia_semana: dayLabel, horarios_livres: free, total_disponivel: free.length };
   }
@@ -348,55 +350,78 @@ async function executeTool(
     const nomeCliente = String(input.nome_cliente ?? customerName ?? 'Cliente');
     const carId       = input.car_id ? String(input.car_id) : null;
 
-    console.log('[AGENDA] agendar_visita chamado:', { dateStr, horario, nomeCliente, carId, userId });
+    console.log('[agendar_visita] params:', { dateStr, horario, nomeCliente, carId, userId, customerPhone });
 
     if (!dateStr || !horario) {
-      console.error('[AGENDA] data ou horario ausente:', { dateStr, horario });
-      return { sucesso: false, mensagem: 'Data ou horário não informado.' };
+      console.error('[agendar_visita] data ou horario ausente:', { dateStr, horario });
+      return { sucesso: false, error: 'Data ou horário não informado.' };
     }
 
-    const { data: conflict } = await supabase
+    // user_id é SEMPRE o dono do bot (vem de conv.user_id), nunca o cliente
+    const { data: settings, error: settingsErr } = await supabase
+      .from('company_settings')
+      .select('booking_mode, max_appointments_per_slot')
+      .eq('user_id', userId)
+      .single();
+
+    if (settingsErr) {
+      console.error('[agendar_visita] erro ao ler company_settings:', JSON.stringify(settingsErr));
+      return { sucesso: false, error: 'Não consegui acessar as configurações da agenda. Vou chamar um atendente.' };
+    }
+
+    const maxPerSlot = Number(settings?.max_appointments_per_slot ?? 1);
+
+    // BUG 4: respeita max_appointments_per_slot — só bloqueia se já atingiu o máximo
+    const { data: existingAtSlot, error: countErr } = await supabase
       .from('appointments')
       .select('id')
       .eq('user_id', userId)
       .eq('appointment_date', dateStr)
       .eq('appointment_time', horario)
-      .neq('status', 'cancelled')
-      .maybeSingle();
+      .neq('status', 'cancelled');
 
-    if (conflict) {
-      console.log('[AGENDA] Conflito de horário detectado:', conflict.id);
-      return { sucesso: false, mensagem: 'Este horário não está mais disponível. Escolha outro horário.' };
+    if (countErr) {
+      console.error('[agendar_visita] erro ao contar slot:', JSON.stringify(countErr));
+      return { sucesso: false, error: 'Não consegui verificar a disponibilidade. Vou chamar um atendente.' };
     }
 
-    const { data: settings } = await supabase
-      .from('company_settings')
-      .select('booking_mode')
-      .eq('user_id', userId)
-      .single();
+    const slotCount = existingAtSlot?.length ?? 0;
+    console.log('[slot]', { hora: horario, count: slotCount, max: maxPerSlot });
+
+    if (slotCount >= maxPerSlot) {
+      console.log('[agendar_visita] slot lotado:', horario, slotCount, '>=', maxPerSlot);
+      return { sucesso: false, error: 'Este horário já está lotado. Escolha outro horário.' };
+    }
 
     const appointmentStatus = settings?.booking_mode === 'confirm' ? 'scheduled' : 'confirmed';
-    console.log('[AGENDA] booking_mode:', settings?.booking_mode, '→ status:', appointmentStatus);
+
+    // Colunas: appointment_date = DATE ('YYYY-MM-DD'), appointment_time = TIME ('HH:MM')
+    const insertData = {
+      user_id: userId,
+      customer_name: nomeCliente,
+      customer_phone: customerPhone,
+      appointment_date: dateStr,
+      appointment_time: horario,
+      car_id: carId,
+      status: appointmentStatus,
+    };
+    console.log('[agendar_visita] inserindo:', JSON.stringify(insertData));
 
     const { data: appt, error } = await supabase
       .from('appointments')
-      .insert({
-        user_id: userId,
-        customer_name: nomeCliente,
-        customer_phone: customerPhone,
-        appointment_date: dateStr,
-        appointment_time: horario,
-        car_id: carId,
-        status: appointmentStatus,
-      })
+      .insert(insertData)
       .select()
       .single();
 
-    if (error) {
-      console.error('[AGENDA] Erro ao inserir agendamento:', JSON.stringify(error));
-      return { sucesso: false, mensagem: 'Erro ao criar agendamento.' };
+    console.log('[agendar_visita] resultado:', JSON.stringify(appt ?? null), 'erro:', error ? JSON.stringify(error) : 'nenhum');
+
+    // BUG 1: se o INSERT falhar, retorna erro REAL ao Claude — nunca finge sucesso
+    if (error || !appt) {
+      console.error('[agendar_visita] INSERT FALHOU:', JSON.stringify(error));
+      return { sucesso: false, error: `Falha ao salvar o agendamento no banco: ${error?.message ?? 'desconhecido'}` };
     }
-    console.log('[AGENDA] Agendamento criado com sucesso:', appt.id, appt.appointment_date, appt.appointment_time);
+
+    console.log('[agendar_visita] Agendamento criado:', appt.id, appt.appointment_date, appt.appointment_time);
 
     return {
       sucesso: true,
@@ -650,7 +675,7 @@ Seu objetivo é entender o que o cliente procura, mostrar as opções que a conc
 - **consultar_estoque** — quando o cliente perguntar sobre veículos (carros ou motos). O estoque pode conter carros e motos — diferencie corretamente ao apresentar cada veículo. Sempre baseie suas respostas no que essa ferramenta retornar.
 - **enviar_foto_carro** — quando o cliente demonstrar interesse específico em um carro e quiser ver uma foto. Ofereça: "Quer que eu te mande uma foto dele?" e, se ele aceitar, use esta ferramenta com o id EXATO do carro retornado por consultar_estoque. Nunca invente um car_id, nunca use ID parcial.
 - **ver_horarios_disponiveis** — quando o cliente quiser saber quando pode visitar. Se retornar \`closed: true\`, informe ao cliente o motivo (campo \`reason\`) e ofereça outra data: "Infelizmente no dia X estaremos fechados por causa de {reason}. Posso te oferecer outro dia?"
-- **agendar_visita** — quando o cliente confirmar que quer agendar. Confirme os dados (nome, dia, horário, carro) antes de agendar de fato.
+- **agendar_visita** — quando o cliente confirmar que quer agendar. Confirme os dados (nome, dia, horário, carro) antes de agendar de fato. **IMPORTANTE: só diga que a visita foi agendada se a ferramenta retornar \`sucesso: true\`. Se retornar \`sucesso: false\`, NUNCA diga ao cliente que o agendamento foi feito — avise que houve um problema e chame um atendente (chamar_atendente).** Sempre verifique a quantidade máxima de agendamentos por horário antes de oferecer alternativa: use ver_horarios_disponiveis e ofereça apenas horários da lista \`horarios_livres\`.
 - **salvar_nome_cliente** — assim que o cliente informar o nome.
 - **registrar_interesse** — quando o cliente demonstrar interesse de compra ou pedir contato.
 - **coletar_dados_financiamento** — quando o cliente quiser simular financiamento (ver regras abaixo).
@@ -674,6 +699,7 @@ Quando o cliente perguntar sobre pagamento ou financiamento:
 - **Nunca invente informação.** Não cite carros, preços, anos, quilometragem ou disponibilidade que não vieram da ferramenta \`consultar_estoque\`. Se não tiver a informação, diga que vai verificar ou passe para um atendente.
 - **Nunca invente condições de financiamento, valor de troca, garantia ou políticas da loja.** Se o cliente perguntar e você não tiver certeza, passe para um atendente humano.
 - **Antes de agendar, confirme os detalhes com o cliente** e respeite o horário de funcionamento da concessionária. Nunca agende fora do horário de funcionamento.
+- **Nunca confirme um agendamento sem que a ferramenta agendar_visita retorne \`sucesso: true\`.** Se a ferramenta retornar \`sucesso: false\` ou um campo \`error\`, informe ao cliente que houve um problema técnico ao registrar e que um atendente vai finalizar — então chame chamar_atendente. Jamais diga "marquei sua visita" baseado só na sua intenção.
 - **Nunca prometa nada em nome da concessionária** que você não tenha como garantir.
 - **O car_id para enviar_foto_carro DEVE ser exatamente um id retornado pela ferramenta consultar_estoque. NÃO invente, NÃO use ID parcial.**
 
@@ -828,7 +854,7 @@ serve(async (req) => {
       .limit(1)
       .maybeSingle();
 
-    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+    await new Promise<void>((resolve) => setTimeout(resolve, 4000));
 
     const { data: lastMsgAfter } = await supabase
       .from('messages')
@@ -840,6 +866,7 @@ serve(async (req) => {
       .maybeSingle();
 
     if (lastMsgAfter?.created_at !== lastMsgBefore?.created_at) {
+      console.log('[debounce] mensagem mais nova detectada, abortando');
       return new Response('OK', { status: 200 });
     }
   }
