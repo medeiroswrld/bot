@@ -3,7 +3,7 @@ import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, CarFront, Users, Calendar, Settings,
   Bell, LogOut, ShoppingCart, Loader2, MessageCircle, Bot,
-  Sun, Moon, Bookmark,
+  Sun, Moon, Bookmark, FileText,
 } from 'lucide-react';
 import './App.css';
 
@@ -19,6 +19,7 @@ const Login        = lazy(() => import('./views/Login.jsx'));
 const Conversations = lazy(() => import('./views/Conversations.tsx'));
 const BotSettings  = lazy(() => import('./views/BotSettings.jsx'));
 const WaitingList  = lazy(() => import('./views/WaitingList.jsx'));
+const Templates    = lazy(() => import('./views/Templates.jsx'));
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
@@ -30,6 +31,7 @@ const NAV_ITEMS = [
   { name: 'Agenda',        icon: <Calendar size={18} />,        path: '/agenda' },
   { name: 'Conversas',     icon: <MessageCircle size={18} />,   path: '/conversas' },
   { name: 'Lista de Espera', icon: <Bookmark size={18} />,      path: '/lista-de-espera' },
+  { name: 'Templates',     icon: <FileText size={18} />,        path: '/templates' },
   { name: 'Assistente',    icon: <Bot size={18} />,             path: '/assistente' },
   { name: 'Configurações', icon: <Settings size={18} />,        path: '/configuracoes' },
 ];
@@ -179,6 +181,7 @@ const AuthenticatedApp = () => {
               <Route path="/agenda"        element={<Agenda />} />
               <Route path="/conversas"     element={<Conversations />} />
               <Route path="/lista-de-espera" element={<WaitingList />} />
+              <Route path="/templates"     element={<Templates />} />
               <Route path="/assistente"    element={<BotSettings />} />
               <Route path="/configuracoes" element={<SettingsView />} />
             </Routes>

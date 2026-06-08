@@ -69,6 +69,7 @@ export const AppProvider = ({ children }) => {
   const [appointments, setAppointments] = useState([]);
   const [companySettings, setCompanySettings] = useState(null);
   const [vehicleInterests, setVehicleInterests] = useState([]);
+  const [messageTemplates, setMessageTemplates] = useState([]);
 
   const [toasts, setToasts] = useState([]);
 
@@ -328,6 +329,21 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
+  // ========== Fetch Message Templates ==========
+  const fetchMessageTemplates = useCallback(async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('message_templates')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      if (error) { console.error('[TEMPLATES] Erro ao carregar:', error); return; }
+      setMessageTemplates(data ?? []);
+    } catch (err) {
+      console.error('[TEMPLATES] Erro inesperado:', err);
+    }
+  }, []);
+
   // ========== Fetch Company Settings from Supabase ==========
   const fetchCompanySettings = useCallback(async (userId) => {
     try {
@@ -392,6 +408,7 @@ export const AppProvider = ({ children }) => {
               await fetchAppointments(newSession.user.id);
               await fetchCompanySettings(newSession.user.id);
               await fetchVehicleInterests(newSession.user.id);
+              await fetchMessageTemplates(newSession.user.id);
             } catch (err) {
               console.error('[AUTH] Erro ao carregar dados iniciais:', err);
             }
@@ -412,6 +429,7 @@ export const AppProvider = ({ children }) => {
               await fetchAppointments(newSession.user.id);
               await fetchCompanySettings(newSession.user.id);
               await fetchVehicleInterests(newSession.user.id);
+              await fetchMessageTemplates(newSession.user.id);
             } catch (err) {
               console.error('[AUTH] Erro ao carregar dados pós-login:', err);
             }
@@ -429,6 +447,7 @@ export const AppProvider = ({ children }) => {
           setAppointments([]);
           setCompanySettings(null);
           setVehicleInterests([]);
+          setMessageTemplates([]);
           setData(EMPTY_DATA);
           profileFetchedRef.current = false;
           if (mounted) setIsLoading(false);
@@ -446,7 +465,7 @@ export const AppProvider = ({ children }) => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [fetchProfile, fetchInventory, fetchAppointments, fetchCompanySettings, fetchVehicleInterests]);
+  }, [fetchProfile, fetchInventory, fetchAppointments, fetchCompanySettings, fetchVehicleInterests, fetchMessageTemplates]);
 
   // ========== Auth Actions (Supabase) ==========
   const login = async (email, password) => {
@@ -836,6 +855,102 @@ export const AppProvider = ({ children }) => {
     return true;
   };
 
+  // ========== Actions - Message Templates ==========
+  const refreshTemplates = useCallback(async () => {
+    if (user?.id) await fetchMessageTemplates(user.id);
+  }, [user?.id, fetchMessageTemplates]);
+
+  // Gera nome técnico Meta a partir do nome amigável (lowercase, snake_case)
+  const slugifyTemplateName = (name) =>
+    String(name || '')
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')
+      .slice(0, 60) || `template_${Date.now()}`;
+
+  const saveTemplate = async (tpl) => {
+    if (!user?.id) return null;
+    const payload = {
+      user_id: user.id,
+      meta_template_name: tpl.meta_template_name || slugifyTemplateName(tpl.display_name),
+      display_name: tpl.display_name,
+      category: tpl.category,
+      language: tpl.language || 'pt_BR',
+      header_type: tpl.header_type || null,
+      header_content: tpl.header_content || null,
+      body_text: tpl.body_text,
+      body_variables: tpl.body_variables || [],
+      footer_text: tpl.footer_text || null,
+      buttons: tpl.buttons || [],
+    };
+    try {
+      let result;
+      if (tpl.id) {
+        const { data, error } = await supabase
+          .from('message_templates')
+          .update({ ...payload, status: 'draft', rejection_reason: null })
+          .eq('id', tpl.id).select().single();
+        if (error) throw error;
+        result = data;
+        setMessageTemplates(prev => prev.map(t => t.id === data.id ? data : t));
+      } else {
+        const { data, error } = await supabase
+          .from('message_templates')
+          .insert(payload).select().single();
+        if (error) throw error;
+        result = data;
+        setMessageTemplates(prev => [data, ...prev]);
+      }
+      addToast('Template salvo.', 'success');
+      return result;
+    } catch (error) {
+      console.error('[TEMPLATES] Erro ao salvar:', error);
+      addToast(error.message?.includes('duplicate') ? 'Já existe um template com esse nome técnico.' : 'Erro ao salvar template.', 'error');
+      throw error;
+    }
+  };
+
+  const deleteTemplate = async (id) => {
+    const { error } = await supabase.from('message_templates').delete().eq('id', id);
+    if (error) { console.error('[TEMPLATES] Erro ao excluir:', error); addToast('Erro ao excluir template.', 'error'); return false; }
+    setMessageTemplates(prev => prev.filter(t => t.id !== id));
+    return true;
+  };
+
+  // Submete o template para aprovação da Meta (edge function)
+  const submitTemplate = async (id) => {
+    try {
+      const { data, error } = await supabase.functions.invoke('submit-template-to-meta', { body: { template_id: id } });
+      if (error || data?.error) {
+        const msg = data?.details ? JSON.stringify(data.details) : (data?.error || error?.message || 'Erro');
+        addToast(`Meta recusou: ${msg}`.slice(0, 160), 'error');
+        await refreshTemplates();
+        return false;
+      }
+      addToast('Template enviado pra aprovação da Meta.', 'success');
+      await refreshTemplates();
+      return true;
+    } catch (e) {
+      console.error('[TEMPLATES] submit erro:', e);
+      addToast('Erro ao enviar template.', 'error');
+      return false;
+    }
+  };
+
+  // Verifica status dos templates pendentes na Meta
+  const checkTemplateStatus = async () => {
+    if (!user?.id) return;
+    try {
+      const { data, error } = await supabase.functions.invoke('check-template-status', { body: { user_id: user.id } });
+      if (error) { addToast('Erro ao verificar status.', 'error'); return; }
+      await refreshTemplates();
+      if (data?.updated > 0) addToast(`${data.updated} template(s) atualizado(s).`, 'success');
+      else addToast('Nenhuma mudança de status ainda.', 'info');
+    } catch (e) {
+      console.error('[TEMPLATES] check erro:', e);
+      addToast('Erro ao verificar status.', 'error');
+    }
+  };
+
   // ========== Actions - Leads (Supabase) ==========
   const addLead = async (leadData) => {
     if (!user?.id) return;
@@ -1191,12 +1306,16 @@ export const AppProvider = ({ children }) => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_interests', filter: `user_id=eq.${userId}` }, () => {
         fetchVehicleInterests(userId);
       })
+      // Templates: qualquer mudança refaz o fetch (status de aprovação atualiza sozinho)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_templates', filter: `user_id=eq.${userId}` }, () => {
+        fetchMessageTemplates(userId);
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user?.id, fetchLeads, fetchVehicleInterests]);
+  }, [user?.id, fetchLeads, fetchVehicleInterests, fetchMessageTemplates]);
 
   // ========== Context Value ==========
   const value = {
@@ -1257,6 +1376,14 @@ export const AppProvider = ({ children }) => {
     refreshVehicleInterests,
     updateInterestStatus,
     deleteInterest,
+
+    // Templates Meta
+    messageTemplates,
+    refreshTemplates,
+    saveTemplate,
+    deleteTemplate,
+    submitTemplate,
+    checkTemplateStatus,
   };
 
   return (

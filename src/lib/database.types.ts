@@ -218,6 +218,176 @@ export interface Database {
         Relationships: []
       }
 
+      message_templates: {
+        Row: {
+          id: string
+          user_id: string
+          meta_template_name: string
+          meta_template_id: string | null
+          display_name: string
+          category: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION'
+          language: string
+          header_type: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT' | null
+          header_content: string | null
+          body_text: string
+          body_variables: Json
+          footer_text: string | null
+          buttons: Json
+          status: 'draft' | 'pending' | 'approved' | 'rejected' | 'paused' | 'disabled'
+          rejection_reason: string | null
+          submitted_at: string | null
+          approved_at: string | null
+          last_status_check: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          meta_template_name: string
+          meta_template_id?: string | null
+          display_name: string
+          category: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION'
+          language?: string
+          header_type?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT' | null
+          header_content?: string | null
+          body_text: string
+          body_variables?: Json
+          footer_text?: string | null
+          buttons?: Json
+          status?: 'draft' | 'pending' | 'approved' | 'rejected' | 'paused' | 'disabled'
+          rejection_reason?: string | null
+          submitted_at?: string | null
+          approved_at?: string | null
+          last_status_check?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          meta_template_name?: string
+          meta_template_id?: string | null
+          display_name?: string
+          category?: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION'
+          language?: string
+          header_type?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT' | null
+          header_content?: string | null
+          body_text?: string
+          body_variables?: Json
+          footer_text?: string | null
+          buttons?: Json
+          status?: 'draft' | 'pending' | 'approved' | 'rejected' | 'paused' | 'disabled'
+          rejection_reason?: string | null
+          submitted_at?: string | null
+          approved_at?: string | null
+          last_status_check?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+
+      campaigns: {
+        Row: {
+          id: string
+          user_id: string
+          template_id: string
+          name: string
+          audience_type: 'all_leads' | 'leads_by_status' | 'leads_inactive' | 'leads_by_interest_vehicle' | 'custom_phones'
+          audience_filter: Json
+          template_variables: Json
+          status: 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed' | 'cancelled'
+          recipients_count: number
+          sent_count: number
+          delivered_count: number
+          read_count: number
+          failed_count: number
+          scheduled_for: string | null
+          started_at: string | null
+          completed_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          template_id: string
+          name: string
+          audience_type: 'all_leads' | 'leads_by_status' | 'leads_inactive' | 'leads_by_interest_vehicle' | 'custom_phones'
+          audience_filter?: Json
+          template_variables?: Json
+          status?: 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed' | 'cancelled'
+          recipients_count?: number
+          sent_count?: number
+          delivered_count?: number
+          read_count?: number
+          failed_count?: number
+          scheduled_for?: string | null
+          started_at?: string | null
+          completed_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          name?: string
+          audience_type?: 'all_leads' | 'leads_by_status' | 'leads_inactive' | 'leads_by_interest_vehicle' | 'custom_phones'
+          audience_filter?: Json
+          template_variables?: Json
+          status?: 'draft' | 'scheduled' | 'sending' | 'completed' | 'failed' | 'cancelled'
+          recipients_count?: number
+          sent_count?: number
+          delivered_count?: number
+          read_count?: number
+          failed_count?: number
+          scheduled_for?: string | null
+          started_at?: string | null
+          completed_at?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+
+      campaign_sends: {
+        Row: {
+          id: string
+          campaign_id: string
+          customer_phone: string
+          customer_name: string | null
+          lead_id: string | null
+          status: 'pending' | 'sent' | 'delivered' | 'read' | 'failed'
+          whatsapp_message_id: string | null
+          error_message: string | null
+          sent_at: string | null
+          delivered_at: string | null
+          read_at: string | null
+          failed_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          campaign_id: string
+          customer_phone: string
+          customer_name?: string | null
+          lead_id?: string | null
+          status?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed'
+          whatsapp_message_id?: string | null
+          error_message?: string | null
+          sent_at?: string | null
+          delivered_at?: string | null
+          read_at?: string | null
+          failed_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          status?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed'
+          whatsapp_message_id?: string | null
+          error_message?: string | null
+          sent_at?: string | null
+          delivered_at?: string | null
+          read_at?: string | null
+          failed_at?: string | null
+        }
+        Relationships: []
+      }
+
       leads: {
         Row: {
           id: string
