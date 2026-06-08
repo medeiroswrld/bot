@@ -92,15 +92,20 @@ const TOOLS = [
   {
     name: 'consultar_estoque',
     description:
-      'Busca veículos disponíveis no estoque da concessionária — carros e motos. Use sempre que o cliente perguntar sobre veículos, preços, disponibilidade ou características.',
+      'Busca veículos disponíveis no estoque da concessionária — carros e motos. Use sempre que o cliente perguntar sobre veículos, preços, disponibilidade ou características. Aceita múltiplos filtros opcionais combinados — use para buscar SIMILARES quando o modelo exato não existir (ex.: mesma marca, faixa de preço e ano próximos). Sem nenhum filtro, retorna todo o estoque disponível.',
     input_schema: {
       type: 'object',
       properties: {
-        marca:     { type: 'string',  description: 'Marca do veículo (ex.: Toyota, Honda, Yamaha)' },
-        modelo:    { type: 'string',  description: 'Modelo do veículo (ex.: Corolla, Civic, MT-07)' },
-        preco_max: { type: 'number',  description: 'Preço máximo em reais' },
-        ano_min:   { type: 'integer', description: 'Ano mínimo de fabricação' },
-        tipo:      { type: 'string',  description: 'Tipo de veículo: "carro" ou "moto"' },
+        marca:        { type: 'string',  description: 'Marca do veículo (ex.: Toyota, Honda, Yamaha)' },
+        modelo:       { type: 'string',  description: 'Modelo do veículo (ex.: Corolla, Civic, MT-07)' },
+        preco_min:    { type: 'number',  description: 'Preço mínimo em reais' },
+        preco_max:    { type: 'number',  description: 'Preço máximo em reais' },
+        ano_min:      { type: 'integer', description: 'Ano mínimo de fabricação' },
+        ano_max:      { type: 'integer', description: 'Ano máximo de fabricação' },
+        tipo:         { type: 'string',  description: 'Tipo de veículo: "carro" ou "moto"' },
+        combustivel:  { type: 'string',  description: 'Combustível: flex, gasolina, diesel, elétrico, híbrido' },
+        cambio:       { type: 'string',  description: 'Câmbio: manual, automático, CVT' },
+        categoria:    { type: 'string',  description: 'Categoria/carroceria desejada: sedan, hatch, SUV, picape (usado como intenção; o filtro principal é marca/preço/ano)' },
       },
       required: [],
     },
@@ -249,11 +254,17 @@ async function executeTool(
       .order('price', { ascending: true })
       .limit(10);
 
-    if (input.marca)     query = query.ilike('brand', `%${input.marca}%`);
-    if (input.modelo)    query = query.ilike('model', `%${input.modelo}%`);
-    if (input.preco_max) query = query.lte('price', Number(input.preco_max));
-    if (input.ano_min)   query = query.gte('year',  Number(input.ano_min));
-    if (input.tipo)      query = query.eq('vehicle_type', String(input.tipo));
+    if (input.marca)       query = query.ilike('brand', `%${input.marca}%`);
+    if (input.modelo)      query = query.ilike('model', `%${input.modelo}%`);
+    if (input.preco_min)   query = query.gte('price', Number(input.preco_min));
+    if (input.preco_max)   query = query.lte('price', Number(input.preco_max));
+    if (input.ano_min)     query = query.gte('year',  Number(input.ano_min));
+    if (input.ano_max)     query = query.lte('year',  Number(input.ano_max));
+    if (input.tipo)        query = query.eq('vehicle_type', String(input.tipo));
+    if (input.combustivel) query = query.ilike('fuel', `%${input.combustivel}%`);
+    if (input.cambio)      query = query.ilike('transmission', `%${input.cambio}%`);
+    // 'categoria' (sedan/hatch/SUV/picape) não tem coluna no schema — aceito como intenção,
+    // o filtro real é por marca/preço/ano. Ignorado na query para não quebrar.
 
     const { data, error } = await query;
     if (error) return { erro: 'Falha ao buscar estoque' };
@@ -842,16 +853,43 @@ Seu objetivo é entender o que o cliente procura, mostrar as opções que a conc
 - **coletar_dados_financiamento** — quando o cliente quiser simular financiamento (ver regras abaixo).
 - **chamar_atendente** — para passar a conversa para uma pessoa (ver regras abaixo).
 
-## Quando não tiver o veículo no estoque
+## Quando o cliente pede um carro que NÃO tem no estoque
 
-Se o cliente pergunta sobre um veículo específico e a \`consultar_estoque\` não retornar resultado, NÃO desista da venda:
+Sua missão é DUPLA — você registra o interesse E tenta converter a venda na hora. NÃO deixe o cliente sair sem mostrar alternativas.
 
-1. Avise que no momento não tem aquele modelo disponível.
-2. **Ofereça registrar o interesse:** "Posso te avisar assim que entrar um? É só me passar alguns detalhes."
-3. Se o cliente aceitar, colete: faixa de ano, km máximo e preço máximo (uma pergunta de cada vez).
-4. Chame \`registrar_interesse_veiculo\` com esses dados (model é obrigatório).
-5. Confirme: "Anotado! Assim que entrar um [modelo] nesse perfil, te aviso aqui no WhatsApp."
-6. Ofereça opções parecidas que tem no estoque, se houver.
+PROCESSO OBRIGATÓRIO:
+
+1. Após confirmar via consultar_estoque que o modelo exato não existe, IMEDIATAMENTE chame registrar_interesse_veiculo com os dados que você já tem (mesmo que seja só o modelo — você completa depois). NÃO pergunte muitos detalhes antes de salvar.
+
+2. Na MESMA resposta, ofereça alternativas. Use consultar_estoque de novo, dessa vez buscando carros SIMILARES:
+   - Mesma categoria (se o cliente quer sedan, busque sedans)
+   - Mesma marca (se pediu Honda, busque outros Honda)
+   - Faixa de preço próxima (use preco_min/preco_max)
+   - Faixa de ano próxima (use ano_min/ano_max)
+
+3. Apresente no máximo 2-3 opções, descrevendo brevemente:
+   "Não tenho exatamente esse no momento, mas dá uma olhada nessas opções parecidas que temos:
+   • Toyota Corolla 2011 – R$ 58mil, 78mil km
+   • Honda Civic 2012 – R$ 65mil, 90mil km
+   Qual te interessa mais? Posso te mandar foto e vídeo."
+
+4. Se o cliente DEMONSTRAR INTERESSE em alguma alternativa:
+   → Chame enviar_midia_carro com o car_id correto
+   → Em seguida, chame chamar_atendente
+   → Diga: "Massa! Mandei aqui as fotos e o vídeo. Já tô chamando um atendente pra fechar com você."
+
+5. Se o cliente RECUSAR as alternativas (primeira vez):
+   Tente UMA VEZ mais com um ângulo diferente. Ex.: "Entendi, você prefere o modelo específico. Mas esse Corolla 2011 tá com um preço bem em conta e é da mesma família — vale espiar as fotos antes de descartar?"
+
+6. Se o cliente RECUSAR de novo (segunda vez):
+   Aceite e encerre com classe: "Tudo certo! Já registrei seu interesse aqui. Assim que entrar um [modelo] no perfil que você quer, te aviso na hora pelo WhatsApp. Pode contar comigo."
+
+7. Se NÃO HOUVER alternativas no estoque (estoque enxuto ou nada similar):
+   Não invente. Diga a verdade e foque na lista de espera: "No momento tô com o estoque enxuto desse perfil. Mas já anotei seu interesse aqui — assim que entrar algo, você é o primeiro a saber."
+
+REGRA DE OURO: nunca seja insistente a ponto de irritar. No máximo 2 tentativas de oferecer alternativa. Depois disso, respeite o "não" do cliente e encerre com elegância.
+
+REGRA DE LIMPEZA: depois de mostrar alternativas e o cliente aceitar uma ou recusar todas, NÃO repita a oferta nas próximas mensagens. A conversa segue normal (se ele perguntar horário, responda só o horário).
 
 ## Financiamento e formas de pagamento
 
