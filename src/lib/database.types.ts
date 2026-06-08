@@ -136,6 +136,88 @@ export interface Database {
         Relationships: []
       }
 
+      vehicle_interests: {
+        Row: {
+          id: string
+          user_id: string
+          lead_id: string | null
+          conversation_id: string | null
+          customer_phone: string
+          customer_name: string | null
+          brand: string | null
+          model: string | null
+          year_min: number | null
+          year_max: number | null
+          km_max: number | null
+          price_min: number | null
+          price_max: number | null
+          vehicle_type: string | null
+          fuel: string | null
+          transmission: string | null
+          color: string | null
+          notes: string | null
+          status: 'active' | 'matched' | 'notified' | 'converted' | 'dismissed' | 'expired'
+          matches_count: number
+          notification_count: number
+          last_notified_at: string | null
+          created_at: string
+          updated_at: string
+          expires_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          lead_id?: string | null
+          conversation_id?: string | null
+          customer_phone: string
+          customer_name?: string | null
+          brand?: string | null
+          model?: string | null
+          year_min?: number | null
+          year_max?: number | null
+          km_max?: number | null
+          price_min?: number | null
+          price_max?: number | null
+          vehicle_type?: string | null
+          fuel?: string | null
+          transmission?: string | null
+          color?: string | null
+          notes?: string | null
+          status?: 'active' | 'matched' | 'notified' | 'converted' | 'dismissed' | 'expired'
+          matches_count?: number
+          notification_count?: number
+          last_notified_at?: string | null
+          created_at?: string
+          updated_at?: string
+          expires_at?: string | null
+        }
+        Update: {
+          lead_id?: string | null
+          conversation_id?: string | null
+          customer_phone?: string
+          customer_name?: string | null
+          brand?: string | null
+          model?: string | null
+          year_min?: number | null
+          year_max?: number | null
+          km_max?: number | null
+          price_min?: number | null
+          price_max?: number | null
+          vehicle_type?: string | null
+          fuel?: string | null
+          transmission?: string | null
+          color?: string | null
+          notes?: string | null
+          status?: 'active' | 'matched' | 'notified' | 'converted' | 'dismissed' | 'expired'
+          matches_count?: number
+          notification_count?: number
+          last_notified_at?: string | null
+          updated_at?: string
+          expires_at?: string | null
+        }
+        Relationships: []
+      }
+
       leads: {
         Row: {
           id: string

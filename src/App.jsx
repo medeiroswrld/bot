@@ -3,7 +3,7 @@ import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, CarFront, Users, Calendar, Settings,
   Bell, LogOut, ShoppingCart, Loader2, MessageCircle, Bot,
-  Sun, Moon,
+  Sun, Moon, Bookmark,
 } from 'lucide-react';
 import './App.css';
 
@@ -18,6 +18,7 @@ const SettingsView = lazy(() => import('./views/Settings.jsx'));
 const Login        = lazy(() => import('./views/Login.jsx'));
 const Conversations = lazy(() => import('./views/Conversations.tsx'));
 const BotSettings  = lazy(() => import('./views/BotSettings.jsx'));
+const WaitingList  = lazy(() => import('./views/WaitingList.jsx'));
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
@@ -28,13 +29,14 @@ const NAV_ITEMS = [
   { name: 'Leads',         icon: <Users size={18} />,           path: '/leads' },
   { name: 'Agenda',        icon: <Calendar size={18} />,        path: '/agenda' },
   { name: 'Conversas',     icon: <MessageCircle size={18} />,   path: '/conversas' },
+  { name: 'Lista de Espera', icon: <Bookmark size={18} />,      path: '/lista-de-espera' },
   { name: 'Assistente',    icon: <Bot size={18} />,             path: '/assistente' },
   { name: 'Configurações', icon: <Settings size={18} />,        path: '/configuracoes' },
 ];
 
 const Sidebar = () => {
   const location = useLocation();
-  const { logout } = useAppContext();
+  const { logout, matchedCount } = useAppContext();
 
   const [isDark, setIsDark] = useState(
     () => document.documentElement.classList.contains('dark'),
@@ -61,18 +63,35 @@ const Sidebar = () => {
       {/* Navigation */}
       <nav className="sidebar-nav">
         <ul>
-          {NAV_ITEMS.map((item) => (
-            <li key={item.name}>
-              <Link
-                to={item.path}
-                className={`sidebar-nav-item${isActive(item.path) ? ' active' : ''}`}
-                data-tooltip={item.name}
-              >
-                <span className="sidebar-nav-icon">{item.icon}</span>
-                <span className="sidebar-label">{item.name}</span>
-              </Link>
-            </li>
-          ))}
+          {NAV_ITEMS.map((item) => {
+            const showBadge = item.path === '/lista-de-espera' && matchedCount > 0;
+            return (
+              <li key={item.name}>
+                <Link
+                  to={item.path}
+                  className={`sidebar-nav-item${isActive(item.path) ? ' active' : ''}`}
+                  data-tooltip={item.name}
+                >
+                  <span className="sidebar-nav-icon" style={{ position: 'relative' }}>
+                    {item.icon}
+                    {showBadge && (
+                      <span style={{
+                        position: 'absolute', top: -6, right: -8,
+                        minWidth: 16, height: 16, padding: '0 4px',
+                        borderRadius: 8, background: '#f59e0b', color: '#fff',
+                        fontSize: '0.62rem', fontWeight: 700,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        lineHeight: 1,
+                      }}>
+                        {matchedCount}
+                      </span>
+                    )}
+                  </span>
+                  <span className="sidebar-label">{item.name}</span>
+                </Link>
+              </li>
+            );
+          })}
         </ul>
       </nav>
 
@@ -159,6 +178,7 @@ const AuthenticatedApp = () => {
               <Route path="/leads"         element={<Leads />} />
               <Route path="/agenda"        element={<Agenda />} />
               <Route path="/conversas"     element={<Conversations />} />
+              <Route path="/lista-de-espera" element={<WaitingList />} />
               <Route path="/assistente"    element={<BotSettings />} />
               <Route path="/configuracoes" element={<SettingsView />} />
             </Routes>

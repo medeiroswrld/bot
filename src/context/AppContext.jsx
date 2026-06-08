@@ -68,6 +68,7 @@ export const AppProvider = ({ children }) => {
   const [leads, setLeads] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [companySettings, setCompanySettings] = useState(null);
+  const [vehicleInterests, setVehicleInterests] = useState([]);
 
   const [toasts, setToasts] = useState([]);
 
@@ -309,6 +310,24 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
+  // ========== Fetch Vehicle Interests (Lista de Espera) ==========
+  const fetchVehicleInterests = useCallback(async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('vehicle_interests')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error('[INTERESTS] Erro ao carregar:', error);
+        return;
+      }
+      setVehicleInterests(data ?? []);
+    } catch (err) {
+      console.error('[INTERESTS] Erro inesperado:', err);
+    }
+  }, []);
+
   // ========== Fetch Company Settings from Supabase ==========
   const fetchCompanySettings = useCallback(async (userId) => {
     try {
@@ -372,6 +391,7 @@ export const AppProvider = ({ children }) => {
               await fetchLeads(newSession.user.id);
               await fetchAppointments(newSession.user.id);
               await fetchCompanySettings(newSession.user.id);
+              await fetchVehicleInterests(newSession.user.id);
             } catch (err) {
               console.error('[AUTH] Erro ao carregar dados iniciais:', err);
             }
@@ -391,6 +411,7 @@ export const AppProvider = ({ children }) => {
               await fetchLeads(newSession.user.id);
               await fetchAppointments(newSession.user.id);
               await fetchCompanySettings(newSession.user.id);
+              await fetchVehicleInterests(newSession.user.id);
             } catch (err) {
               console.error('[AUTH] Erro ao carregar dados pós-login:', err);
             }
@@ -407,6 +428,7 @@ export const AppProvider = ({ children }) => {
           setLeads([]);
           setAppointments([]);
           setCompanySettings(null);
+          setVehicleInterests([]);
           setData(EMPTY_DATA);
           profileFetchedRef.current = false;
           if (mounted) setIsLoading(false);
@@ -424,7 +446,7 @@ export const AppProvider = ({ children }) => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [fetchProfile, fetchInventory, fetchAppointments, fetchCompanySettings]);
+  }, [fetchProfile, fetchInventory, fetchAppointments, fetchCompanySettings, fetchVehicleInterests]);
 
   // ========== Auth Actions (Supabase) ==========
   const login = async (email, password) => {
@@ -662,8 +684,10 @@ export const AppProvider = ({ children }) => {
       // Chama a sincronização das imagens
       const finalImageUrls = await syncCarImages(newCar.id, car.images || []);
 
-      setInventory(prev => [{ ...newCar, images: finalImageUrls, km: newCar.mileage, status: 'disponivel' }, ...prev]);
+      const savedCar = { ...newCar, images: finalImageUrls, km: newCar.mileage, status: 'disponivel' };
+      setInventory(prev => [savedCar, ...prev]);
       addToast('Veículo adicionado ao estoque com sucesso.', 'success');
+      return savedCar;
     } catch (error) {
       console.error('[INVENTORY] Erro ao adicionar:', error);
       addToast('Erro ao adicionar veículo.', 'error');
@@ -707,8 +731,10 @@ export const AppProvider = ({ children }) => {
 
       const finalImageUrls = await syncCarImages(id, updates.images || []);
 
-      setInventory(prev => prev.map(c => c.id === id ? { ...updatedCar, images: finalImageUrls, km: updatedCar.mileage } : c));
+      const savedCar = { ...updatedCar, images: finalImageUrls, km: updatedCar.mileage };
+      setInventory(prev => prev.map(c => c.id === id ? savedCar : c));
       addToast('Informações do veículo atualizadas.', 'success');
+      return savedCar;
     } catch (error) {
       console.error('Erro ao atualizar', error);
       addToast('Erro ao atualizar veículo.', 'error');
@@ -775,6 +801,39 @@ export const AppProvider = ({ children }) => {
       console.error('Erro ao vender', error);
       addToast('Erro ao vender veículo.', 'error');
     }
+  };
+
+  // ========== Actions - Lista de Espera (vehicle_interests) ==========
+  const refreshVehicleInterests = useCallback(async () => {
+    if (user?.id) await fetchVehicleInterests(user.id);
+  }, [user?.id, fetchVehicleInterests]);
+
+  const updateInterestStatus = async (interestId, newStatus) => {
+    const { error } = await supabase
+      .from('vehicle_interests')
+      .update({ status: newStatus })
+      .eq('id', interestId);
+    if (error) {
+      console.error('[INTERESTS] Erro ao atualizar status:', error);
+      addToast('Erro ao atualizar interesse.', 'error');
+      return false;
+    }
+    setVehicleInterests(prev => prev.map(i => i.id === interestId ? { ...i, status: newStatus } : i));
+    return true;
+  };
+
+  const deleteInterest = async (interestId) => {
+    const { error } = await supabase
+      .from('vehicle_interests')
+      .delete()
+      .eq('id', interestId);
+    if (error) {
+      console.error('[INTERESTS] Erro ao excluir:', error);
+      addToast('Erro ao excluir interesse.', 'error');
+      return false;
+    }
+    setVehicleInterests(prev => prev.filter(i => i.id !== interestId));
+    return true;
   };
 
   // ========== Actions - Leads (Supabase) ==========
@@ -1128,12 +1187,16 @@ export const AppProvider = ({ children }) => {
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'appointments', filter: `user_id=eq.${userId}` }, (payload) => {
         setAppointments(prev => prev.filter(a => a.id !== payload.old.id));
       })
+      // Lista de espera: qualquer mudança refaz o fetch (mantém badge e página em dia)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_interests', filter: `user_id=eq.${userId}` }, () => {
+        fetchVehicleInterests(userId);
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user?.id, fetchLeads]);
+  }, [user?.id, fetchLeads, fetchVehicleInterests]);
 
   // ========== Context Value ==========
   const value = {
@@ -1187,6 +1250,13 @@ export const AppProvider = ({ children }) => {
     updateCompany,
     updateAgendaConfig,
     updateProfile,
+
+    // Lista de Espera (vehicle_interests)
+    vehicleInterests,
+    matchedCount: vehicleInterests.filter(i => i.status === 'matched').length,
+    refreshVehicleInterests,
+    updateInterestStatus,
+    deleteInterest,
   };
 
   return (

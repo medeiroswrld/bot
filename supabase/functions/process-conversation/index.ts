@@ -197,6 +197,34 @@ const TOOLS = [
       required: ['car_id'],
     },
   },
+  {
+    name: 'registrar_interesse_veiculo',
+    description:
+      'Registra que o cliente está procurando um veículo específico que NÃO está disponível no estoque atual (lista de espera). ' +
+      'QUANDO USAR: o cliente perguntou por um modelo específico, você buscou em consultar_estoque e não encontrou, e o cliente quer ser avisado quando entrar. ' +
+      'QUANDO NÃO USAR: pergunta genérica ("vocês têm carros?") ou cliente só explorando sem dizer o que quer. ' +
+      'ANTES de chamar: (1) confirme via consultar_estoque que realmente não tem; (2) pergunte os detalhes (faixa de ano, km máximo, preço máximo); (3) confirme que o cliente quer ser avisado. ' +
+      'Depois de chamar, confirme: "Anotado! Assim que entrar um [modelo] nesse perfil, te aviso aqui pelo WhatsApp." ' +
+      'Retorna { success: true, action, message } em sucesso ou { success: false, error } em falha.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        brand:        { type: 'string',  description: 'Marca do veículo (ex: Honda, Toyota, VW)' },
+        model:        { type: 'string',  description: 'Modelo (ex: Civic, Corolla, Onix). OBRIGATÓRIO.' },
+        year_min:     { type: 'integer', description: 'Ano mínimo aceito' },
+        year_max:     { type: 'integer', description: 'Ano máximo aceito' },
+        km_max:       { type: 'integer', description: 'KM máximo aceito (ex: 90000 para 90 mil km)' },
+        price_min:    { type: 'number',  description: 'Preço mínimo aceito em R$' },
+        price_max:    { type: 'number',  description: 'Preço máximo aceito em R$' },
+        vehicle_type: { type: 'string',  description: 'Tipo: carro, moto, caminhonete' },
+        fuel:         { type: 'string',  description: 'Combustível: flex, gasolina, diesel' },
+        transmission: { type: 'string',  description: 'Câmbio: manual ou automatico' },
+        color:        { type: 'string',  description: 'Cor desejada' },
+        notes:        { type: 'string',  description: 'Observações adicionais do cliente' },
+      },
+      required: ['model'],
+    },
+  },
 ]
 
 // ─── execução das ferramentas ─────────────────────────────────────────────────
@@ -645,6 +673,90 @@ async function executeTool(
     };
   }
 
+  if (name === 'registrar_interesse_veiculo') {
+    const model = String(input.model ?? '').trim();
+    console.log('[registrar_interesse_veiculo] params:', JSON.stringify(input));
+    console.log('[registrar_interesse_veiculo] ctx:', { userId, customerPhone, conversationId });
+
+    if (!model) return { success: false, error: 'Modelo não informado.' };
+
+    // Busca o lead do cliente (por telefone) para vincular e pegar o nome
+    const { data: lead } = await supabase
+      .from('leads')
+      .select('id, name')
+      .eq('user_id', userId)
+      .eq('phone', customerPhone)
+      .maybeSingle();
+
+    const leadId = lead?.id ?? null;
+    const nomeCliente = lead?.name ?? customerName ?? null;
+
+    const num = (v: unknown) => (v === undefined || v === null || v === '' ? null : Number(v));
+    const str = (v: unknown) => (v === undefined || v === null || v === '' ? null : String(v));
+
+    const fields = {
+      brand:        str(input.brand),
+      model,
+      year_min:     num(input.year_min),
+      year_max:     num(input.year_max),
+      km_max:       num(input.km_max),
+      price_min:    num(input.price_min),
+      price_max:    num(input.price_max),
+      vehicle_type: str(input.vehicle_type),
+      fuel:         str(input.fuel),
+      transmission: str(input.transmission),
+      color:        str(input.color),
+      notes:        str(input.notes),
+      customer_name: nomeCliente,
+    };
+
+    // Anti-duplicação: já existe interesse ativo desse cliente para esse modelo?
+    const { data: existing } = await supabase
+      .from('vehicle_interests')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('customer_phone', customerPhone)
+      .ilike('model', model)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (existing) {
+      const { error } = await supabase
+        .from('vehicle_interests')
+        .update(fields)
+        .eq('id', existing.id);
+      if (error) {
+        console.error('[registrar_interesse_veiculo] erro update:', JSON.stringify(error));
+        return { success: false, error: 'Não consegui salvar seu interesse, vou chamar um atendente.' };
+      }
+      console.log('[registrar_interesse_veiculo] atualizado:', existing.id);
+      return { success: true, action: 'updated', message: `Interesse atualizado para ${model}.` };
+    }
+
+    const { data: created, error } = await supabase
+      .from('vehicle_interests')
+      .insert({
+        user_id: userId,
+        lead_id: leadId,
+        conversation_id: conversationId,
+        customer_phone: customerPhone,
+        status: 'active',
+        ...fields,
+      })
+      .select('id')
+      .single();
+
+    console.log('[registrar_interesse_veiculo] resultado:', JSON.stringify(created ?? null), 'erro:', error ? JSON.stringify(error) : 'nenhum');
+
+    if (error || !created) {
+      console.error('[registrar_interesse_veiculo] erro insert:', JSON.stringify(error));
+      return { success: false, error: 'Falha ao salvar interesse no banco' };
+    }
+
+    const anoInfo = fields.year_min ? ` ${fields.year_min}-${fields.year_max ?? fields.year_min}` : '';
+    return { success: true, action: 'created', message: `Interesse registrado: ${model}${anoInfo}.` };
+  }
+
   return { erro: `Ferramenta desconhecida: ${name}` };
 }
 
@@ -726,8 +838,20 @@ Seu objetivo é entender o que o cliente procura, mostrar as opções que a conc
 - **agendar_visita** — quando o cliente confirmar que quer agendar. Confirme os dados (nome, dia, horário, carro) antes de agendar de fato. **IMPORTANTE: só diga que a visita foi agendada se a ferramenta retornar \`sucesso: true\`. Se retornar \`sucesso: false\`, NUNCA diga ao cliente que o agendamento foi feito — avise que houve um problema e chame um atendente (chamar_atendente).** Sempre verifique a quantidade máxima de agendamentos por horário antes de oferecer alternativa: use ver_horarios_disponiveis e ofereça apenas horários da lista \`horarios_livres\`.
 - **salvar_nome_cliente** — assim que o cliente informar o nome.
 - **registrar_interesse** — quando o cliente demonstrar interesse de compra ou pedir contato.
+- **registrar_interesse_veiculo** — quando o cliente procura um modelo específico que NÃO está no estoque e quer ser avisado quando entrar (lista de espera). Veja a seção "Quando não tiver o veículo no estoque".
 - **coletar_dados_financiamento** — quando o cliente quiser simular financiamento (ver regras abaixo).
 - **chamar_atendente** — para passar a conversa para uma pessoa (ver regras abaixo).
+
+## Quando não tiver o veículo no estoque
+
+Se o cliente pergunta sobre um veículo específico e a \`consultar_estoque\` não retornar resultado, NÃO desista da venda:
+
+1. Avise que no momento não tem aquele modelo disponível.
+2. **Ofereça registrar o interesse:** "Posso te avisar assim que entrar um? É só me passar alguns detalhes."
+3. Se o cliente aceitar, colete: faixa de ano, km máximo e preço máximo (uma pergunta de cada vez).
+4. Chame \`registrar_interesse_veiculo\` com esses dados (model é obrigatório).
+5. Confirme: "Anotado! Assim que entrar um [modelo] nesse perfil, te aviso aqui no WhatsApp."
+6. Ofereça opções parecidas que tem no estoque, se houver.
 
 ## Financiamento e formas de pagamento
 

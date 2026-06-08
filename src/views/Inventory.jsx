@@ -5,6 +5,8 @@ import {
     Video, Loader2
 } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
+import { supabase } from '../lib/supabase.js';
+import MatchFoundModal from './MatchFoundModal.jsx';
 
 const CarPlaceholder = () => (
     <div className="car-placeholder">
@@ -446,6 +448,7 @@ const Inventory = () => {
     const [sellCarObj, setSellCarObj] = useState(null);
     const [viewCar, setViewCar] = useState(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+    const [matchModalData, setMatchModalData] = useState(null);
 
     const filtered = inventory.filter(c => {
         const matchSearch = `${c.brand} ${c.model} ${c.version} ${c.year}`.toLowerCase().includes(search.toLowerCase());
@@ -453,8 +456,22 @@ const Inventory = () => {
         return matchSearch && matchStatus;
     });
 
-    const handleAddCar = (carData) => addInventoryCar(carData);
-    const handleEditCar = (carData) => updateInventoryCar(editCar.id, carData);
+    // Após salvar um carro, busca interesses na lista de espera que batem
+    const checkMatches = async (car) => {
+        if (!car?.id) return;
+        try {
+            const { data, error } = await supabase.functions.invoke('match-interests-for-car', {
+                body: { car_id: car.id },
+            });
+            if (error) { console.error('[Inventory] match error:', error); return; }
+            if (data?.matches_count > 0) setMatchModalData(data);
+        } catch (e) {
+            console.error('[Inventory] match exception:', e);
+        }
+    };
+
+    const handleAddCar = async (carData) => { const car = await addInventoryCar(carData); await checkMatches(car); };
+    const handleEditCar = async (carData) => { const car = await updateInventoryCar(editCar.id, carData); await checkMatches(car); };
     const handleSell = (carId, price, date, seller) => { sellCar(carId, price, date, seller); setSellCarObj(null); };
     const handleDelete = (carId) => setConfirmDeleteId(carId);
     const confirmDelete = () => { removeInventoryCar(confirmDeleteId); setConfirmDeleteId(null); };
@@ -549,6 +566,9 @@ const Inventory = () => {
                     onConfirm={confirmDelete}
                     onCancel={() => setConfirmDeleteId(null)}
                 />
+            )}
+            {matchModalData && (
+                <MatchFoundModal data={matchModalData} onClose={() => setMatchModalData(null)} />
             )}
         </div>
     );
