@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
-import { sendMessage, sendImage } from '../_shared/whatsapp.ts';
+import { sendMessage, sendImage, sendVideo } from '../_shared/whatsapp.ts';
 
 // ─── tipos locais ─────────────────────────────────────────────────────────────
 
@@ -186,9 +186,9 @@ const TOOLS = [
     },
   },
   {
-    name: 'enviar_foto_carro',
+    name: 'enviar_midia_carro',
     description:
-      'Envia a foto de um carro pelo WhatsApp. Use quando o cliente aceitar receber uma foto de um veículo específico do estoque. O parâmetro car_id DEVE ser EXATAMENTE o valor do campo "id" retornado pela ferramenta consultar_estoque para aquele veículo específico. Nunca invente um ID. Nunca use ID parcial, truncado ou aproximado. Se não tiver certeza do id exato, chame consultar_estoque novamente.',
+      'Envia a foto de especificações + o vídeo de um veículo pelo WhatsApp (foto primeiro, depois o vídeo). Use quando o cliente perguntar sobre um veículo específico (pedir foto, pedir vídeo, pedir pra ver, ou demonstrar interesse claro). O parâmetro car_id DEVE ser EXATAMENTE o valor do campo "id" retornado pela ferramenta consultar_estoque. Nunca invente um ID, nunca use ID parcial. Se não tiver certeza do id exato, chame consultar_estoque novamente. A ferramenta retorna { success: true, sent: [...] } em caso de sucesso ou { success: false, error: "..." } em caso de falha.',
     input_schema: {
       type: 'object',
       properties: {
@@ -557,44 +557,92 @@ async function executeTool(
     return { sucesso: true, mensagem: 'Atendente chamado. O cliente será notificado.' };
   }
 
-  if (name === 'enviar_foto_carro') {
+  if (name === 'enviar_midia_carro') {
     const carId = String(input.car_id ?? '');
-    console.log('[FOTO] car_id recebido:', carId);
-    console.log('[FOTO] user_id:', userId);
+    console.log('[enviar_midia_carro] car_id:', carId, 'user_id:', userId);
 
-    if (!carId) return { sucesso: false, mensagem: 'ID do carro não fornecido.' };
+    if (!carId) return { success: false, error: 'ID do carro não fornecido' };
 
-    const { data: imgs } = await supabase
-      .from('car_images')
-      .select('image_url')
-      .eq('car_id', carId)
+    // 1. Busca o carro (só do dono do bot)
+    const { data: car, error: carErr } = await supabase
+      .from('cars')
+      .select('id, brand, model, specs_image_url, video_url, user_id')
+      .eq('id', carId)
       .eq('user_id', userId)
-      .order('sort_order', { ascending: true });
+      .single();
 
-    const imageUrls = imgs?.map((i: { image_url: string }) => i.image_url) ?? [];
-    console.log('[FOTO] imagens encontradas:', imageUrls.length, imageUrls);
+    console.log('[enviar_midia_carro] car:', JSON.stringify(car ?? null), 'error:', carErr ? JSON.stringify(carErr) : 'nenhum');
 
-    if (!imageUrls.length) {
-      return { sucesso: false, mensagem: 'Não há foto cadastrada para este veículo.' };
+    if (carErr || !car) {
+      return { success: false, error: 'Veículo não encontrado' };
     }
 
-    let sentCount = 0;
-    for (const img of imgs!) {
-      const imageUrl = String(img.image_url);
-      const sent = await sendImage(customerPhone, imageUrl, phoneNumberId || undefined);
-      if (sent) {
-        sentCount++;
-        await supabase.from('messages').insert({
-          conversation_id: conversationId,
-          role: 'bot',
-          content: `[foto] ${imageUrl}`,
-        });
+    const carName = [car.brand, car.model].filter(Boolean).join(' ') || 'veículo';
+    let specsImageUrl: string | null = car.specs_image_url;
+    const videoUrl: string | null = car.video_url;
+
+    // 2. Fallback: sem specs_image_url, usa a primeira foto de car_images
+    if (!specsImageUrl) {
+      const { data: firstImage } = await supabase
+        .from('car_images')
+        .select('image_url')
+        .eq('car_id', carId)
+        .eq('user_id', userId)
+        .order('sort_order', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (firstImage?.image_url) specsImageUrl = String(firstImage.image_url);
+    }
+
+    // 3. Sem nada cadastrado
+    if (!specsImageUrl && !videoUrl) {
+      return { success: false, error: 'Este veículo ainda não tem fotos ou vídeo cadastrados' };
+    }
+
+    const sentItems: string[] = [];
+    const pid = phoneNumberId || undefined;
+
+    // 4. Foto primeiro
+    if (specsImageUrl) {
+      try {
+        const ok = await sendImage(customerPhone, specsImageUrl, pid);
+        if (ok) {
+          sentItems.push('foto');
+          await supabase.from('messages').insert({
+            conversation_id: conversationId, role: 'bot', content: `[foto] ${specsImageUrl}`,
+          });
+          // Delay entre foto e vídeo para chegarem em ordem
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      } catch (e) {
+        console.error('[enviar_midia_carro] erro foto:', e);
       }
     }
 
-    return sentCount > 0
-      ? { sucesso: true, fotos_enviadas: sentCount, mensagem: `${sentCount} foto${sentCount > 1 ? 's' : ''} enviada${sentCount > 1 ? 's' : ''} com sucesso.` }
-      : { sucesso: false, mensagem: 'Erro ao enviar as fotos. Tente novamente ou passe para um atendente.' };
+    // 5. Vídeo depois
+    if (videoUrl) {
+      try {
+        const ok = await sendVideo(customerPhone, videoUrl, pid);
+        if (ok) {
+          sentItems.push('vídeo');
+          await supabase.from('messages').insert({
+            conversation_id: conversationId, role: 'bot', content: `[vídeo] ${videoUrl}`,
+          });
+        }
+      } catch (e) {
+        console.error('[enviar_midia_carro] erro vídeo:', e);
+      }
+    }
+
+    if (sentItems.length === 0) {
+      return { success: false, error: 'Falha ao enviar as mídias' };
+    }
+
+    return {
+      success: true,
+      sent: sentItems,
+      message: `Enviei ${sentItems.join(' e ')} do ${carName}.`,
+    };
   }
 
   return { erro: `Ferramenta desconhecida: ${name}` };
@@ -673,7 +721,7 @@ Seu objetivo é entender o que o cliente procura, mostrar as opções que a conc
 ## Ferramentas que você pode usar
 
 - **consultar_estoque** — quando o cliente perguntar sobre veículos (carros ou motos). O estoque pode conter carros e motos — diferencie corretamente ao apresentar cada veículo. Sempre baseie suas respostas no que essa ferramenta retornar.
-- **enviar_foto_carro** — quando o cliente demonstrar interesse específico em um carro e quiser ver uma foto. Ofereça: "Quer que eu te mande uma foto dele?" e, se ele aceitar, use esta ferramenta com o id EXATO do carro retornado por consultar_estoque. Nunca invente um car_id, nunca use ID parcial.
+- **enviar_midia_carro** — envia a foto de especificações + o vídeo do veículo para o cliente. Use sempre que o cliente perguntar sobre um veículo específico (pedir foto, pedir pra ver, pedir vídeo, ou demonstrar interesse claro). Ofereça: "Quer que eu te mande a foto e o vídeo dele?" e, se ele aceitar, use esta ferramenta com o id EXATO do carro retornado por consultar_estoque. Nunca invente um car_id, nunca use ID parcial. A ferramenta retorna \`success: true\` com a lista \`sent\` em sucesso, ou \`success: false\` com \`error\` em falha. **Se retornar \`success: false\`, NUNCA diga ao cliente que enviou as mídias — avise que houve um problema técnico e ofereça chamar um atendente.**
 - **ver_horarios_disponiveis** — quando o cliente quiser saber quando pode visitar. Se retornar \`closed: true\`, informe ao cliente o motivo (campo \`reason\`) e ofereça outra data: "Infelizmente no dia X estaremos fechados por causa de {reason}. Posso te oferecer outro dia?"
 - **agendar_visita** — quando o cliente confirmar que quer agendar. Confirme os dados (nome, dia, horário, carro) antes de agendar de fato. **IMPORTANTE: só diga que a visita foi agendada se a ferramenta retornar \`sucesso: true\`. Se retornar \`sucesso: false\`, NUNCA diga ao cliente que o agendamento foi feito — avise que houve um problema e chame um atendente (chamar_atendente).** Sempre verifique a quantidade máxima de agendamentos por horário antes de oferecer alternativa: use ver_horarios_disponiveis e ofereça apenas horários da lista \`horarios_livres\`.
 - **salvar_nome_cliente** — assim que o cliente informar o nome.

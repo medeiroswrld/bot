@@ -58,6 +58,8 @@ export interface Database {
           sold_at: string | null
           sold_by: string | null
           description: string | null
+          specs_image_url: string | null
+          video_url: string | null
           created_at: string
           updated_at: string | null
         }
@@ -79,6 +81,8 @@ export interface Database {
           sold_at?: string | null
           sold_by?: string | null
           description?: string | null
+          specs_image_url?: string | null
+          video_url?: string | null
           created_at?: string
           updated_at?: string | null
         }
@@ -98,6 +102,8 @@ export interface Database {
           sold_at?: string | null
           sold_by?: string | null
           description?: string | null
+          specs_image_url?: string | null
+          video_url?: string | null
           updated_at?: string | null
         }
         Relationships: []

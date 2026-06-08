@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
-    X, Gauge, Tag, CheckCircle2, ShoppingCart, Package, Camera
+    X, Gauge, Tag, CheckCircle2, ShoppingCart, Package, Camera,
+    Video, Loader2
 } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 
@@ -21,7 +22,7 @@ const StatusBadge = ({ status }) => {
     return <span className="inv-status-badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>;
 };
 
-const EMPTY_CAR = { brand: '', model: '', version: '', year: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', description: '', images: [] };
+const EMPTY_CAR = { brand: '', model: '', version: '', year: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', description: '', images: [], specsImage: null, video: null };
 
 // Parse preço no formato brasileiro ("198.000" ou "198.000,00" ou "198000") → número
 const parsePriceBR = (value) => {
@@ -38,8 +39,11 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
         km:    car.km    != null ? Number(car.km).toLocaleString('pt-BR',    { maximumFractionDigits: 0 }) : '',
         vehicle_type: car.vehicle_type || 'carro',
         images: (car.images || (car.image ? [car.image] : [])).map(img => typeof img === 'string' ? { preview: img, file: null } : img),
+        specsImage: car.specs_image_url ? { url: car.specs_image_url } : null,
+        video: car.video_url ? { url: car.video_url } : null,
     } : { ...EMPTY_CAR });
     const [errors, setErrors] = useState({});
+    const [saving, setSaving] = useState(false);
 
     const handleChange = (field, value) => {
         setForm(prev => ({ ...prev, [field]: value }));
@@ -79,7 +83,30 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
         }));
     };
 
-    const handleSubmit = () => {
+    // ── Foto de especificações (JPG/PNG/WEBP até 5MB) ──────────────────────────
+    const SPECS_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    const handleSpecsUpload = (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        if (!SPECS_TYPES.includes(file.type)) { addToast('Formato inválido. Use JPEG, PNG ou WEBP.', 'error'); return; }
+        if (file.size > 5 * 1024 * 1024) { addToast('Imagem muito grande. Máximo 5MB.', 'error'); return; }
+        setForm(prev => ({ ...prev, specsImage: { file, preview: URL.createObjectURL(file) } }));
+    };
+    const removeSpecs = () => setForm(prev => ({ ...prev, specsImage: null }));
+
+    // ── Vídeo do veículo (MP4 até 16MB) ────────────────────────────────────────
+    const handleVideoUpload = (e) => {
+        const file = e.target.files?.[0];
+        e.target.value = '';
+        if (!file) return;
+        if (file.type !== 'video/mp4') { addToast('Formato inválido. Use MP4.', 'error'); return; }
+        if (file.size > 16 * 1024 * 1024) { addToast('Vídeo muito grande. Máximo 16MB. Tente comprimir o vídeo ou reduzir a duração.', 'error'); return; }
+        setForm(prev => ({ ...prev, video: { file, preview: URL.createObjectURL(file) } }));
+    };
+    const removeVideo = () => setForm(prev => ({ ...prev, video: null }));
+
+    const handleSubmit = async () => {
         const newErrors = {};
         if (!form.brand) newErrors.brand = true;
         if (!form.model) newErrors.model = true;
@@ -91,15 +118,25 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
             addToast('Preencha os campos obrigatórios.', 'error');
             return;
         }
-        
-        onSave({
-            ...form,
-            price: parsePriceBR(form.price),
-            km:    parsePriceBR(form.km),
-            status: form.status || 'disponivel',
-            images: form.images?.length > 0 ? form.images : []
-        });
-        onClose();
+
+        setSaving(true);
+        try {
+            await onSave({
+                ...form,
+                price: parsePriceBR(form.price),
+                km:    parsePriceBR(form.km),
+                status: form.status || 'disponivel',
+                images: form.images?.length > 0 ? form.images : [],
+                specsImage: form.specsImage,
+                video: form.video,
+            });
+            onClose();
+        } catch (err) {
+            // O AppContext já exibe o toast de erro específico. Mantém o modal aberto.
+            console.error('[Inventory] erro ao salvar veículo:', err);
+        } finally {
+            setSaving(false);
+        }
     };
 
     return (
@@ -128,6 +165,60 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
                             )}
                         </div>
                         {form.images?.length === 8 && <p className="error-message" style={{ color: '#f59e0b' }}>Limite de 8 fotos atingido.</p>}
+                    </div>
+
+                    {/* ── Foto de Especificações (usada pelo bot) ──────────────────── */}
+                    <div className="form-group">
+                        <label>Foto de Especificações</label>
+                        {form.specsImage ? (
+                            <div style={{ width: 'fit-content' }}>
+                                <img
+                                    src={form.specsImage.preview || form.specsImage.url}
+                                    alt="Foto de especificações"
+                                    style={{ maxWidth: 240, maxHeight: 160, borderRadius: 8, border: '1px solid var(--border)', objectFit: 'cover', display: 'block' }}
+                                />
+                                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                                    <button type="button" className="btn-secondary" onClick={() => document.getElementById('specs-upload').click()}>Trocar foto</button>
+                                    <button type="button" className="btn-secondary" style={{ color: '#dc2626' }} onClick={removeSpecs}>Remover</button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="upload-card-btn" style={{ width: 'fit-content', padding: '1rem 1.5rem' }} onClick={() => document.getElementById('specs-upload').click()}>
+                                <ImageIcon size={22} />
+                                <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Enviar foto de specs</span>
+                            </div>
+                        )}
+                        <input id="specs-upload" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" style={{ display: 'none' }} onChange={handleSpecsUpload} />
+                        <p className="text-muted" style={{ fontSize: '0.75rem', marginTop: 6 }}>
+                            Esta é a foto que o bot vai enviar quando o cliente perguntar sobre este veículo. Use um card com as especificações (preço, ano, km, câmbio, etc.).
+                        </p>
+                    </div>
+
+                    {/* ── Vídeo do Veículo (usado pelo bot) ────────────────────────── */}
+                    <div className="form-group">
+                        <label>Vídeo do Veículo</label>
+                        {form.video ? (
+                            <div style={{ width: 'fit-content' }}>
+                                <video
+                                    src={form.video.preview || form.video.url}
+                                    controls
+                                    style={{ maxWidth: 300, maxHeight: 190, borderRadius: 8, border: '1px solid var(--border)', display: 'block', background: '#000' }}
+                                />
+                                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                                    <button type="button" className="btn-secondary" onClick={() => document.getElementById('video-upload').click()}>Trocar vídeo</button>
+                                    <button type="button" className="btn-secondary" style={{ color: '#dc2626' }} onClick={removeVideo}>Remover</button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="upload-card-btn" style={{ width: 'fit-content', padding: '1rem 1.5rem' }} onClick={() => document.getElementById('video-upload').click()}>
+                                <Video size={22} />
+                                <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Enviar vídeo MP4</span>
+                            </div>
+                        )}
+                        <input id="video-upload" type="file" accept="video/mp4" style={{ display: 'none' }} onChange={handleVideoUpload} />
+                        <p className="text-muted" style={{ fontSize: '0.75rem', marginTop: 6 }}>
+                            Vídeo curto mostrando o veículo (recomendado: até 60 segundos, máx 16MB). O bot vai enviar este vídeo junto com a foto de especificações.
+                        </p>
                     </div>
 
                     <div className="form-group">
@@ -195,9 +286,10 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
                         <div className="form-group"><label>Cor</label><input type="text" value={form.color} onChange={e => handleChange('color', e.target.value)} placeholder="Prata" /></div>
                     </div>
                     <div className="modal-footer" style={{ marginTop: '1rem' }}>
-                        <button className="btn-secondary" onClick={onClose}>Cancelar</button>
-                        <button className="btn-primary" onClick={handleSubmit}>
-                            {isEdit ? 'Salvar Alterações' : 'Registrar Veículo'}
+                        <button className="btn-secondary" onClick={onClose} disabled={saving}>Cancelar</button>
+                        <button className="btn-primary" onClick={handleSubmit} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: saving ? 0.7 : 1 }}>
+                            {saving && <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />}
+                            {saving ? 'Salvando...' : (isEdit ? 'Salvar Alterações' : 'Registrar Veículo')}
                         </button>
                     </div>
                 </div>

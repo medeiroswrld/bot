@@ -134,6 +134,56 @@ export async function sendImage(
   return true;
 }
 
+export async function sendVideo(
+  to: string,
+  videoUrl: string,
+  phoneNumberId?: string,
+  caption?: string,
+): Promise<boolean> {
+  const provider = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
+  const token    = Deno.env.get('WHATSAPP_TOKEN') ?? '';
+
+  if (!token) {
+    console.error('[WA] WHATSAPP_TOKEN não configurado');
+    return false;
+  }
+
+  if (provider !== 'cloud') {
+    console.warn('[WA] sendVideo disponível apenas para provider cloud');
+    return false;
+  }
+
+  const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
+  if (!pid) {
+    console.error('[WA Cloud] phone_number_id não fornecido para sendVideo');
+    return false;
+  }
+
+  const res = await fetch(`https://graph.facebook.com/v25.0/${pid}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'video',
+      video: { link: videoUrl, ...(caption ? { caption } : {}) },
+    }),
+  });
+
+  const result = await res.text();
+  console.log('[sendVideo] response:', res.status, result);
+
+  if (!res.ok) {
+    console.error(`[WA Cloud] Erro ao enviar vídeo para ${to}: ${res.status} ${result}`);
+    return false;
+  }
+  return true;
+}
+
 export async function sendMessage(
   to: string,
   text: string,

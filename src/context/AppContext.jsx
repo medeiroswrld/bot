@@ -596,6 +596,24 @@ export const AppProvider = ({ children }) => {
     return newRecords.sort((a, b) => a.sort_order - b.sort_order).map(r => r.image_url);
   };
 
+  // Upload de uma única mídia (foto de specs ou vídeo) → retorna URL pública.
+  // media: { url } (manter existente) | { file } (novo upload) | null (remover/vazio)
+  const uploadCarMedia = async (media, bucket) => {
+    if (!media) return null;
+    if (media.url) return media.url;            // já está na nuvem — mantém
+    if (media.file) {
+      const ext  = (media.file.name.split('.').pop() || 'bin').toLowerCase();
+      const path = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from(bucket)
+        .upload(path, media.file, { contentType: media.file.type, upsert: true });
+      if (upErr) throw upErr;
+      const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+      return data.publicUrl;
+    }
+    return null;
+  };
+
   // ========== Actions - Estoque ==========
   const addInventoryCar = async (car) => {
     console.log('[INVENTORY] addInventoryCar chamado. user.id:', user?.id, 'car:', car?.brand, car?.model);
@@ -605,6 +623,10 @@ export const AppProvider = ({ children }) => {
       return;
     }
     try {
+      // Upload das mídias do bot (foto de specs → car-images, vídeo → car-videos)
+      const specsImageUrl = await uploadCarMedia(car.specsImage, 'car-images');
+      const videoUrl      = await uploadCarMedia(car.video, 'car-videos');
+
       const insertData = {
         user_id: user.id,
         brand: car.brand,
@@ -618,6 +640,8 @@ export const AppProvider = ({ children }) => {
         color: car.color || '',
         vehicle_type: car.vehicle_type || 'carro',
         description: car.description || null,
+        specs_image_url: specsImageUrl,
+        video_url: videoUrl,
         status: 'available'
       };
       console.log('[INVENTORY] Inserindo no Supabase:', insertData);
@@ -643,6 +667,7 @@ export const AppProvider = ({ children }) => {
     } catch (error) {
       console.error('[INVENTORY] Erro ao adicionar:', error);
       addToast('Erro ao adicionar veículo.', 'error');
+      throw error; // re-lança para o modal manter-se aberto
     }
   };
 
@@ -650,7 +675,16 @@ export const AppProvider = ({ children }) => {
     if (!user?.id) return;
     try {
       const dbUpdates = { ...updates };
+      // Remove campos que não são colunas da tabela cars
       delete dbUpdates.images;
+      delete dbUpdates.image;
+      delete dbUpdates.car_images;
+      delete dbUpdates.specsImage;
+      delete dbUpdates.video;
+
+      // Resolve mídias do bot (mantém URL existente, sobe arquivo novo, ou null se removida)
+      dbUpdates.specs_image_url = await uploadCarMedia(updates.specsImage, 'car-images');
+      dbUpdates.video_url       = await uploadCarMedia(updates.video, 'car-videos');
 
       if (dbUpdates.km !== undefined) {
         dbUpdates.mileage = Number(dbUpdates.km) || 0;
@@ -678,6 +712,7 @@ export const AppProvider = ({ children }) => {
     } catch (error) {
       console.error('Erro ao atualizar', error);
       addToast('Erro ao atualizar veículo.', 'error');
+      throw error; // re-lança para o modal manter-se aberto
     }
   };
 
