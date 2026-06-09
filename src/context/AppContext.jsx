@@ -70,6 +70,7 @@ export const AppProvider = ({ children }) => {
   const [companySettings, setCompanySettings] = useState(null);
   const [vehicleInterests, setVehicleInterests] = useState([]);
   const [messageTemplates, setMessageTemplates] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
 
   const [toasts, setToasts] = useState([]);
 
@@ -344,6 +345,21 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
+  // ========== Fetch Campaigns ==========
+  const fetchCampaigns = useCallback(async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('campaigns')
+        .select('*, template:template_id(display_name, category, meta_template_name)')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+      if (error) { console.error('[CAMPAIGNS] Erro ao carregar:', error); return; }
+      setCampaigns(data ?? []);
+    } catch (err) {
+      console.error('[CAMPAIGNS] Erro inesperado:', err);
+    }
+  }, []);
+
   // ========== Fetch Company Settings from Supabase ==========
   const fetchCompanySettings = useCallback(async (userId) => {
     try {
@@ -409,6 +425,7 @@ export const AppProvider = ({ children }) => {
               await fetchCompanySettings(newSession.user.id);
               await fetchVehicleInterests(newSession.user.id);
               await fetchMessageTemplates(newSession.user.id);
+              await fetchCampaigns(newSession.user.id);
             } catch (err) {
               console.error('[AUTH] Erro ao carregar dados iniciais:', err);
             }
@@ -430,6 +447,7 @@ export const AppProvider = ({ children }) => {
               await fetchCompanySettings(newSession.user.id);
               await fetchVehicleInterests(newSession.user.id);
               await fetchMessageTemplates(newSession.user.id);
+              await fetchCampaigns(newSession.user.id);
             } catch (err) {
               console.error('[AUTH] Erro ao carregar dados pós-login:', err);
             }
@@ -448,6 +466,7 @@ export const AppProvider = ({ children }) => {
           setCompanySettings(null);
           setVehicleInterests([]);
           setMessageTemplates([]);
+          setCampaigns([]);
           setData(EMPTY_DATA);
           profileFetchedRef.current = false;
           if (mounted) setIsLoading(false);
@@ -465,7 +484,7 @@ export const AppProvider = ({ children }) => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [fetchProfile, fetchInventory, fetchAppointments, fetchCompanySettings, fetchVehicleInterests, fetchMessageTemplates]);
+  }, [fetchProfile, fetchInventory, fetchAppointments, fetchCompanySettings, fetchVehicleInterests, fetchMessageTemplates, fetchCampaigns]);
 
   // ========== Auth Actions (Supabase) ==========
   const login = async (email, password) => {
@@ -951,6 +970,73 @@ export const AppProvider = ({ children }) => {
     }
   };
 
+  // ========== Actions - Campanhas ==========
+  const refreshCampaigns = useCallback(async () => {
+    if (user?.id) await fetchCampaigns(user.id);
+  }, [user?.id, fetchCampaigns]);
+
+  const createCampaign = async (camp) => {
+    if (!user?.id) return null;
+    try {
+      const { data, error } = await supabase
+        .from('campaigns')
+        .insert({
+          user_id: user.id,
+          template_id: camp.template_id,
+          name: camp.name,
+          audience_type: camp.audience_type,
+          audience_filter: camp.audience_filter || {},
+          template_variables: camp.template_variables || {},
+          status: 'draft',
+        })
+        .select('*, template:template_id(display_name, category, meta_template_name)')
+        .single();
+      if (error) throw error;
+      setCampaigns(prev => [data, ...prev]);
+      return data;
+    } catch (error) {
+      console.error('[CAMPAIGNS] Erro ao criar:', error);
+      addToast('Erro ao criar campanha.', 'error');
+      throw error;
+    }
+  };
+
+  const deleteCampaign = async (id) => {
+    const { error } = await supabase.from('campaigns').delete().eq('id', id);
+    if (error) { console.error('[CAMPAIGNS] Erro ao excluir:', error); addToast('Erro ao excluir campanha.', 'error'); return false; }
+    setCampaigns(prev => prev.filter(c => c.id !== id));
+    return true;
+  };
+
+  // Dispara a campanha (edge function send-campaign)
+  const sendCampaign = async (id) => {
+    try {
+      addToast('Disparando campanha... isso pode levar alguns minutos.', 'info');
+      const { data, error } = await supabase.functions.invoke('send-campaign', { body: { campaign_id: id } });
+      await refreshCampaigns();
+      if (error || data?.error) {
+        addToast(`Erro ao disparar: ${data?.error || error?.message || 'desconhecido'}`, 'error');
+        return false;
+      }
+      addToast(`Campanha enviada: ${data.sent} enviada(s), ${data.failed} falha(s).`, 'success');
+      return true;
+    } catch (e) {
+      console.error('[CAMPAIGNS] send erro:', e);
+      addToast('Erro ao disparar campanha.', 'error');
+      return false;
+    }
+  };
+
+  const fetchCampaignSends = async (campaignId) => {
+    const { data, error } = await supabase
+      .from('campaign_sends')
+      .select('*')
+      .eq('campaign_id', campaignId)
+      .order('created_at', { ascending: true });
+    if (error) { console.error('[CAMPAIGNS] Erro ao carregar envios:', error); return []; }
+    return data ?? [];
+  };
+
   // ========== Actions - Leads (Supabase) ==========
   const addLead = async (leadData) => {
     if (!user?.id) return;
@@ -1310,12 +1396,16 @@ export const AppProvider = ({ children }) => {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_templates', filter: `user_id=eq.${userId}` }, () => {
         fetchMessageTemplates(userId);
       })
+      // Campanhas: status e contadores atualizam sozinhos
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'campaigns', filter: `user_id=eq.${userId}` }, () => {
+        fetchCampaigns(userId);
+      })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user?.id, fetchLeads, fetchVehicleInterests, fetchMessageTemplates]);
+  }, [user?.id, fetchLeads, fetchVehicleInterests, fetchMessageTemplates, fetchCampaigns]);
 
   // ========== Context Value ==========
   const value = {
@@ -1384,6 +1474,14 @@ export const AppProvider = ({ children }) => {
     deleteTemplate,
     submitTemplate,
     checkTemplateStatus,
+
+    // Campanhas
+    campaigns,
+    refreshCampaigns,
+    createCampaign,
+    deleteCampaign,
+    sendCampaign,
+    fetchCampaignSends,
   };
 
   return (
