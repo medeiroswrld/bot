@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     Building2, Calendar, MapPin, Phone, MessageSquare, Save, CheckCircle,
     User, Mail, ToggleLeft, ToggleRight, Plus, Trash2, CalendarOff,
-    Image as ImageIcon, Upload, RefreshCw
+    Image as ImageIcon, Upload, RefreshCw, Gift, Bell
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
@@ -28,7 +28,28 @@ const DEFAULT_BH = {
 };
 
 const Settings = () => {
-    const { company, updateCompany, profile, user } = useAppContext();
+    const { company, updateCompany, profile, user, companySettings, messageTemplates, updateNotificationSettings } = useAppContext();
+
+    // ── Notificações automáticas (aniversário / lista de espera) ──────────────
+    const approvedTemplates = (messageTemplates || []).filter(t => t.status === 'approved');
+    const [notif, setNotif] = useState({ birthday_enabled: false, birthday_template_id: '', waiting_list_template_id: '' });
+    const [savingNotif, setSavingNotif] = useState(false);
+    useEffect(() => {
+        if (companySettings) setNotif({
+            birthday_enabled: !!companySettings.birthday_enabled,
+            birthday_template_id: companySettings.birthday_template_id || '',
+            waiting_list_template_id: companySettings.waiting_list_template_id || '',
+        });
+    }, [companySettings]);
+    const saveNotif = async () => {
+        setSavingNotif(true);
+        await updateNotificationSettings({
+            birthday_enabled: notif.birthday_enabled,
+            birthday_template_id: notif.birthday_template_id || null,
+            waiting_list_template_id: notif.waiting_list_template_id || null,
+        });
+        setSavingNotif(false);
+    };
 
     // ── Perfil da empresa ─────────────────────────────────────────────────────
     const [localCompany, setLocalCompany] = useState(company);
@@ -681,6 +702,61 @@ const Settings = () => {
                             ))}
                         </div>
                     )}
+                </section>
+
+                {/* ── Notificações Automáticas ────────────────────────────── */}
+                <section className="settings-section card">
+                    <div className="section-title">
+                        <Bell size={20} />
+                        <h2>Notificações Automáticas</h2>
+                    </div>
+
+                    {approvedTemplates.length === 0 && (
+                        <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '1rem' }}>
+                            Você precisa de pelo menos um template aprovado pela Meta. Crie em <strong>Templates</strong>.
+                        </p>
+                    )}
+
+                    {/* Aniversário */}
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                            <Gift size={18} style={{ color: 'var(--primary)' }} />
+                            <strong style={{ flex: 1 }}>Mensagem de aniversário automática</strong>
+                            <button type="button" onClick={() => setNotif(p => ({ ...p, birthday_enabled: !p.birthday_enabled }))}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: notif.birthday_enabled ? '#10b981' : '#94a3b8' }}>
+                                {notif.birthday_enabled ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
+                            </button>
+                        </div>
+                        <p className="text-muted" style={{ fontSize: '0.78rem', marginBottom: 8 }}>
+                            Toda manhã (9h Brasília) o sistema verifica os aniversariantes do dia e envia a mensagem. O template precisa estar aprovado e ter 1 variável (o nome).
+                        </p>
+                        <select value={notif.birthday_template_id} onChange={e => setNotif(p => ({ ...p, birthday_template_id: e.target.value }))}
+                            style={{ width: '100%', padding: '0.65rem 1rem', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text-primary)' }}>
+                            <option value="">Selecione o template de aniversário…</option>
+                            {approvedTemplates.map(t => (
+                                <option key={t.id} value={t.id}>{t.display_name} ({(t.body_variables?.length ?? 0)} variável{(t.body_variables?.length ?? 0) !== 1 ? 'is' : ''})</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Lista de espera */}
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <strong style={{ display: 'block', marginBottom: 6 }}>Template de aviso da Lista de Espera</strong>
+                        <p className="text-muted" style={{ fontSize: '0.78rem', marginBottom: 8 }}>
+                            Usado quando você clicar "Avisar todos" na Lista de Espera ao cadastrar um carro novo. Deve ter 3 variáveis (nome, modelo procurado, descrição do carro).
+                        </p>
+                        <select value={notif.waiting_list_template_id} onChange={e => setNotif(p => ({ ...p, waiting_list_template_id: e.target.value }))}
+                            style={{ width: '100%', padding: '0.65rem 1rem', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--card-bg)', color: 'var(--text-primary)' }}>
+                            <option value="">Selecione o template de aviso…</option>
+                            {approvedTemplates.map(t => (
+                                <option key={t.id} value={t.id}>{t.display_name} ({(t.body_variables?.length ?? 0)} variáveis)</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <button className="btn-primary" onClick={saveNotif} disabled={savingNotif} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <Save size={16} /> {savingNotif ? 'Salvando...' : 'Salvar notificações'}
+                    </button>
                 </section>
             </div>
         </div>

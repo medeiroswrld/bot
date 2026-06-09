@@ -267,6 +267,7 @@ export const AppProvider = ({ children }) => {
         status: l.status,
         notes: l.notes || '',
         date: l.created_at,
+        birth_date: l.birth_date || '',
         city: 'Não informada',
         avatar: l.name.charAt(0).toUpperCase()
       }));
@@ -1112,6 +1113,7 @@ export const AppProvider = ({ children }) => {
       if (updates.email !== undefined) dbUpdates.email = updates.email;
       if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
       if (updates.status !== undefined) dbUpdates.status = updates.status;
+      if (updates.birth_date !== undefined) dbUpdates.birth_date = updates.birth_date || null;
 
       const { error } = await supabase
         .from('leads')
@@ -1328,6 +1330,27 @@ export const AppProvider = ({ children }) => {
     }
   };
 
+  // ========== Settings de notificação (aniversário / lista de espera) ==========
+  const updateNotificationSettings = async (updates) => {
+    if (!user?.id) return false;
+    try {
+      const dbUpdates = { updated_at: new Date().toISOString() };
+      if (updates.birthday_enabled !== undefined) dbUpdates.birthday_enabled = updates.birthday_enabled;
+      if (updates.birthday_template_id !== undefined) dbUpdates.birthday_template_id = updates.birthday_template_id || null;
+      if (updates.waiting_list_template_id !== undefined) dbUpdates.waiting_list_template_id = updates.waiting_list_template_id || null;
+
+      const { error } = await supabase.from('company_settings').update(dbUpdates).eq('user_id', user.id);
+      if (error) throw error;
+      setCompanySettings(prev => prev ? { ...prev, ...dbUpdates } : dbUpdates);
+      addToast('Configurações de notificação salvas.', 'success');
+      return true;
+    } catch (e) {
+      console.error('[SETTINGS] Erro ao salvar notificações:', e);
+      addToast('Erro ao salvar configurações.', 'error');
+      return false;
+    }
+  };
+
   // ========== Realtime: leads e appointments ==========
   useEffect(() => {
     if (!user?.id) return;
@@ -1344,6 +1367,7 @@ export const AppProvider = ({ children }) => {
       status: raw.status,
       notes: raw.notes || '',
       date: raw.created_at,
+      birth_date: raw.birth_date || '',
       city: 'Não informada',
       avatar: (raw.name || '?').charAt(0).toUpperCase()
     });
@@ -1482,6 +1506,10 @@ export const AppProvider = ({ children }) => {
     deleteCampaign,
     sendCampaign,
     fetchCampaignSends,
+
+    // Settings de notificação
+    companySettings,
+    updateNotificationSettings,
   };
 
   return (

@@ -28,6 +28,7 @@ const STATUS_MAP = {
 };
 
 const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
+    const { updateLead } = useAppContext();
     if (!lead) return null;
     const s = STATUS_MAP[lead.status] || STATUS_MAP.novo;
     return (
@@ -70,6 +71,17 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
                                 <option key={key} value={key}>{val.label}</option>
                             ))}
                         </select>
+                    </div>
+
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.5rem' }}>Data de aniversário</label>
+                        <input
+                            type="date"
+                            defaultValue={lead.birth_date || ''}
+                            onBlur={e => { if (e.target.value !== (lead.birth_date || '')) updateLead(lead.id, { birth_date: e.target.value }); }}
+                            style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: 12, border: '1px solid #e2e8f0', fontSize: '0.9rem', boxSizing: 'border-box' }}
+                        />
+                        <p style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>Usado pela mensagem automática de aniversário (se ativada em Configurações).</p>
                     </div>
                 </div>
                 <div className="drawer-footer">
