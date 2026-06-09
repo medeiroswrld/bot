@@ -875,6 +875,28 @@ export const AppProvider = ({ children }) => {
     return true;
   };
 
+  // Aviso automático via template (edge function notify-waiting-list-match)
+  const notifyWaitingListMatch = async (carId, interestIds) => {
+    if (!carId || !interestIds?.length) return false;
+    try {
+      addToast('Enviando avisos...', 'info');
+      const { data, error } = await supabase.functions.invoke('notify-waiting-list-match', {
+        body: { car_id: carId, interest_ids: interestIds },
+      });
+      if (error || data?.error) {
+        addToast(`Erro ao avisar: ${data?.error || error?.message || 'desconhecido'}`, 'error');
+        return false;
+      }
+      if (user?.id) await fetchVehicleInterests(user.id);
+      addToast(`${data.sent} aviso(s) enviado(s)${data.failed ? `, ${data.failed} falha(s)` : ''}.`, 'success');
+      return true;
+    } catch (e) {
+      console.error('[INTERESTS] notify erro:', e);
+      addToast('Erro ao enviar avisos.', 'error');
+      return false;
+    }
+  };
+
   // ========== Actions - Message Templates ==========
   const refreshTemplates = useCallback(async () => {
     if (user?.id) await fetchMessageTemplates(user.id);
@@ -1490,6 +1512,10 @@ export const AppProvider = ({ children }) => {
     refreshVehicleInterests,
     updateInterestStatus,
     deleteInterest,
+    notifyWaitingListMatch,
+    // True quando há template de lista de espera configurado E aprovado
+    waitingListTemplateReady: !!(companySettings?.waiting_list_template_id &&
+      messageTemplates.some(t => t.id === companySettings.waiting_list_template_id && t.status === 'approved')),
 
     // Templates Meta
     messageTemplates,

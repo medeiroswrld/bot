@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Copy, Bookmark } from 'lucide-react';
+import { X, Copy, Bookmark, Rocket, Settings, Loader2 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 
 const fmtBRL = (n) => `R$ ${Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
@@ -7,10 +8,18 @@ const fmtKm  = (n) => `${Number(n).toLocaleString('pt-BR')} km`;
 
 const MatchFoundModal = ({ data, onClose }) => {
     const navigate = useNavigate();
-    const { addToast } = useAppContext();
+    const { addToast, waitingListTemplateReady, notifyWaitingListMatch } = useAppContext();
+    const [notifying, setNotifying] = useState(false);
     if (!data) return null;
 
     const { car, matches = [], matches_count = 0 } = data;
+
+    const notifyAll = async () => {
+        setNotifying(true);
+        const ok = await notifyWaitingListMatch(car.id, matches.map(m => m.id));
+        setNotifying(false);
+        if (ok) onClose();
+    };
 
     const buildMessage = (m) => {
         const nome = (m.customer_name || '').split(' ')[0] || 'tudo bem';
@@ -58,6 +67,25 @@ const MatchFoundModal = ({ data, onClose }) => {
                         </div>
                     ))}
                 </div>
+
+                {/* Aviso automático (se template configurado e aprovado) */}
+                {waitingListTemplateReady ? (
+                    <div style={{ marginTop: 14, padding: 12, borderRadius: 10, background: 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.85rem' }}>Quer disparar o aviso oficial (template) pra todos de uma vez?</span>
+                        <button className="btn-primary" onClick={notifyAll} disabled={notifying}
+                            style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#059669' }}>
+                            {notifying ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Rocket size={16} />}
+                            Avisar todos automaticamente
+                        </button>
+                    </div>
+                ) : (
+                    <div style={{ marginTop: 12, fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Settings size={14} />
+                        <button className="btn-text" style={{ padding: 0 }} onClick={() => { onClose(); navigate('/configuracoes'); }}>
+                            Configurar avisos automáticos →
+                        </button>
+                    </div>
+                )}
 
                 <div className="modal-footer" style={{ marginTop: 16 }}>
                     <button className="btn-secondary" onClick={onClose}>Fechar</button>

@@ -95,6 +95,44 @@ serve(async (req) => {
     console.log('[submit-template] meta response:', JSON.stringify(metaResult));
 
     if (!metaResponse.ok) {
+      // Subcode 2388024 = "Já existe conteúdo nesse idioma" — o template já existe na Meta.
+      // Não é rejeição: buscamos o template existente pelo nome e marcamos como pending
+      // pra consultar o status depois (em vez de marcar como rejeitado).
+      if (metaResult.error?.error_subcode === 2388024) {
+        const listUrl = `https://graph.facebook.com/v25.0/${WABA_ID}/message_templates`
+          + `?name=${encodeURIComponent(template.meta_template_name)}&limit=1`;
+        const listResponse = await fetch(listUrl, {
+          headers: { Authorization: `Bearer ${whatsappToken}` },
+        });
+        const listResult = await listResponse.json();
+        console.log('[submit-template] existing template lookup:', JSON.stringify(listResult));
+
+        const existing = Array.isArray(listResult.data)
+          ? listResult.data.find(
+              (t: { language?: string }) => t.language === template.language,
+            ) ?? listResult.data[0]
+          : null;
+
+        if (existing?.id) {
+          await supabase.from('message_templates')
+            .update({
+              meta_template_id: existing.id,
+              status: 'pending',
+              rejection_reason: null,
+              submitted_at: new Date().toISOString(),
+            })
+            .eq('id', template_id);
+
+          return new Response(JSON.stringify({
+            success: true,
+            meta_template_id: existing.id,
+            status: existing.status || 'PENDING',
+            already_existed: true,
+          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        // Não achou o existente — cai pro fluxo de erro normal abaixo.
+      }
+
       await supabase.from('message_templates')
         .update({ status: 'rejected', rejection_reason: JSON.stringify(metaResult.error || metaResult) })
         .eq('id', template_id);

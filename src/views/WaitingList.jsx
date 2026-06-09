@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import {
-    Bookmark, Search, Trash2, Copy, Eye, CheckCircle2, XCircle, Bell, X, Package
+    Bookmark, Search, Trash2, Copy, Eye, CheckCircle2, XCircle, Bell, X, Package,
+    Rocket, Loader2
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 
@@ -178,12 +179,44 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
 
 // ─── Página ───────────────────────────────────────────────────────────────────
 const WaitingList = () => {
-    const { vehicleInterests, inventory, updateInterestStatus, deleteInterest, addToast } = useAppContext();
+    const { vehicleInterests, inventory, updateInterestStatus, deleteInterest, addToast,
+        waitingListTemplateReady, notifyWaitingListMatch } = useAppContext();
     const [filter, setFilter] = useState('todos');
     const [search, setSearch] = useState('');
     const [matchesModal, setMatchesModal] = useState(null);
     const [notifyModal, setNotifyModal] = useState(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+    const [notifyingId, setNotifyingId] = useState(null);
+
+    // Avisa um cliente sobre o primeiro carro do estoque que bate com o interesse dele
+    const notifyOne = async (it) => {
+        const cars = matchCarsForInterest(it, inventory);
+        if (!cars.length) { addToast('Nenhum carro no estoque bate com esse interesse agora.', 'error'); return; }
+        setNotifyingId(it.id);
+        await notifyWaitingListMatch(cars[0].id, [it.id]);
+        setNotifyingId(null);
+    };
+
+    // Master: avisa todos os matched, agrupando por carro (cada notify usa 1 car_id)
+    const notifyAllMatched = async () => {
+        const groups = new Map(); // carId -> { carId, ids: [] }
+        for (const it of vehicleInterests) {
+            if (it.status !== 'matched') continue;
+            const cars = matchCarsForInterest(it, inventory);
+            if (!cars.length) continue;
+            const carId = cars[0].id;
+            if (!groups.has(carId)) groups.set(carId, []);
+            groups.get(carId).push(it.id);
+        }
+        if (groups.size === 0) { addToast('Nenhum interesse "match" com carro disponível agora.', 'error'); return; }
+        setNotifyingId('all');
+        for (const [carId, ids] of groups) {
+            await notifyWaitingListMatch(carId, ids);
+        }
+        setNotifyingId(null);
+    };
+
+    const matchedWithCar = vehicleInterests.some(i => i.status === 'matched' && matchCarsForInterest(i, inventory).length > 0);
 
     const filtered = useMemo(() => (vehicleInterests || []).filter((it) => {
         if (filter !== 'todos' && it.status !== filter) return false;
@@ -201,9 +234,18 @@ const WaitingList = () => {
 
     return (
         <div className="view-content">
-            <header className="view-header">
-                <h1>Lista de Espera</h1>
-                <p>Clientes esperando veículos específicos. Avise quando o carro entrar no estoque.</p>
+            <header className="view-header-flex">
+                <div className="view-header">
+                    <h1>Lista de Espera</h1>
+                    <p>Clientes esperando veículos específicos. Avise quando o carro entrar no estoque.</p>
+                </div>
+                {waitingListTemplateReady && matchedWithCar && (
+                    <button className="btn-primary" onClick={notifyAllMatched} disabled={notifyingId === 'all'}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#059669' }}>
+                        {notifyingId === 'all' ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Rocket size={16} />}
+                        Avisar todos os "match"
+                    </button>
+                )}
             </header>
 
             <div className="inv-toolbar" style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -252,7 +294,13 @@ const WaitingList = () => {
                                                 <button className="inv-action-btn" title="Ver carros que batem" onClick={() => setMatchesModal({ interest: it, cars: matchCars })}>
                                                     <Eye size={15} />{matchCars.length > 0 ? ` ${matchCars.length}` : ''}
                                                 </button>
-                                                <button className="inv-action-btn" title="Avisar cliente" onClick={() => setNotifyModal({ interest: it, cars: matchCars })}>
+                                                {waitingListTemplateReady && it.status === 'matched' && matchCars.length > 0 && (
+                                                    <button className="inv-action-btn" title="Avisar automaticamente (template)" style={{ color: '#059669' }}
+                                                        onClick={() => notifyOne(it)} disabled={notifyingId === it.id}>
+                                                        {notifyingId === it.id ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> : <Rocket size={15} />}
+                                                    </button>
+                                                )}
+                                                <button className="inv-action-btn" title="Avisar manual (copiar mensagem)" onClick={() => setNotifyModal({ interest: it, cars: matchCars })}>
                                                     <Bell size={15} />
                                                 </button>
                                                 {it.status !== 'converted' && (
