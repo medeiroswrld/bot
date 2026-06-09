@@ -43,15 +43,10 @@ serve(async (req) => {
       });
     }
 
-    const { data: settings } = await supabase
-      .from('company_settings')
-      .select('whatsapp_token')
-      .eq('user_id', template.user_id)
-      .single();
-
-    if (!settings?.whatsapp_token) {
-      return new Response(JSON.stringify({ error: 'Token WhatsApp não configurado' }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    const whatsappToken = Deno.env.get('WHATSAPP_TOKEN');
+    if (!whatsappToken) {
+      return new Response(JSON.stringify({ error: 'WHATSAPP_TOKEN não configurado nas Edge Function Secrets' }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
@@ -93,7 +88,7 @@ serve(async (req) => {
 
     const metaResponse = await fetch(metaUrl, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${settings.whatsapp_token}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${whatsappToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(metaPayload),
     });
     const metaResult = await metaResponse.json();
