@@ -957,7 +957,9 @@ async function callClaude(
   attempt = 0,
 ): Promise<ClaudeResponse> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
-  const MAX_RETRIES = 3;
+  // Backoff exponencial: 2s, 5s, 10s (3 tentativas extras)
+  const BACKOFF_MS = [2000, 5000, 10000];
+  const MAX_RETRIES = BACKOFF_MS.length;
 
   let res: Response;
   try {
@@ -979,7 +981,7 @@ async function callClaude(
   } catch (netErr) {
     // Erro de rede → retry com backoff
     if (attempt < MAX_RETRIES) {
-      const delay = 1000 * Math.pow(2, attempt);
+      const delay = BACKOFF_MS[attempt];
       console.warn(`[CLAUDE] erro de rede — retry ${attempt + 1}/${MAX_RETRIES} em ${delay}ms`);
       await new Promise((r) => setTimeout(r, delay));
       return callClaude(systemPrompt, messages, attempt + 1);
@@ -989,14 +991,15 @@ async function callClaude(
 
   if (!res.ok) {
     const body = await res.text();
-    // Erros transitórios (rate limit, sobrecarga, instabilidade) → retry com backoff
+    // Erros transitórios (rate limit 429, sobrecarga 529, server 5xx) → retry com backoff
     const retriable = [408, 409, 429, 500, 502, 503, 504, 529].includes(res.status);
     if (retriable && attempt < MAX_RETRIES) {
-      const delay = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+      const delay = BACKOFF_MS[attempt]; // 2s, 5s, 10s
       console.warn(`[CLAUDE] ${res.status} — retry ${attempt + 1}/${MAX_RETRIES} em ${delay}ms`);
       await new Promise((r) => setTimeout(r, delay));
       return callClaude(systemPrompt, messages, attempt + 1);
     }
+    console.error(`[CLAUDE_FATAL] ${res.status} após ${attempt} retries: ${body.slice(0, 300)}`);
     throw new Error(`Claude API error ${res.status}: ${body}`);
   }
   return res.json() as Promise<ClaudeResponse>;
