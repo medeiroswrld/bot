@@ -33,6 +33,73 @@ async function computeHmac(secret: string, data: string): Promise<string> {
     .join('');
 }
 
+// ─── status updates de campanhas (sent/delivered/read/failed) ──────────────────
+// ADICIONAL ao processamento de mensagens — não substitui nada.
+// Idempotente: só atualiza/incrementa se o status realmente mudou para aquele wamid.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function processStatuses(payload: any): Promise<void> {
+  try {
+    const entries = payload?.entry ?? [];
+    let supabase: ReturnType<typeof initAdmin> | null = null;
+
+    for (const entry of entries) {
+      for (const change of (entry?.changes ?? [])) {
+        const statuses = change?.value?.statuses;
+        if (!Array.isArray(statuses) || statuses.length === 0) continue;
+
+        if (!supabase) supabase = initAdmin();
+
+        for (const status of statuses) {
+          const wamid     = status?.id;
+          const newStatus = status?.status; // sent | delivered | read | failed
+          if (!wamid || !newStatus) continue;
+
+          const ts = status?.timestamp
+            ? new Date(parseInt(status.timestamp, 10) * 1000).toISOString()
+            : new Date().toISOString();
+
+          console.log('[webhook-status]', wamid, '→', newStatus);
+
+          // Busca o envio de campanha por wamid. Se não existir, não é campanha — ignora.
+          const { data: existing } = await supabase
+            .from('campaign_sends')
+            .select('id, status, campaign_id')
+            .eq('whatsapp_message_id', wamid)
+            .maybeSingle();
+
+          if (!existing) continue;
+          // Idempotência: mesmo status já registrado → não incrementa de novo
+          if (existing.status === newStatus) {
+            console.log('[webhook-status] sem mudança (idempotente):', wamid, newStatus);
+            continue;
+          }
+
+          const updates: Record<string, unknown> = { status: newStatus };
+          if (newStatus === 'sent')           updates.sent_at = ts;
+          else if (newStatus === 'delivered') updates.delivered_at = ts;
+          else if (newStatus === 'read')      updates.read_at = ts;
+          else if (newStatus === 'failed') {
+            updates.failed_at = ts;
+            updates.error_message = JSON.stringify(status?.errors ?? {});
+          }
+
+          await supabase.from('campaign_sends').update(updates).eq('id', existing.id);
+
+          // Incremento atômico do contador agregado da campanha
+          await supabase.rpc('increment_campaign_counter', {
+            campaign_id: existing.campaign_id,
+            field_name: `${newStatus}_count`,
+          });
+
+          console.log('[webhook-status] atualizado', existing.id, existing.status, '→', newStatus);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[webhook-status] erro:', e);
+  }
+}
+
 // ─── main ─────────────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -87,9 +154,13 @@ serve(async (req) => {
     return ok(); // Payload mal formado — responde 200 para não retentar
   }
 
+  // Processa status updates de campanhas (sent/delivered/read/failed).
+  // ADICIONAL: não interfere no fluxo de mensagens abaixo.
+  await processStatuses(payload);
+
   const msg = parseInboundMessage(payload);
   if (!msg) {
-    // Não é uma mensagem de texto válida (pode ser status/delivery receipt)
+    // Não é uma mensagem de texto válida (pode ser status/delivery receipt — já tratado acima)
     return ok();
   }
 
