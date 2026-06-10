@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendWhatsAppTemplate } from '../_shared/sendTemplate.ts';
+import { maskPhone } from '../_shared/maskPII.ts';
 
 import { buildCors } from '../_shared/cors.ts';
 
@@ -96,7 +97,7 @@ serve(async (req) => {
     for (const interest of interests) {
       const firstName = String(interest.customer_name ?? 'cliente').split(' ')[0];
       try {
-        console.log('[notify-waiting-list] enviando para', interest.customer_phone, 'modelo:', interest.model);
+        console.log('[notify-waiting-list] enviando para', maskPhone(interest.customer_phone), 'modelo:', interest.model);
         await sendWhatsAppTemplate({
           phone: interest.customer_phone,
           templateName: template.meta_template_name,
@@ -124,7 +125,7 @@ serve(async (req) => {
         sent++;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        console.error('[notify-waiting-list] erro pra', interest.customer_phone, msg);
+        console.error('[notify-waiting-list] erro pra', maskPhone(interest.customer_phone), msg);
         // Não trava os outros — registra o erro nas notes do interesse
         const errLine = `[aviso falhou ${new Date().toISOString()}] ${msg}`.slice(0, 300);
         const newNotes = interest.notes ? `${interest.notes}\n${errLine}` : errLine;

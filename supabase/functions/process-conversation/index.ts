@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendImage, sendVideo } from '../_shared/whatsapp.ts';
+import { maskPhone, maskName } from '../_shared/maskPII.ts';
 
 // ─── tipos locais ─────────────────────────────────────────────────────────────
 
@@ -389,7 +390,7 @@ async function executeTool(
     const nomeCliente = String(input.nome_cliente ?? customerName ?? 'Cliente');
     const carId       = input.car_id ? String(input.car_id) : null;
 
-    console.log('[agendar_visita] params:', { dateStr, horario, nomeCliente, carId, userId, customerPhone });
+    console.log('[agendar_visita] params:', { dateStr, horario, nomeCliente: maskName(nomeCliente), carId, userId, customerPhone: maskPhone(customerPhone) });
 
     if (!dateStr || !horario) {
       console.error('[agendar_visita] data ou horario ausente:', { dateStr, horario });
@@ -687,7 +688,7 @@ async function executeTool(
   if (name === 'registrar_interesse_veiculo') {
     const model = String(input.model ?? '').trim();
     console.log('[registrar_interesse_veiculo] params:', JSON.stringify(input));
-    console.log('[registrar_interesse_veiculo] ctx:', { userId, customerPhone, conversationId });
+    console.log('[registrar_interesse_veiculo] ctx:', { userId, customerPhone: maskPhone(customerPhone), conversationId });
 
     if (!model) return { success: false, error: 'Modelo não informado.' };
 
@@ -1133,7 +1134,7 @@ serve(async (req) => {
     await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);
 
     const wSent = await sendMessage(customerPhone, welcomeText, wPid || undefined);
-    if (!wSent) console.error(`[PC] Falha ao enviar boas-vindas para ${customerPhone}`);
+    if (!wSent) console.error(`[PC] Falha ao enviar boas-vindas para ${maskPhone(customerPhone)}`);
 
     return new Response('OK', { status: 200 });
   }
@@ -1239,7 +1240,7 @@ serve(async (req) => {
       const fbSent = await sendMessage(customerPhone, fallbackMsg, phoneNumberId || undefined);
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: fallbackMsg });
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
-      if (!fbSent) console.error(`[PC] Falha ao enviar mensagem de fallback para ${customerPhone} (salva no banco mesmo assim)`);
+      if (!fbSent) console.error(`[PC] Falha ao enviar mensagem de fallback para ${maskPhone(customerPhone)} (salva no banco mesmo assim)`);
     } catch (sendErr) {
       console.error('[PC] Erro ao enviar mensagem de fallback:', sendErr);
     }
@@ -1265,7 +1266,7 @@ serve(async (req) => {
   // ── 8. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────
   const sent = await sendMessage(customerPhone, finalText, phoneNumberId || undefined);
   if (!sent) {
-    console.error(`[PC] Falha ao enviar WhatsApp para ${customerPhone} — mensagem salva no banco mesmo assim`);
+    console.error(`[PC] Falha ao enviar WhatsApp para ${maskPhone(customerPhone)} — mensagem salva no banco mesmo assim`);
   }
 
   // ── 9. Salva resposta do bot e atualiza last_message_at ────────────────────

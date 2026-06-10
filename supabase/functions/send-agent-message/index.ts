@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage } from '../_shared/whatsapp.ts';
 import { buildCors } from '../_shared/cors.ts';
+import { maskPhone } from '../_shared/maskPII.ts';
 
 serve(async (req) => {
   const CORS = buildCors(req);
@@ -95,7 +96,7 @@ serve(async (req) => {
 
   const sent = await sendMessage(conv.customer_phone as string, text.trim(), phoneNumberId || undefined);
   if (!sent) {
-    console.error(`[SAM] Falha ao enviar WhatsApp para ${conv.customer_phone} — mensagem salva no banco`);
+    console.error(`[SAM] Falha ao enviar WhatsApp para ${maskPhone(conv.customer_phone as string)} — mensagem salva no banco`);
   }
 
   return jsonResponse({ success: true, message_id: msg.id });

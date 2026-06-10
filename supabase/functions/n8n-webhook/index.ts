@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
+import { maskPhone } from '../_shared/maskPII.ts';
 
 // Array de status autorizados via CHECK CONSTRAINT
 const VALID_LEAD_STATUS = ['novo', 'atendimento', 'proposta', 'negociacao', 'vendido', 'perdido'];
@@ -103,7 +104,7 @@ serve(async (req) => {
       if (dupError) throw dupError;
 
       if (duplicateLeads && duplicateLeads.length > 0) {
-        console.warn(`[N8N-WEBHOOK] Duplicate lead rejected for user ${user_id} and phone ${phone}`);
+        console.warn(`[N8N-WEBHOOK] Duplicate lead rejected for user ${user_id} and phone ${maskPhone(phone)}`);
         return buildResponse(false, 'duplicate', 'A lead with this phone was already created in the last 7 days.', { lead_id: duplicateLeads[0].id }, 409);
       }
 

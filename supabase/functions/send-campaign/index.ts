@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendWhatsAppTemplate } from '../_shared/sendTemplate.ts';
+import { maskPhone } from '../_shared/maskPII.ts';
 
 import { buildCors } from '../_shared/cors.ts';
 
@@ -112,7 +113,7 @@ serve(async (req) => {
         sentCount++;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        console.error(`[send-campaign] erro pra ${send.customer_phone}:`, msg);
+        console.error(`[send-campaign] erro pra ${maskPhone(send.customer_phone)}:`, msg);
         await supabase.from('campaign_sends')
           .update({ status: 'failed', error_message: msg, failed_at: new Date().toISOString() })
           .eq('id', send.id);
