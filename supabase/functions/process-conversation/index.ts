@@ -1230,11 +1230,28 @@ serve(async (req) => {
     console.error('[FALLBACK]', err.message, err.stack);
     console.error('[PC] Erro ao chamar Claude (após retries):', e);
 
-    // Falha persistente após os retries → em vez de mandar mensagem de erro
-    // técnica (que polui o chat) ou ficar em silêncio, passa a conversa para
-    // um atendente humano. O frontend notifica o atendente (status 'pending').
-    await supabase.from('conversations').update({ status: 'pending' }).eq('id', conversationId);
-    console.error('[PC] Conversa marcada como pending (handoff) após falha do Claude.');
+    // Falha persistente após os retries. Avisa o cliente de forma amigável
+    // PRIMEIRO e só DEPOIS faz o handoff — garantindo que a mensagem chegue
+    // mesmo se a atualização de status falhar.
+    const fallbackMsg = 'Tive uma instabilidade aqui, mas já tô avisando um atendente pra continuar te ajudar. Em instantes alguém da equipe vai te responder.';
+
+    try {
+      const fbSent = await sendMessage(customerPhone, fallbackMsg, phoneNumberId || undefined);
+      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: fallbackMsg });
+      await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
+      if (!fbSent) console.error(`[PC] Falha ao enviar mensagem de fallback para ${customerPhone} (salva no banco mesmo assim)`);
+    } catch (sendErr) {
+      console.error('[PC] Erro ao enviar mensagem de fallback:', sendErr);
+    }
+
+    // Handoff em bloco separado: se falhar, o cliente já recebeu o aviso acima.
+    try {
+      await supabase.from('conversations').update({ status: 'pending' }).eq('id', conversationId);
+      console.error('[PC] Conversa marcada como pending (handoff) após falha do Claude.');
+    } catch (handoffErr) {
+      console.error('[PC] Falha ao fazer handoff (status pending):', handoffErr);
+    }
+
     return new Response('OK', { status: 200 });
   }
 

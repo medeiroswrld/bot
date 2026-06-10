@@ -188,9 +188,24 @@ const WaitingList = () => {
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
     const [notifyingId, setNotifyingId] = useState(null);
 
+    // Calcula os carros que batem com cada interesse UMA vez por mudança de dados
+    // (em vez de recalcular por linha em cada render).
+    const matchesByInterest = useMemo(() => {
+        const map = new Map();
+        for (const it of (vehicleInterests || [])) {
+            map.set(it.id, matchCarsForInterest(it, inventory));
+        }
+        return map;
+    }, [vehicleInterests, inventory]);
+
+    const matchedWithCar = useMemo(
+        () => (vehicleInterests || []).some(i => i.status === 'matched' && (matchesByInterest.get(i.id)?.length > 0)),
+        [vehicleInterests, matchesByInterest],
+    );
+
     // Avisa um cliente sobre o primeiro carro do estoque que bate com o interesse dele
     const notifyOne = async (it) => {
-        const cars = matchCarsForInterest(it, inventory);
+        const cars = matchesByInterest.get(it.id) || [];
         if (!cars.length) { addToast('Nenhum carro no estoque bate com esse interesse agora.', 'error'); return; }
         setNotifyingId(it.id);
         await notifyWaitingListMatch(cars[0].id, [it.id]);
@@ -199,10 +214,10 @@ const WaitingList = () => {
 
     // Master: avisa todos os matched, agrupando por carro (cada notify usa 1 car_id)
     const notifyAllMatched = async () => {
-        const groups = new Map(); // carId -> { carId, ids: [] }
-        for (const it of vehicleInterests) {
+        const groups = new Map(); // carId -> ids[]
+        for (const it of (vehicleInterests || [])) {
             if (it.status !== 'matched') continue;
-            const cars = matchCarsForInterest(it, inventory);
+            const cars = matchesByInterest.get(it.id) || [];
             if (!cars.length) continue;
             const carId = cars[0].id;
             if (!groups.has(carId)) groups.set(carId, []);
@@ -215,8 +230,6 @@ const WaitingList = () => {
         }
         setNotifyingId(null);
     };
-
-    const matchedWithCar = vehicleInterests.some(i => i.status === 'matched' && matchCarsForInterest(i, inventory).length > 0);
 
     const filtered = useMemo(() => (vehicleInterests || []).filter((it) => {
         if (filter !== 'todos' && it.status !== filter) return false;
@@ -281,7 +294,7 @@ const WaitingList = () => {
                         </thead>
                         <tbody>
                             {filtered.map((it) => {
-                                const matchCars = matchCarsForInterest(it, inventory);
+                                const matchCars = matchesByInterest.get(it.id) || [];
                                 return (
                                     <tr key={it.id} style={{ borderBottom: '1px solid var(--border)' }}>
                                         <td style={{ padding: '12px 16px', fontWeight: 600 }}>{it.customer_name || '—'}</td>
