@@ -4,6 +4,23 @@ import { buildCors } from '../_shared/cors.ts';
 
 const WABA_ID = '1284569480545489';
 
+// Rate limit in-memory (por instância) — suficiente para evitar spam à Meta.
+const rateLimits = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minuto
+const RATE_LIMIT_MAX = 5;
+
+function checkRateLimit(userId: string): boolean {
+  const now = Date.now();
+  const entry = rateLimits.get(userId);
+  if (!entry || now > entry.resetAt) {
+    rateLimits.set(userId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  if (entry.count >= RATE_LIMIT_MAX) return false;
+  entry.count++;
+  return true;
+}
+
 serve(async (req) => {
   const corsHeaders = buildCors(req);
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -31,6 +48,13 @@ serve(async (req) => {
     if (tplErr || !template) {
       return new Response(JSON.stringify({ error: 'Template não encontrado' }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Rate limit por dono do template (5 submissões/minuto) — evita ban da Meta
+    if (!checkRateLimit(String(template.user_id))) {
+      return new Response(JSON.stringify({ error: 'Muitas tentativas. Aguarde 1 minuto e tente novamente.' }), {
+        status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
