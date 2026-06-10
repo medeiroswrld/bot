@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
+import { timingSafeEqual } from 'https://deno.land/std@0.224.0/crypto/timing_safe_equal.ts';
 import { parseInboundMessage } from '../_shared/whatsapp.ts';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -140,7 +141,10 @@ serve(async (req) => {
     }
     const sig      = req.headers.get('x-hub-signature-256') ?? '';
     const expected = 'sha256=' + (await computeHmac(appSecret, rawBody));
-    if (sig !== expected) {
+    // Comparação em tempo constante para evitar timing attacks
+    const sigBytes = new TextEncoder().encode(sig);
+    const expBytes = new TextEncoder().encode(expected);
+    if (sigBytes.length !== expBytes.length || !timingSafeEqual(sigBytes, expBytes)) {
       console.warn('[WH] Assinatura inválida');
       return err(401, 'Unauthorized');
     }
