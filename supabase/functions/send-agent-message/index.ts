@@ -1,21 +1,16 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage } from '../_shared/whatsapp.ts';
-
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
-};
-
-function jsonResponse(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json', ...CORS },
-  });
-}
+import { buildCors } from '../_shared/cors.ts';
 
 serve(async (req) => {
+  const CORS = buildCors(req);
+  const jsonResponse = (data: unknown, status = 200): Response =>
+    new Response(JSON.stringify(data), {
+      status,
+      headers: { 'Content-Type': 'application/json', ...CORS },
+    });
+
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS });
   }

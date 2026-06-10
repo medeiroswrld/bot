@@ -2,16 +2,13 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendWhatsAppTemplate } from '../_shared/sendTemplate.ts';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
+import { buildCors } from '../_shared/cors.ts';
 
 const fmtBRL = (n: number) => `R$ ${Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
 const fmtKm  = (n: number) => `${Number(n || 0).toLocaleString('pt-BR')} km`;
 
 serve(async (req) => {
+  const corsHeaders = buildCors(req);
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
