@@ -1050,13 +1050,18 @@ export const AppProvider = ({ children }) => {
     }
   };
 
-  const fetchCampaignSends = async (campaignId) => {
-    const { data, error } = await supabase
+  const fetchCampaignSends = async (campaignId, signal) => {
+    let query = supabase
       .from('campaign_sends')
       .select('*')
       .eq('campaign_id', campaignId)
       .order('created_at', { ascending: true });
-    if (error) { console.error('[CAMPAIGNS] Erro ao carregar envios:', error); return []; }
+    if (signal) query = query.abortSignal(signal);
+    const { data, error } = await query;
+    if (error) {
+      if (!signal?.aborted) console.error('[CAMPAIGNS] Erro ao carregar envios:', error);
+      return [];
+    }
     return data ?? [];
   };
 
@@ -1409,7 +1414,7 @@ export const AppProvider = ({ children }) => {
     });
 
     const channel = supabase
-      .channel(`realtime-crm-${userId}`)
+      .channel(`realtime-crm-${userId}-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leads', filter: `user_id=eq.${userId}` }, (payload) => {
         // Re-busca para obter o join com cars
         fetchLeads(userId);

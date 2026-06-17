@@ -256,6 +256,7 @@ const Dashboard = () => {
 
     useEffect(() => {
         if (!user?.id) return;
+        const controller = new AbortController();
         supabase
             .from('conversations')
             .select('id, customer_name, customer_phone, status, last_message_at')
@@ -263,10 +264,16 @@ const Dashboard = () => {
             .neq('status', 'closed')
             .order('last_message_at', { ascending: false })
             .limit(5)
+            .abortSignal(controller.signal)
             .then(({ data }) => {
+                if (controller.signal.aborted) return;
                 setConversations(data ?? []);
-                setLoadingConvs(false);
+            })
+            .catch(() => { /* abort/erro: ignora */ })
+            .finally(() => {
+                if (!controller.signal.aborted) setLoadingConvs(false);
             });
+        return () => controller.abort();
     }, [user?.id]);
 
     // ── Métricas calculadas ───────────────────────────────────────────────────

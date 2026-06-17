@@ -318,20 +318,24 @@ export default function Conversations() {
 
   // ── fetch helpers ─────────────────────────────────────────────────────────
 
-  const fetchConversations = useCallback(async () => {
+  const fetchConversations = useCallback(async (signal?: AbortSignal) => {
     if (!user?.id) { setLoading(false); return; }
     try {
-      const { data, error } = await supabaseTyped
+      let query = supabaseTyped
         .from('conversations')
         .select('*')
         .eq('user_id', user.id)
         .order('last_message_at', { ascending: false });
+      if (signal) query = query.abortSignal(signal);
+      const { data, error } = await query;
+      if (signal?.aborted) return;
       if (error) throw error;
       setConversations(data ?? []);
     } catch (e) {
+      if (signal?.aborted || (e as { name?: string })?.name === 'AbortError') return;
       console.error('[Conversations] fetchConversations:', e);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [user?.id]);
 
@@ -352,15 +356,24 @@ export default function Conversations() {
     setLastMessages(map);
   }, []);
 
-  const fetchMessages = useCallback(async (convId: string) => {
+  const fetchMessages = useCallback(async (convId: string, signal?: AbortSignal) => {
     setMsgLoading(true);
-    const { data } = await supabaseTyped
-      .from('messages')
-      .select('*')
-      .eq('conversation_id', convId)
-      .order('created_at', { ascending: true });
-    setMessages(data ?? []);
-    setMsgLoading(false);
+    try {
+      let query = supabaseTyped
+        .from('messages')
+        .select('*')
+        .eq('conversation_id', convId)
+        .order('created_at', { ascending: true });
+      if (signal) query = query.abortSignal(signal);
+      const { data } = await query;
+      if (signal?.aborted) return;
+      setMessages(data ?? []);
+    } catch (e) {
+      if (signal?.aborted || (e as { name?: string })?.name === 'AbortError') return;
+      console.error('[Conversations] fetchMessages:', e);
+    } finally {
+      if (!signal?.aborted) setMsgLoading(false);
+    }
   }, []);
 
   // Refresh silencioso (sem spinner) — usado pelo polling de fallback
@@ -387,7 +400,11 @@ export default function Conversations() {
 
   // ── effects ───────────────────────────────────────────────────────────────
 
-  useEffect(() => { fetchConversations(); }, [fetchConversations]);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchConversations(controller.signal);
+    return () => controller.abort();
+  }, [fetchConversations]);
 
   useEffect(() => {
     if (conversations.length) fetchLastMessages(conversations.map((c) => c.id));
@@ -395,8 +412,10 @@ export default function Conversations() {
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
-    if (selectedId) fetchMessages(selectedId);
-    else setMessages([]);
+    if (!selectedId) { setMessages([]); return; }
+    const controller = new AbortController();
+    fetchMessages(selectedId, controller.signal);
+    return () => controller.abort();
   }, [selectedId, fetchMessages]);
 
   useEffect(() => {
@@ -409,6 +428,7 @@ export default function Conversations() {
     if (!user?.id) return;
 
     const refreshList = () => {
+      console.log('[poll] refreshList rodando @', new Date().toLocaleTimeString());
       fetchConversations();
       const ids = conversationsRef.current.map((c) => c.id);
       if (ids.length) fetchLastMessages(ids);
@@ -417,7 +437,10 @@ export default function Conversations() {
     // Lista de conversas a cada 8s; mensagens da conversa aberta a cada 4s
     const listInterval = setInterval(refreshList, 8000);
     const msgInterval = setInterval(() => {
-      if (selectedIdRef.current) refreshMessages(selectedIdRef.current);
+      if (selectedIdRef.current) {
+        console.log('[poll] refreshMessages rodando @', new Date().toLocaleTimeString());
+        refreshMessages(selectedIdRef.current);
+      }
     }, 4000);
 
     // Ao voltar o foco para a aba (ou trocar de aba), atualiza na hora
@@ -449,12 +472,13 @@ export default function Conversations() {
     const uid = user.id;
 
     const channel = supabaseTyped
-      .channel(`conv-list-${uid}`)
+      .channel(`conv-list-${uid}-${Math.random().toString(36).slice(2)}`)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'conversations', filter: `user_id=eq.${uid}` },
         (payload) => {
           const { eventType } = payload;
+          console.log('[RT conversations] evento recebido:', eventType);
           if (eventType === 'INSERT') {
             const added = payload.new as Conversation;
             setConversations((prev) => [added, ...prev]);
@@ -501,7 +525,8 @@ export default function Conversations() {
           }
         },
       )
-      .subscribe((status) => {
+      .subscribe((status, err) => {
+        console.log('[RT conversations] status:', status, err ? `| err: ${err.message}` : '');
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           fetchConversations();
         }
@@ -516,12 +541,13 @@ export default function Conversations() {
     if (!selectedId) return;
 
     const channel = supabaseTyped
-      .channel(`msgs-${selectedId}`)
+      .channel(`msgs-${selectedId}-${Math.random().toString(36).slice(2)}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${selectedId}` },
         (payload) => {
           const newMsg = payload.new as Message;
+          console.log('[RT messages] INSERT recebido:', newMsg.id, newMsg.role);
           setMessages((prev) => {
             // Remove mensagem otimista correspondente, depois adiciona a real
             const withoutOptimistic = prev.filter(
@@ -534,7 +560,8 @@ export default function Conversations() {
           setLastMessages((prev) => ({ ...prev, [selectedId]: newMsg }));
         },
       )
-      .subscribe((status) => {
+      .subscribe((status, err) => {
+        console.log('[RT messages] status:', status, 'conv:', selectedId, err ? `| err: ${err.message}` : '');
         // Se o canal cair, refaz o fetch para não perder mensagens
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           refreshMessages(selectedId);

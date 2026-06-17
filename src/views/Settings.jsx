@@ -206,15 +206,22 @@ const Settings = () => {
 
     useEffect(() => {
         if (!user?.id) return;
+        const controller = new AbortController();
         supabase
             .from('schedule_exceptions')
             .select('*')
             .eq('user_id', user.id)
             .order('date', { ascending: true })
+            .abortSignal(controller.signal)
             .then(({ data }) => {
+                if (controller.signal.aborted) return;
                 setExceptions(data || []);
-                setLoadingEx(false);
+            })
+            .catch(() => { /* abort/erro: ignora */ })
+            .finally(() => {
+                if (!controller.signal.aborted) setLoadingEx(false);
             });
+        return () => controller.abort();
     }, [user?.id]);
 
     const addException = async () => {

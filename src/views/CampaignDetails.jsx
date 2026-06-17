@@ -31,18 +31,26 @@ const CampaignDetails = () => {
 
     const campaign = (campaigns || []).find(c => c.id === id) || null;
 
-    const load = useCallback(async () => {
-        const data = await fetchCampaignSends(id);
-        setSends(data);
-        setLoading(false);
+    const load = useCallback(async (signal) => {
+        try {
+            const data = await fetchCampaignSends(id, signal);
+            if (signal?.aborted) return;
+            setSends(data);
+        } finally {
+            if (!signal?.aborted) setLoading(false);
+        }
     }, [id, fetchCampaignSends]);
 
-    useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        const controller = new AbortController();
+        load(controller.signal);
+        return () => controller.abort();
+    }, [load]);
 
     // Realtime nos envios desta campanha
     useEffect(() => {
         const channel = supabase
-            .channel(`campaign-sends-${id}`)
+            .channel(`campaign-sends-${id}-${Math.random().toString(36).slice(2)}`)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'campaign_sends', filter: `campaign_id=eq.${id}` }, () => load())
             .subscribe();
         return () => { supabase.removeChannel(channel); };

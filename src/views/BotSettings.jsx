@@ -36,25 +36,36 @@ const BotSettings = () => {
 
     useEffect(() => {
         if (!user?.id) return;
+        const controller = new AbortController();
 
         supabase
             .from('company_settings')
             .select('bot_custom_instructions')
             .eq('user_id', user.id)
+            .abortSignal(controller.signal)
             .single()
             .then(({ data }) => {
+                if (controller.signal.aborted) return;
                 setInstructions(data?.bot_custom_instructions || '');
-            });
+            })
+            .catch(() => { /* abort/erro: ignora */ });
 
         supabase
             .from('bot_faqs')
             .select('*')
             .eq('user_id', user.id)
             .order('created_at', { ascending: true })
+            .abortSignal(controller.signal)
             .then(({ data }) => {
+                if (controller.signal.aborted) return;
                 setFaqs(data || []);
-                setLoadingFaqs(false);
+            })
+            .catch(() => { /* abort/erro: ignora */ })
+            .finally(() => {
+                if (!controller.signal.aborted) setLoadingFaqs(false);
             });
+
+        return () => controller.abort();
     }, [user?.id]);
 
     const saveInstructions = async () => {
