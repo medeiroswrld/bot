@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     Building2, Calendar, MapPin, Phone, MessageSquare, Save, CheckCircle,
     User, Mail, ToggleLeft, ToggleRight, Plus, Trash2, CalendarOff,
-    Image as ImageIcon, Upload, RefreshCw, Gift, Bell, CreditCard
+    Image as ImageIcon, Upload, RefreshCw, Gift, Bell, CreditCard, Bot
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
@@ -244,6 +244,35 @@ const Settings = () => {
         setSavingPay(false);
         setSavedPay(true);
         setTimeout(() => setSavedPay(false), 2000);
+    };
+
+    // ── Comportamento do Bot ──────────────────────────────────────────────────
+    const [delayedSched, setDelayedSched] = useState(true);
+    const [savingBehav,  setSavingBehav]  = useState(false);
+    const [savedBehav,   setSavedBehav]   = useState(false);
+
+    useEffect(() => {
+        if (!user?.id) return;
+        supabase
+            .from('company_settings')
+            .select('delayed_schedule_enabled')
+            .eq('user_id', user.id)
+            .single()
+            .then(({ data }) => {
+                if (data) setDelayedSched(data.delayed_schedule_enabled !== false);
+            });
+    }, [user?.id]);
+
+    const saveBehavior = async () => {
+        if (!user?.id) return;
+        setSavingBehav(true);
+        await supabase
+            .from('company_settings')
+            .update({ delayed_schedule_enabled: delayedSched, updated_at: new Date().toISOString() })
+            .eq('user_id', user.id);
+        setSavingBehav(false);
+        setSavedBehav(true);
+        setTimeout(() => setSavedBehav(false), 2000);
     };
 
     // ── Exceções / Feriados ───────────────────────────────────────────────────
@@ -683,6 +712,45 @@ const Settings = () => {
                                 ? <><CheckCircle size={18} /> Salvo!</>
                                 : savingPay ? 'Salvando...'
                                 : <><Save size={18} /> Salvar Formas de Pagamento</>}
+                        </button>
+                    </div>
+                </section>
+            </div>
+
+            {/* ── Comportamento do Bot ────────────────────────────────────────── */}
+            <div style={{ marginTop: '2rem' }}>
+                <section className="settings-section card">
+                    <div className="section-title">
+                        <Bot size={20} />
+                        <h2>Comportamento do Bot</h2>
+                    </div>
+                    <div className="settings-form">
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                            <button
+                                type="button"
+                                onClick={() => setDelayedSched(v => !v)}
+                                title={delayedSched ? 'Desativar' : 'Ativar'}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, color: delayedSched ? '#10b981' : '#94a3b8' }}
+                            >
+                                {delayedSched ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
+                            </button>
+                            <div>
+                                <strong style={{ display: 'block', marginBottom: 4 }}>Verificação simulada de agenda</strong>
+                                <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                                    Quando o cliente pede um horário ocupado, o vendedor diz que vai verificar com o superior e responde alguns minutos depois — confirmando o encaixe ou propondo alternativas. Recomendado: ligado.
+                                </p>
+                            </div>
+                        </div>
+                        <button
+                            className="btn-primary"
+                            onClick={saveBehavior}
+                            disabled={savingBehav}
+                            style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                            {savedBehav
+                                ? <><CheckCircle size={18} /> Salvo!</>
+                                : savingBehav ? 'Salvando...'
+                                : <><Save size={18} /> Salvar</>}
                         </button>
                     </div>
                 </section>
