@@ -805,6 +805,13 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], convS
     ? `\n- Nome do cliente nesta conversa: ${nomeCliente} (use este nome ao se dirigir a ele)`
     : '';
 
+  const paymentMethods = Array.isArray(settings.payment_methods)
+    ? (settings.payment_methods as unknown[]).map((m) => String(m).trim()).filter(Boolean)
+    : [];
+  const paymentBlock = paymentMethods.length > 0
+    ? `\n\n## Formas de pagamento aceitas pela loja\n\nFormas de pagamento aceitas pela loja: ${paymentMethods.join(', ')}.\n\nSe o cliente perguntar como pode pagar, responda baseado APENAS nesta lista. Não invente formas de pagamento que não estejam listadas. Se o cliente perguntar por uma forma que não está na lista, não afirme que a loja aceita — diga que vai confirmar com um atendente.`
+    : '';
+
   return `Você é o assistente virtual de atendimento da **${company}**, uma concessionária de veículos. Você conversa com clientes pelo WhatsApp.
 
 ## Informações da concessionária
@@ -895,7 +902,7 @@ REGRA DE LIMPEZA: depois de mostrar alternativas e o cliente aceitar uma ou recu
 ## Financiamento e formas de pagamento
 
 Quando o cliente perguntar sobre pagamento ou financiamento:
-1. Mencione as formas disponíveis (financiamento, PIX com desconto, etc.) conforme o FAQ e as instruções específicas desta concessionária.
+1. Informe as formas de pagamento aceitas conforme a seção "Formas de pagamento aceitas pela loja" (quando disponível) e o FAQ. Nunca invente formas que não estejam listadas.
 2. Se o cliente quiser simular um financiamento, COLETE os seguintes dados (um por vez, de forma natural):
    - Nome completo
    - Valor de entrada que pretende dar
@@ -947,7 +954,7 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
     faqs.length > 0
       ? `\n\n## Perguntas frequentes — use estas respostas quando o cliente perguntar algo relacionado\n\n${faqs.map((f) => `P: ${f.question}\nR: ${f.answer}`).join('\n\n')}`
       : ''
-  }`;
+  }${paymentBlock}`;
 }
 
 // ─── chamada à API do Claude ──────────────────────────────────────────────────
@@ -961,6 +968,12 @@ async function callClaude(
   // Backoff exponencial: 2s, 5s, 10s (3 tentativas extras)
   const BACKOFF_MS = [2000, 5000, 10000];
   const MAX_RETRIES = BACKOFF_MS.length;
+
+  // Timeout defensivo: aborta a chamada se a API do Claude travar (não responder).
+  // O AbortError cai no catch abaixo e entra no fluxo normal de retry.
+  const TIMEOUT_MS = 30000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
   let res: Response;
   try {
@@ -978,16 +991,20 @@ async function callClaude(
         messages,
         tools: TOOLS,
       }),
+      signal: controller.signal,
     });
   } catch (netErr) {
-    // Erro de rede → retry com backoff
+    // Erro de rede OU timeout (AbortError) → retry com backoff
     if (attempt < MAX_RETRIES) {
       const delay = BACKOFF_MS[attempt];
-      console.warn(`[CLAUDE] erro de rede — retry ${attempt + 1}/${MAX_RETRIES} em ${delay}ms`);
+      const isTimeout = (netErr as Error)?.name === 'AbortError';
+      console.warn(`[CLAUDE] ${isTimeout ? `timeout ${TIMEOUT_MS}ms` : 'erro de rede'} — retry ${attempt + 1}/${MAX_RETRIES} em ${delay}ms`);
       await new Promise((r) => setTimeout(r, delay));
       return callClaude(systemPrompt, messages, attempt + 1);
     }
     throw netErr;
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   if (!res.ok) {

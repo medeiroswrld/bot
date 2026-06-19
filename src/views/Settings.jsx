@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     Building2, Calendar, MapPin, Phone, MessageSquare, Save, CheckCircle,
     User, Mail, ToggleLeft, ToggleRight, Plus, Trash2, CalendarOff,
-    Image as ImageIcon, Upload, RefreshCw, Gift, Bell
+    Image as ImageIcon, Upload, RefreshCw, Gift, Bell, CreditCard
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
@@ -26,6 +26,17 @@ const DEFAULT_BH = {
     sat: { open: true,  start: '09:00', end: '12:00' },
     sun: { open: false, start: '09:00', end: '18:00' },
 };
+
+const PAYMENT_OPTIONS = [
+    'À vista (PIX, transferência)',
+    'Cartão de crédito',
+    'Cartão de débito',
+    'Financiamento bancário',
+    'Financiamento próprio da loja',
+    'Consórcio',
+    'Troca (recebe carro como parte do pagamento)',
+    'Boleto',
+];
 
 const Settings = () => {
     const { company, updateCompany, profile, user, companySettings, messageTemplates, updateNotificationSettings } = useAppContext();
@@ -193,6 +204,46 @@ const Settings = () => {
         } finally {
             setSavingWp(false);
         }
+    };
+
+    // ── Formas de pagamento ───────────────────────────────────────────────────
+    const [payMethods, setPayMethods] = useState([]); // opções padrão marcadas
+    const [payOther,   setPayOther]   = useState('');  // texto livre adicional
+    const [savingPay,  setSavingPay]  = useState(false);
+    const [savedPay,   setSavedPay]   = useState(false);
+
+    useEffect(() => {
+        if (!user?.id) return;
+        supabase
+            .from('company_settings')
+            .select('payment_methods')
+            .eq('user_id', user.id)
+            .single()
+            .then(({ data }) => {
+                const saved = Array.isArray(data?.payment_methods) ? data.payment_methods : [];
+                setPayMethods(saved.filter(m => PAYMENT_OPTIONS.includes(m)));
+                setPayOther(saved.filter(m => !PAYMENT_OPTIONS.includes(m)).join(', '));
+            });
+    }, [user?.id]);
+
+    const togglePay = (label) =>
+        setPayMethods(prev =>
+            prev.includes(label) ? prev.filter(m => m !== label) : [...prev, label]
+        );
+
+    const savePayments = async () => {
+        if (!user?.id) return;
+        setSavingPay(true);
+        const ordered = PAYMENT_OPTIONS.filter(o => payMethods.includes(o)); // ordem estável
+        const other   = payOther.trim();
+        const methods = [...ordered, ...(other ? [other] : [])];
+        await supabase
+            .from('company_settings')
+            .update({ payment_methods: methods, updated_at: new Date().toISOString() })
+            .eq('user_id', user.id);
+        setSavingPay(false);
+        setSavedPay(true);
+        setTimeout(() => setSavedPay(false), 2000);
     };
 
     // ── Exceções / Feriados ───────────────────────────────────────────────────
@@ -564,6 +615,74 @@ const Settings = () => {
                                 : savingWp
                                     ? <><RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> Atualizando...</>
                                     : <><MessageSquare size={18} /> Atualizar no WhatsApp</>}
+                        </button>
+                    </div>
+                </section>
+            </div>
+
+            {/* ── Formas de Pagamento ────────────────────────────────────────── */}
+            <div style={{ marginTop: '2rem' }}>
+                <section className="settings-section card">
+                    <div className="section-title">
+                        <CreditCard size={20} />
+                        <h2>Formas de Pagamento</h2>
+                    </div>
+                    <div className="settings-form">
+                        <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+                            Marque as formas de pagamento que a concessionária aceita. O assistente
+                            usa essa lista ao responder dúvidas sobre pagamento — e não inventa
+                            formas que não estejam marcadas aqui.
+                        </p>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.5rem', marginBottom: '1rem' }}>
+                            {PAYMENT_OPTIONS.map(label => {
+                                const checked = payMethods.includes(label);
+                                return (
+                                    <label
+                                        key={label}
+                                        style={{
+                                            display: 'flex', alignItems: 'center', gap: '0.6rem',
+                                            padding: '0.6rem 0.85rem', borderRadius: '10px',
+                                            border: `1px solid ${checked ? 'var(--color-primary)' : 'var(--border)'}`,
+                                            background: checked ? 'rgba(37,99,235,0.06)' : 'var(--input-bg)',
+                                            cursor: 'pointer', fontSize: '0.875rem', transition: 'all 0.15s',
+                                        }}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={checked}
+                                            onChange={() => togglePay(label)}
+                                            style={{ width: 16, height: 16, flexShrink: 0, accentColor: 'var(--color-primary)' }}
+                                        />
+                                        <span>{label}</span>
+                                    </label>
+                                );
+                            })}
+                        </div>
+
+                        <div className="form-group">
+                            <label>Outras opções (opcional)</label>
+                            <input
+                                type="text"
+                                value={payOther}
+                                onChange={e => setPayOther(e.target.value)}
+                                placeholder="Ex: Criptomoeda, cheque pré-datado"
+                            />
+                            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '-0.25rem', lineHeight: 1.5 }}>
+                                Formas adicionais que a loja aceita e não estão na lista acima.
+                            </p>
+                        </div>
+
+                        <button
+                            className="btn-primary"
+                            onClick={savePayments}
+                            disabled={savingPay}
+                            style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                            {savedPay
+                                ? <><CheckCircle size={18} /> Salvo!</>
+                                : savingPay ? 'Salvando...'
+                                : <><Save size={18} /> Salvar Formas de Pagamento</>}
                         </button>
                     </div>
                 </section>
