@@ -850,8 +850,10 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], convS
   const paymentMethods = Array.isArray(settings.payment_methods)
     ? (settings.payment_methods as unknown[]).map((m) => String(m).trim()).filter(Boolean)
     : [];
+  // Diagnóstico BUG 2: registra nos logs o que foi lido do banco e o que entrou no prompt.
+  console.log('[payment] payment_methods lido do banco:', JSON.stringify(settings.payment_methods ?? null), '→ usados no prompt:', JSON.stringify(paymentMethods));
   const paymentBlock = paymentMethods.length > 0
-    ? `\n\n## Formas de pagamento aceitas pela loja\n\nFormas de pagamento aceitas pela loja: ${paymentMethods.join(', ')}.\n\nSe o cliente perguntar como pode pagar, responda baseado APENAS nesta lista. Não invente formas de pagamento que não estejam listadas. Se o cliente perguntar por uma forma que não está na lista, não afirme que a loja aceita — diga que vai confirmar com o gerente.`
+    ? `\n\n## Formas de pagamento aceitas pela loja\n\nFormas de pagamento aceitas pela loja: ${paymentMethods.join(', ')}.\n\nREGRA RÍGIDA sobre pagamento — siga ao pé da letra:\n- Responda SOMENTE com base na lista acima. Considere essa lista completa e exata.\n- NUNCA invente formas de pagamento, prazos (ex.: "18x", "48x", "em até 60x"), descontos, taxas ou condições especiais que não estejam EXPLICITAMENTE escritos na lista.\n- Se a lista NÃO tem "cartão de crédito" ou "cartão de débito", você NÃO pode mencionar cartão. Se não tem "consórcio", não cite consórcio. O mesmo vale para qualquer forma fora da lista.\n- Se um item está na lista sem prazo (ex.: "Financiamento bancário"), você NÃO pode dizer "em 48x" nem inventar número de parcelas — diga apenas que a loja trabalha com essa forma e que prazos/condições são confirmados pela equipe.\n- Se o cliente perguntar por algo que não está na lista, não afirme que a loja aceita — diga que vai confirmar com o gerente.`
     : '';
 
   const delayedEnabled = settings.delayed_schedule_enabled !== false; // default ON
