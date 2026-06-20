@@ -6,8 +6,10 @@ export interface InboundMessage {
   phoneNumberId: string   // Cloud: phone_number_id do metadata; Evolution: nome da instância
   from: string            // Telefone do cliente (formato internacional, ex.: 5515999998888)
   senderName: string      // Nome exibido no WhatsApp
-  text: string            // Texto da mensagem
+  text: string            // Texto da mensagem (vazio quando type === 'audio', preenchido após transcrição)
   waMessageId: string     // ID da mensagem no WhatsApp (para deduplicação)
+  type: 'text' | 'audio'  // Tipo da mensagem recebida
+  mediaId?: string        // ID da mídia na Meta (presente quando type === 'audio')
 }
 
 // ─── parseInboundMessage ───────────────────────────────────────────────────────
@@ -31,22 +33,30 @@ function parseCloud(payload: unknown): InboundMessage | null {
     if (!messages?.length) return null;
 
     const msg = messages[0] as Record<string, unknown>;
-    if (msg.type !== 'text') return null;
 
     const metadata = value.metadata as Record<string, string>;
     const contact  = ((value.contacts as unknown[])?.[0] as Record<string, unknown>) ?? {};
     const profile  = (contact.profile as Record<string, string>) ?? {};
-
-    const text = ((msg.text as Record<string, string>)?.body ?? '').trim();
-    if (!text) return null;
-
-    return {
+    const base = {
       phoneNumberId: metadata?.phone_number_id ?? '',
       from:          String(msg.from ?? ''),
       senderName:    profile.name ?? '',
-      text,
       waMessageId:   String(msg.id ?? ''),
     };
+
+    if (msg.type === 'text') {
+      const text = ((msg.text as Record<string, string>)?.body ?? '').trim();
+      if (!text) return null;
+      return { ...base, text, type: 'text' };
+    }
+
+    if (msg.type === 'audio') {
+      const mediaId = String((msg.audio as Record<string, string>)?.id ?? '');
+      if (!mediaId) return null;
+      return { ...base, text: '', type: 'audio', mediaId };
+    }
+
+    return null; // imagem, vídeo, documento, etc. — não suportados
   } catch {
     return null;
   }
@@ -78,6 +88,7 @@ function parseEvolution(payload: unknown): InboundMessage | null {
       senderName:    String(data?.pushName ?? ''),
       text,
       waMessageId:   String(key?.id ?? ''),
+      type:          'text', // Evolution: áudio não suportado neste escopo (produção usa 'cloud')
     };
   } catch {
     return null;

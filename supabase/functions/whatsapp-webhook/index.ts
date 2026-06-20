@@ -1,7 +1,8 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { timingSafeEqual } from 'https://deno.land/std@0.224.0/crypto/timing_safe_equal.ts';
-import { parseInboundMessage } from '../_shared/whatsapp.ts';
+import { parseInboundMessage, sendMessage } from '../_shared/whatsapp.ts';
+import { maskPhone } from '../_shared/maskPII.ts';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -51,7 +52,7 @@ async function processStatuses(payload: any): Promise<void> {
         if (!supabase) supabase = initAdmin();
 
         for (const status of statuses) {
-          const wamid     = status?.id;
+          const wamid = status?.id;
           const newStatus = status?.status; // sent | delivered | read | failed
           if (!wamid || !newStatus) continue;
 
@@ -76,9 +77,9 @@ async function processStatuses(payload: any): Promise<void> {
           }
 
           const updates: Record<string, unknown> = { status: newStatus };
-          if (newStatus === 'sent')           updates.sent_at = ts;
+          if (newStatus === 'sent') updates.sent_at = ts;
           else if (newStatus === 'delivered') updates.delivered_at = ts;
-          else if (newStatus === 'read')      updates.read_at = ts;
+          else if (newStatus === 'read') updates.read_at = ts;
           else if (newStatus === 'failed') {
             updates.failed_at = ts;
             updates.error_message = JSON.stringify(status?.errors ?? {});
@@ -108,10 +109,10 @@ serve(async (req) => {
 
   // ── GET: verificação inicial do webhook pela Meta ──────────────────────────
   if (req.method === 'GET') {
-    const mode      = url.searchParams.get('hub.mode');
-    const token     = url.searchParams.get('hub.verify_token');
+    const mode = url.searchParams.get('hub.mode');
+    const token = url.searchParams.get('hub.verify_token');
     const challenge = url.searchParams.get('hub.challenge');
-    const expected  = Deno.env.get('WHATSAPP_VERIFY_TOKEN') ?? '';
+    const expected = Deno.env.get('WHATSAPP_VERIFY_TOKEN') ?? '';
 
     if (mode === 'subscribe' && token === expected && challenge) {
       return new Response(challenge, { status: 200 });
@@ -131,7 +132,7 @@ serve(async (req) => {
   // 2. Verifica assinatura HMAC-SHA256
   // Para o provider 'cloud' (Meta), a verificação é obrigatória.
   // Para 'evolution', a assinatura não existe — pula.
-  const provider  = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
+  const provider = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
   const appSecret = Deno.env.get('WHATSAPP_APP_SECRET') ?? '';
 
   if (provider === 'cloud') {
@@ -139,7 +140,7 @@ serve(async (req) => {
       console.error('[WH] WHATSAPP_APP_SECRET não configurado para provider cloud');
       return err(500, 'Webhook não configurado corretamente');
     }
-    const sig      = req.headers.get('x-hub-signature-256') ?? '';
+    const sig = req.headers.get('x-hub-signature-256') ?? '';
     const expected = 'sha256=' + (await computeHmac(appSecret, rawBody));
     // Comparação em tempo constante para evitar timing attacks
     const sigBytes = new TextEncoder().encode(sig);
@@ -218,20 +219,7 @@ serve(async (req) => {
     return ok();
   }
 
-  // 7. Salva a mensagem do cliente
-  const { error: msgErr } = await supabase.from('messages').insert({
-    conversation_id: upsertedConv.id,
-    role: 'customer',
-    content: text,
-    wa_message_id: waMessageId,
-  });
-
-  if (msgErr) {
-    console.error('[WH] Erro ao salvar mensagem:', msgErr);
-    return ok();
-  }
-
-  // 8. Garante que existe um lead para este contato (cria apenas se não existir)
+  // 7. Garante que existe um lead para este contato (cria apenas se não existir)
   const { data: existingLead } = await supabase
     .from('leads')
     .select('id')
@@ -242,35 +230,113 @@ serve(async (req) => {
   if (!existingLead) {
     await supabase.from('leads').insert({
       user_id: userId,
-      name:    senderName || 'Cliente WhatsApp',
-      phone:   from,
-      status:  'novo',
-      notes:   'Lead criado automaticamente via WhatsApp',
+      name: senderName || 'Cliente WhatsApp',
+      phone: from,
+      status: 'novo',
+      notes: 'Lead criado automaticamente via WhatsApp',
     });
   }
 
-  // 9. Se um humano está atendendo, para aqui — não dispara o bot
-  if (upsertedConv.status === 'human') {
+  // 8. Helper: aciona process-conversation de forma assíncrona (mantém a function viva)
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  const fireProcess = (conversationId: string) => {
+    // @ts-ignore — EdgeRuntime é global nas Supabase Edge Functions
+    EdgeRuntime.waitUntil(
+      fetch(`${supabaseUrl}/functions/v1/process-conversation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+        body: JSON.stringify({ conversation_id: conversationId }),
+      }).catch((e: unknown) => console.error('[WH] Erro ao acionar process-conversation:', e)),
+    );
+  };
+
+  // 9a. Mensagem de TEXTO — fluxo normal
+  if (msg.type === 'text') {
+    const { error: msgErr } = await supabase.from('messages').insert({
+      conversation_id: upsertedConv.id,
+      role: 'customer',
+      content: text,
+      wa_message_id: waMessageId,
+    });
+    if (msgErr) {
+      console.error('[WH] Erro ao salvar mensagem:', msgErr);
+      return ok();
+    }
+    if (upsertedConv.status !== 'human') fireProcess(upsertedConv.id);
     return ok();
   }
 
-  // 9. Aciona process-conversation de forma assíncrona
-  const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
-  const serviceKey  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  const processUrl  = `${supabaseUrl}/functions/v1/process-conversation`;
+  // 9b. Mensagem de ÁUDIO — claim de dedup + transcrição em background
+  if (msg.type === 'audio') {
+    // Claim: insere já a mensagem (placeholder) para reservar o wa_message_id e
+    // evitar transcrição dupla caso chegue uma entrega duplicada da Meta.
+    const { data: audioMsg, error: claimErr } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: upsertedConv.id,
+        role: 'customer',
+        content: '🎤 Áudio recebido, transcrevendo…',
+        wa_message_id: waMessageId,
+        transcribed_from_audio: true,
+      })
+      .select('id')
+      .single();
 
-  // EdgeRuntime.waitUntil mantém a function viva após responder 200
-  // @ts-ignore — EdgeRuntime é global nas Supabase Edge Functions
-  EdgeRuntime.waitUntil(
-    fetch(processUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${serviceKey}`,
-      },
-      body: JSON.stringify({ conversation_id: upsertedConv.id }),
-    }).catch((e: unknown) => console.error('[WH] Erro ao acionar process-conversation:', e)),
-  );
+    if (claimErr || !audioMsg) {
+      console.warn('[WH] claim de áudio falhou (duplicado?):', claimErr?.message);
+      return ok();
+    }
 
-  return ok();
+    const convId  = upsertedConv.id;
+    const isHuman = upsertedConv.status === 'human';
+    const mediaId = msg.mediaId ?? '';
+    const pid     = phoneNumberId;
+
+    // @ts-ignore — EdgeRuntime é global nas Supabase Edge Functions
+    EdgeRuntime.waitUntil((async () => {
+      try {
+        const res = await fetch(`${supabaseUrl}/functions/v1/transcribe-audio`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
+          body: JSON.stringify({ media_id: mediaId, phone_number_id: pid }),
+        });
+        const result = await res.json().catch(() => ({ success: false, code: 'openai_error' }));
+
+        if (result?.success && result.text) {
+          await supabase.from('messages').update({ content: result.text }).eq('id', audioMsg.id);
+          console.log(`[WH-audio] transcrito (${maskPhone(from)}): ${String(result.text).length} chars`);
+          if (!isHuman) fireProcess(convId);
+          return;
+        }
+
+        // Erro de transcrição: registra marcador e responde de forma humana
+        const code = String(result?.code ?? 'openai_error');
+        console.error(`[WH-audio] falha (${maskPhone(from)}): ${code} ${result?.error ?? ''}`);
+        await supabase.from('messages').update({ content: '[áudio com falha de transcrição]' }).eq('id', audioMsg.id);
+
+        const FALLBACKS: Record<string, { msg: string; handoff: boolean }> = {
+          too_large:       { msg: 'Recebi seu áudio mas é muito longo pra eu processar. Pode resumir por texto ou mandar em partes?', handoff: false },
+          download_failed: { msg: 'Tive um problema técnico, pode mandar de novo?', handoff: true },
+          timeout:         { msg: 'Recebi seu áudio mas tive um problema pra processar. Pode me mandar por texto?', handoff: true },
+          openai_error:    { msg: 'Recebi seu áudio mas tive um problema pra processar. Pode me mandar por texto?', handoff: true },
+        };
+        const fb = FALLBACKS[code] ?? FALLBACKS.openai_error;
+
+        const sent = await sendMessage(from, fb.msg, pid || undefined);
+        if (!sent) console.error('[WH-audio] falha ao enviar fallback (salvo no banco mesmo assim)');
+        await supabase.from('messages').insert({ conversation_id: convId, role: 'bot', content: fb.msg });
+        await supabase.from('conversations').update({
+          last_message_at: new Date().toISOString(),
+          ...(fb.handoff ? { status: 'pending' } : {}),
+        }).eq('id', convId);
+      } catch (e) {
+        console.error('[WH-audio] exceção no processamento de áudio:', e);
+      }
+    })());
+
+    return ok();
+  }
+
+  return ok(); // tipo não suportado
 });

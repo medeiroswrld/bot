@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   Bot, UserCheck, MessageCircle, Send, RefreshCw,
-  PhoneCall, Search, Loader2, AlertCircle, Bell, BellOff, Trash2,
+  PhoneCall, Search, Loader2, AlertCircle, Bell, BellOff, Trash2, Mic,
 } from 'lucide-react';
 import { supabaseTyped } from '../lib/supabase-typed';
 // useAppContext is from a .jsx file — cast to known shape below
@@ -147,6 +147,11 @@ const Bubble = React.memo(function Bubble({ msg }: { msg: Message }) {
           </div>
         )}
         <p style={{ margin: 0, fontSize: '0.875rem', lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: textColor }}>
+          {msg.transcribed_from_audio && (
+            <span title="Mensagem recebida como áudio (transcrita)">
+              <Mic size={13} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 4, opacity: 0.6 }} />
+            </span>
+          )}
           {msg.content}
         </p>
         <p style={{ margin: '4px 0 0', fontSize: '0.65rem', color: timeColor, textAlign: 'right' }}>
@@ -558,6 +563,16 @@ export default function Conversations() {
               : [...withoutOptimistic, newMsg];
           });
           setLastMessages((prev) => ({ ...prev, [selectedId]: newMsg }));
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${selectedId}` },
+        (payload) => {
+          const updated = payload.new as Message;
+          console.log('[RT messages] UPDATE recebido:', updated.id);
+          setMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
+          setLastMessages((prev) => (prev[selectedId]?.id === updated.id ? { ...prev, [selectedId]: updated } : prev));
         },
       )
       .subscribe((status, err) => {
