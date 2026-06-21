@@ -251,15 +251,24 @@ const Settings = () => {
     const [savingBehav,  setSavingBehav]  = useState(false);
     const [savedBehav,   setSavedBehav]   = useState(false);
 
+    // ── Qualificação FORD (toggles independentes, salvar próprio) ──────────────
+    const [ford,       setFord]       = useState({ family: true, occupation: true, recreation: true, financial: true });
+    const [savingFord, setSavingFord] = useState(false);
+    const [savedFord,  setSavedFord]  = useState(false);
+
     useEffect(() => {
         if (!user?.id) return;
         supabase
             .from('company_settings')
-            .select('delayed_schedule_enabled')
+            .select('delayed_schedule_enabled, ford_qualification')
             .eq('user_id', user.id)
             .single()
             .then(({ data }) => {
-                if (data) setDelayedSched(data.delayed_schedule_enabled !== false);
+                if (!data) return;
+                setDelayedSched(data.delayed_schedule_enabled !== false);
+                if (data.ford_qualification && typeof data.ford_qualification === 'object') {
+                    setFord({ family: true, occupation: true, recreation: true, financial: true, ...data.ford_qualification });
+                }
             });
     }, [user?.id]);
 
@@ -273,6 +282,18 @@ const Settings = () => {
         setSavingBehav(false);
         setSavedBehav(true);
         setTimeout(() => setSavedBehav(false), 2000);
+    };
+
+    const saveFord = async () => {
+        if (!user?.id) return;
+        setSavingFord(true);
+        await supabase
+            .from('company_settings')
+            .update({ ford_qualification: ford, updated_at: new Date().toISOString() })
+            .eq('user_id', user.id);
+        setSavingFord(false);
+        setSavedFord(true);
+        setTimeout(() => setSavedFord(false), 2000);
     };
 
     // ── Exceções / Feriados ───────────────────────────────────────────────────
@@ -751,6 +772,42 @@ const Settings = () => {
                                 ? <><CheckCircle size={18} /> Salvo!</>
                                 : savingBehav ? 'Salvando...'
                                 : <><Save size={18} /> Salvar</>}
+                        </button>
+
+                        {/* ── Sub-seção: Qualificação do Lead (FORD) ───────────────── */}
+                        <div style={{ borderTop: '1px solid var(--border)', margin: '1.5rem 0 1.25rem' }} />
+                        <strong style={{ display: 'block', marginBottom: 4 }}>Qualificação do Lead (Técnica FORD)</strong>
+                        <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', lineHeight: 1.5, marginBottom: '0.75rem' }}>
+                            O vendedor pode descobrir naturalmente, durante a conversa, informações importantes do cliente. Cada categoria que você ativar abaixo será explorada quando fizer sentido no fluxo.
+                        </p>
+                        {[
+                            ['family',     '👨‍👩‍👧 Família',             'estado civil, filhos, com quem mora'],
+                            ['occupation', '💼 Ocupação',              'profissão e área de trabalho'],
+                            ['recreation', '🎯 Recreação',             'uso do carro (trabalho/lazer) e estilo de vida'],
+                            ['financial',  '💰 Capacidade financeira', 'forma de pagamento e faixa de orçamento'],
+                        ].map(([key, label, hint]) => (
+                            <div key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
+                                <button type="button" onClick={() => setFord(f => ({ ...f, [key]: !f[key] }))}
+                                    title={ford[key] ? 'Desativar' : 'Ativar'}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, color: ford[key] ? '#10b981' : '#94a3b8' }}>
+                                    {ford[key] ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
+                                </button>
+                                <div>
+                                    <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{label}</span>
+                                    <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>{hint}</p>
+                                </div>
+                            </div>
+                        ))}
+                        <button
+                            className="btn-primary"
+                            onClick={saveFord}
+                            disabled={savingFord}
+                            style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                            {savedFord
+                                ? <><CheckCircle size={18} /> Salvo!</>
+                                : savingFord ? 'Salvando...'
+                                : <><Save size={18} /> Salvar Qualificação FORD</>}
                         </button>
                     </div>
                 </section>

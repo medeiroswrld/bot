@@ -269,6 +269,10 @@ export const AppProvider = ({ children }) => {
         date: l.created_at,
         birth_date: l.birth_date || '',
         city: 'Não informada',
+        family_info: l.family_info || '',
+        occupation: l.occupation || '',
+        recreation_info: l.recreation_info || '',
+        financial_info: l.financial_info || '',
         avatar: l.name.charAt(0).toUpperCase()
       }));
 
@@ -1141,6 +1145,10 @@ export const AppProvider = ({ children }) => {
       if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
       if (updates.status !== undefined) dbUpdates.status = updates.status;
       if (updates.birth_date !== undefined) dbUpdates.birth_date = updates.birth_date || null;
+      if (updates.family_info !== undefined)     dbUpdates.family_info     = updates.family_info || null;
+      if (updates.occupation !== undefined)      dbUpdates.occupation      = updates.occupation || null;
+      if (updates.recreation_info !== undefined) dbUpdates.recreation_info = updates.recreation_info || null;
+      if (updates.financial_info !== undefined)  dbUpdates.financial_info  = updates.financial_info || null;
 
       const { error } = await supabase
         .from('leads')

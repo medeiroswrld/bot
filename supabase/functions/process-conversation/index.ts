@@ -247,6 +247,20 @@ const TOOLS = [
       required: ['model'],
     },
   },
+  {
+    name: 'save_lead_qualification',
+    description:
+      'Use SEMPRE que descobrir naturalmente uma informação relevante do cliente durante a conversa: estado civil/filhos (family), profissão/ocupação (occupation), uso do carro/hobbies (recreation), ou capacidade financeira/forma de pagamento (financial). Não precisa ter as 4 ao mesmo tempo — vai salvando aos poucos. NÃO faça perguntas só pra preencher; só salve quando a informação surgir naturalmente.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        family:     { type: 'string', description: 'Estado civil, filhos, situação familiar. Ex: "casado, 2 filhos pequenos"' },
+        occupation: { type: 'string', description: 'Profissão, área de atuação. Ex: "engenheiro civil"' },
+        recreation: { type: 'string', description: 'Uso do carro, hobbies. Ex: "vai usar pra passeio em família aos fins de semana"' },
+        financial:  { type: 'string', description: 'Forma de pagamento, orçamento. Ex: "à vista até 80 mil" ou "financiamento, tem 20 mil de entrada"' },
+      },
+    },
+  },
 ]
 
 // ─── execução das ferramentas ─────────────────────────────────────────────────
@@ -811,6 +825,31 @@ async function executeTool(
     return { success: true, action: 'created', message: `Interesse registrado: ${model}${anoInfo}.` };
   }
 
+  if (name === 'save_lead_qualification') {
+    const map: Record<string, string> = {};
+    if (String(input.family ?? '').trim())     map.family_info     = String(input.family).trim();
+    if (String(input.occupation ?? '').trim()) map.occupation      = String(input.occupation).trim();
+    if (String(input.recreation ?? '').trim()) map.recreation_info = String(input.recreation).trim();
+    if (String(input.financial ?? '').trim())  map.financial_info  = String(input.financial).trim();
+    if (Object.keys(map).length === 0) return { sucesso: false, mensagem: 'Nada para salvar.' };
+
+    const { data: existing } = await supabase
+      .from('leads').select('id').eq('user_id', userId).eq('phone', customerPhone).maybeSingle();
+
+    if (existing) {
+      await supabase.from('leads').update({ ...map, updated_at: new Date().toISOString() }).eq('id', existing.id);
+      console.log('[save_lead_qualification] atualizado:', existing.id, Object.keys(map));
+      return { sucesso: true, campos: Object.keys(map) };
+    }
+
+    const { data: created } = await supabase
+      .from('leads')
+      .insert({ user_id: userId, name: customerName ?? 'Cliente WhatsApp', phone: customerPhone, status: 'novo', ...map })
+      .select('id').single();
+    console.log('[save_lead_qualification] lead criado:', created?.id, Object.keys(map));
+    return { sucesso: true, campos: Object.keys(map), lead_id: created?.id };
+  }
+
   return { erro: `Ferramenta desconhecida: ${name}` };
 }
 
@@ -854,6 +893,21 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], convS
   console.log('[payment] payment_methods lido do banco:', JSON.stringify(settings.payment_methods ?? null), '→ usados no prompt:', JSON.stringify(paymentMethods));
   const paymentBlock = paymentMethods.length > 0
     ? `\n\n## Formas de pagamento aceitas pela loja\n\nFormas de pagamento aceitas pela loja: ${paymentMethods.join(', ')}.\n\nREGRA RÍGIDA sobre pagamento — siga ao pé da letra:\n- Responda SOMENTE com base na lista acima. Considere essa lista completa e exata.\n- NUNCA invente formas de pagamento, prazos (ex.: "18x", "48x", "em até 60x"), descontos, taxas ou condições especiais que não estejam EXPLICITAMENTE escritos na lista.\n- Se a lista NÃO tem "cartão de crédito" ou "cartão de débito", você NÃO pode mencionar cartão. Se não tem "consórcio", não cite consórcio. O mesmo vale para qualquer forma fora da lista.\n- Se um item está na lista sem prazo (ex.: "Financiamento bancário"), você NÃO pode dizer "em 48x" nem inventar número de parcelas — diga apenas que a loja trabalha com essa forma e que prazos/condições são confirmados pela equipe.\n- Se o cliente perguntar por algo que não está na lista, não afirme que a loja aceita — diga que vai confirmar com o gerente.`
+    : '';
+
+  // Qualificação FORD — só inclui as categorias com toggle ativo no tenant.
+  const ford = (settings.ford_qualification && typeof settings.ford_qualification === 'object')
+    ? settings.ford_qualification as Record<string, unknown>
+    : null;
+  const FORD_LINES: Record<string, string> = {
+    family:     '- **Família**: tente descobrir se é solteiro/casado, se tem filhos, com quem mora. Pergunte naturalmente, tipo "É carro pra você ou pra família?", "Tem criança pequena em casa?". NÃO use a palavra "família" como pergunta direta.',
+    occupation: '- **Ocupação**: descubra a profissão dele. Pergunte de forma natural tipo "E você, trabalha com o quê?" ou "É pro trabalho ou só passeio?". Não soe formal.',
+    recreation: '- **Recreação**: descubra como ele usa o carro/o que gosta de fazer. Pergunte tipo "Vai usar mais na cidade ou viaja bastante?", "Curte estrada?", "É pra trabalho ou passeio?".',
+    financial:  '- **Capacidade financeira**: descubra a forma de pagamento e o orçamento. Pergunte de forma leve no momento certo, tipo "Tá pensando em comprar à vista ou financiar?", "Já tem ideia de quanto quer investir?". Não pergunte se ele "tem dinheiro" — só explore a forma e a faixa.',
+  };
+  const fordKeys = (['family', 'occupation', 'recreation', 'financial'] as const).filter((k) => ford?.[k] === true);
+  const fordBlock = fordKeys.length > 0
+    ? `\n\n## Qualificação natural do cliente (FORD)\n\nDurante a conversa, descubra naturalmente — SEM interrogatório — as seguintes informações sobre o cliente. Não pergunte tudo de uma vez nem em sequência. Distribua ao longo do diálogo quando fizer sentido no fluxo. Use linguagem leve, conversacional.\n\n${fordKeys.map((k) => FORD_LINES[k]).join('\n\n')}\n\n## Quando perguntar\n\n- Logo APÓS o cliente expressar interesse em um carro específico (já tem clareza do que quer)\n- ANTES de marcar visita (pra atendente já estar preparado)\n- DURANTE conversa fluida (não em momentos de urgência ou desconforto)\n\n## Como salvar\n\nQuando descobrir uma informação, use a tool save_lead_qualification passando o campo correspondente. NÃO precisa esperar ter as 4 — vai salvando aos poucos. Por exemplo:\n- Cliente diz "é pra minha esposa" → save_lead_qualification({ family: "casado, comprando carro pra esposa" })\n- Cliente diz "trabalho como pedreiro" → save_lead_qualification({ occupation: "pedreiro" })\n- Cliente diz "vou pagar à vista" → save_lead_qualification({ financial: "à vista" })`
     : '';
 
   const delayedEnabled = settings.delayed_schedule_enabled !== false; // default ON
@@ -1025,7 +1079,7 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
     faqs.length > 0
       ? `\n\n## Perguntas frequentes — use estas respostas quando o cliente perguntar algo relacionado\n\n${faqs.map((f) => `P: ${f.question}\nR: ${f.answer}`).join('\n\n')}`
       : ''
-  }${paymentBlock}`;
+  }${paymentBlock}${fordBlock}`;
 }
 
 // ─── chamada à API do Claude ──────────────────────────────────────────────────
