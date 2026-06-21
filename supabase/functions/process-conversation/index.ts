@@ -155,6 +155,17 @@ const TOOLS = [
     },
   },
   {
+    name: 'cancelar_visita',
+    description:
+      'Cancela um agendamento existente do cliente. Use quando o cliente claramente quiser desmarcar/cancelar uma visita já agendada (ex: respondendo a lembrete dizendo que não vai poder ir).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', description: 'Motivo do cancelamento conforme dito pelo cliente. Ex: "imprevisto no trabalho"' },
+      },
+    },
+  },
+  {
     name: 'registrar_interesse',
     description:
       'Registra ou atualiza o lead do cliente quando ele demonstra intenção de compra ou pede contato.',
@@ -528,6 +539,52 @@ async function executeTool(
     return {
       sucesso: true,
       mensagem: 'Registrado. Diga ao cliente que vai verificar com seu superior e responde em alguns minutos. NÃO ofereça outro horário agora nem fale em atendente/sistema.',
+    };
+  }
+
+  if (name === 'cancelar_visita') {
+    const reason = String(input.reason ?? '').trim();
+    const { iso: todayIso } = getBrazilDateInfo();
+    const in7 = new Intl.DateTimeFormat('sv-SE').format(new Date(Date.parse(`${todayIso}T12:00:00`) + 7 * 86400000));
+
+    // Agendamento mais próximo do cliente (próximos 7 dias, ainda ativo)
+    const { data: appt } = await supabase
+      .from('appointments')
+      .select('id, appointment_date, appointment_time, notes')
+      .eq('user_id', userId)
+      .eq('customer_phone', customerPhone)
+      .in('status', ['scheduled', 'confirmed'])
+      .gte('appointment_date', todayIso)
+      .lte('appointment_date', in7)
+      .order('appointment_date', { ascending: true })
+      .order('appointment_time', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (!appt) {
+      console.log('[cancelar_visita] nenhum agendamento ativo encontrado para', maskPhone(customerPhone));
+      return { sucesso: false, mensagem: 'Nenhuma visita agendada encontrada para cancelar.' };
+    }
+
+    const notaCancel = reason ? `Cancelado pelo cliente: ${reason}` : 'Cancelado pelo cliente';
+    const novaNota = appt.notes ? `${appt.notes}\n${notaCancel}` : notaCancel;
+
+    const { error } = await supabase
+      .from('appointments')
+      .update({ status: 'cancelled', notes: novaNota })
+      .eq('id', appt.id);
+
+    if (error) {
+      console.error('[cancelar_visita] erro ao cancelar:', JSON.stringify(error));
+      return { sucesso: false, error: 'Falha ao cancelar o agendamento.' };
+    }
+
+    console.log('[cancelar_visita] cancelado:', appt.id, appt.appointment_date, appt.appointment_time);
+    return {
+      sucesso: true,
+      data: appt.appointment_date,
+      horario: String(appt.appointment_time).substring(0, 5),
+      mensagem: 'Visita cancelada.',
     };
   }
 
@@ -910,6 +967,8 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], convS
     ? `\n\n## Qualificação natural do cliente (FORD)\n\nDurante a conversa, descubra naturalmente — SEM interrogatório — as seguintes informações sobre o cliente. Não pergunte tudo de uma vez nem em sequência. Distribua ao longo do diálogo quando fizer sentido no fluxo. Use linguagem leve, conversacional.\n\n${fordKeys.map((k) => FORD_LINES[k]).join('\n\n')}\n\n## Quando perguntar\n\n- Logo APÓS o cliente expressar interesse em um carro específico (já tem clareza do que quer)\n- ANTES de marcar visita (pra atendente já estar preparado)\n- DURANTE conversa fluida (não em momentos de urgência ou desconforto)\n\n## Como salvar\n\nQuando descobrir uma informação, use a tool save_lead_qualification passando o campo correspondente. NÃO precisa esperar ter as 4 — vai salvando aos poucos. Por exemplo:\n- Cliente diz "é pra minha esposa" → save_lead_qualification({ family: "casado, comprando carro pra esposa" })\n- Cliente diz "trabalho como pedreiro" → save_lead_qualification({ occupation: "pedreiro" })\n- Cliente diz "vou pagar à vista" → save_lead_qualification({ financial: "à vista" })`
     : '';
 
+  const visitReminderBlock = `\n\n## Resposta do cliente ao lembrete de visita\n\nSe o cliente responde algo como "não vou poder ir", "preciso desmarcar", "vou cancelar", "tô com problema" ou "vou ter que remarcar" (normalmente após um lembrete de visita):\n\n1. Mostre empatia ("Tudo bem, imprevistos acontecem!").\n2. Pergunte: "Você prefere remarcar pra outro horário ou cancelar de vez?"\n3. Se quiser REMARCAR: chame a tool cancelar_visita (cancela o agendamento atual) e em seguida conduza uma nova marcação seguindo o fluxo normal (dia → período → confirmação).\n4. Se quiser CANCELAR: chame a tool cancelar_visita e responda algo acolhedor: "Sem problemas, fica pra próxima! Quando quiser voltar, é só me chamar."\n\nSe o cliente responder positivamente ("ok", "tô indo", "estou a caminho"), apenas confirme: "Perfeito, te esperamos! 😊"`;
+
   const delayedEnabled = settings.delayed_schedule_enabled !== false; // default ON
   const busyTimeRule = delayedEnabled
     ? `5. **Quando o cliente pedir um horário que está OCUPADO** (você confirmou via ver_horarios_disponiveis que ele NÃO aparece em horarios_livres): NÃO descarte na hora nem ofereça alternativa imediatamente — chame request_schedule_check e responda só "Deixa eu verificar com meu superior, te respondo em alguns minutos." A confirmação ou as alternativas chegam ao cliente depois, automaticamente. ATENÇÃO: isto vale SÓ para horário OCUPADO. Se o horário estiver livre, siga a regra 6 (agendar na hora).`
@@ -984,6 +1043,7 @@ Seu objetivo é entender o que o cliente procura, mostrar as opções que a conc
 - **registrar_interesse_veiculo** — quando o cliente procura um modelo específico que NÃO está no estoque e quer ser avisado quando entrar (lista de espera). Veja a seção "Quando não tiver o veículo no estoque".
 - **coletar_dados_financiamento** — quando o cliente quiser simular financiamento (ver regras abaixo).
 - **request_schedule_check** — APENAS quando o cliente pedir um horário de visita que está OCUPADO (você confirmou via ver_horarios_disponiveis que NÃO está em horarios_livres). Se o horário pedido está livre, use agendar_visita, NUNCA esta. Veja as regras 5 e 6 em "Como conduzir a conversa".
+- **cancelar_visita** — quando o cliente quiser desmarcar/cancelar uma visita já agendada (ex: respondendo ao lembrete que não vai poder ir). Veja "Resposta do cliente ao lembrete de visita".
 - **chamar_atendente** — aciona a equipe nos bastidores (handoff interno e silencioso; o cliente nunca percebe). Veja as regras abaixo.
 
 ## Quando o cliente pede um carro que NÃO tem no estoque
@@ -1079,7 +1139,7 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
     faqs.length > 0
       ? `\n\n## Perguntas frequentes — use estas respostas quando o cliente perguntar algo relacionado\n\n${faqs.map((f) => `P: ${f.question}\nR: ${f.answer}`).join('\n\n')}`
       : ''
-  }${paymentBlock}${fordBlock}`;
+  }${paymentBlock}${fordBlock}${visitReminderBlock}`;
 }
 
 // ─── chamada à API do Claude ──────────────────────────────────────────────────

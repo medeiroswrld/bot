@@ -256,11 +256,16 @@ const Settings = () => {
     const [savingFord, setSavingFord] = useState(false);
     const [savedFord,  setSavedFord]  = useState(false);
 
+    // ── Lembrete de Visita (toggle + minutos, salvar próprio) ──────────────────
+    const [visitReminder, setVisitReminder] = useState({ enabled: false, minutes: 15 });
+    const [savingVR, setSavingVR] = useState(false);
+    const [savedVR,  setSavedVR]  = useState(false);
+
     useEffect(() => {
         if (!user?.id) return;
         supabase
             .from('company_settings')
-            .select('delayed_schedule_enabled, ford_qualification')
+            .select('delayed_schedule_enabled, ford_qualification, visit_reminder_enabled, visit_reminder_minutes_before')
             .eq('user_id', user.id)
             .single()
             .then(({ data }) => {
@@ -269,6 +274,10 @@ const Settings = () => {
                 if (data.ford_qualification && typeof data.ford_qualification === 'object') {
                     setFord({ family: true, occupation: true, recreation: true, financial: true, ...data.ford_qualification });
                 }
+                setVisitReminder({
+                    enabled: data.visit_reminder_enabled === true,
+                    minutes: Number(data.visit_reminder_minutes_before ?? 15),
+                });
             });
     }, [user?.id]);
 
@@ -294,6 +303,22 @@ const Settings = () => {
         setSavingFord(false);
         setSavedFord(true);
         setTimeout(() => setSavedFord(false), 2000);
+    };
+
+    const saveVisitReminder = async () => {
+        if (!user?.id) return;
+        setSavingVR(true);
+        await supabase
+            .from('company_settings')
+            .update({
+                visit_reminder_enabled: visitReminder.enabled,
+                visit_reminder_minutes_before: visitReminder.minutes,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', user.id);
+        setSavingVR(false);
+        setSavedVR(true);
+        setTimeout(() => setSavedVR(false), 2000);
     };
 
     // ── Exceções / Feriados ───────────────────────────────────────────────────
@@ -808,6 +833,44 @@ const Settings = () => {
                                 ? <><CheckCircle size={18} /> Salvo!</>
                                 : savingFord ? 'Salvando...'
                                 : <><Save size={18} /> Salvar Qualificação FORD</>}
+                        </button>
+
+                        {/* ── Sub-seção: Lembrete de Visita ───────────────────────── */}
+                        <div style={{ borderTop: '1px solid var(--border)', margin: '1.5rem 0 1.25rem' }} />
+                        <strong style={{ display: 'block', marginBottom: 4 }}>Lembrete de Visita</strong>
+                        <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', lineHeight: 1.5, marginBottom: '0.75rem' }}>
+                            O sistema envia uma mensagem de lembrete via WhatsApp alguns minutos antes da visita. Requer o template <strong>lembrete_visita</strong> aprovado pela Meta.
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
+                            <button type="button" onClick={() => setVisitReminder(v => ({ ...v, enabled: !v.enabled }))}
+                                title={visitReminder.enabled ? 'Desativar' : 'Ativar'}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, color: visitReminder.enabled ? '#10b981' : '#94a3b8' }}>
+                                {visitReminder.enabled ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
+                            </button>
+                            <div>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Enviar lembrete antes da visita</span>
+                                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>Ative só depois que o template estiver aprovado pela Meta.</p>
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label>Enviar quantos minutos antes</label>
+                            <select value={visitReminder.minutes} onChange={e => setVisitReminder(v => ({ ...v, minutes: Number(e.target.value) }))}>
+                                <option value={15}>15 minutos</option>
+                                <option value={30}>30 minutos</option>
+                                <option value={60}>1 hora</option>
+                                <option value={120}>2 horas</option>
+                            </select>
+                        </div>
+                        <button
+                            className="btn-primary"
+                            onClick={saveVisitReminder}
+                            disabled={savingVR}
+                            style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                            {savedVR
+                                ? <><CheckCircle size={18} /> Salvo!</>
+                                : savingVR ? 'Salvando...'
+                                : <><Save size={18} /> Salvar Lembrete de Visita</>}
                         </button>
                     </div>
                 </section>
