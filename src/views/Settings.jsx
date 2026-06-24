@@ -261,11 +261,16 @@ const Settings = () => {
     const [savingVR, setSavingVR] = useState(false);
     const [savedVR,  setSavedVR]  = useState(false);
 
+    // ── Pré-avaliação de Carro / Troca (toggle + perguntas extras, salvar próprio) ──
+    const [tradeIn, setTradeIn] = useState({ enabled: true, extraQuestions: '' });
+    const [savingTI, setSavingTI] = useState(false);
+    const [savedTI,  setSavedTI]  = useState(false);
+
     useEffect(() => {
         if (!user?.id) return;
         supabase
             .from('company_settings')
-            .select('delayed_schedule_enabled, ford_qualification, visit_reminder_enabled, visit_reminder_minutes_before')
+            .select('delayed_schedule_enabled, ford_qualification, visit_reminder_enabled, visit_reminder_minutes_before, trade_in_evaluation_enabled, trade_in_extra_questions')
             .eq('user_id', user.id)
             .single()
             .then(({ data }) => {
@@ -277,6 +282,10 @@ const Settings = () => {
                 setVisitReminder({
                     enabled: data.visit_reminder_enabled === true,
                     minutes: Number(data.visit_reminder_minutes_before ?? 15),
+                });
+                setTradeIn({
+                    enabled: data.trade_in_evaluation_enabled !== false,
+                    extraQuestions: data.trade_in_extra_questions || '',
                 });
             });
     }, [user?.id]);
@@ -319,6 +328,22 @@ const Settings = () => {
         setSavingVR(false);
         setSavedVR(true);
         setTimeout(() => setSavedVR(false), 2000);
+    };
+
+    const saveTradeIn = async () => {
+        if (!user?.id) return;
+        setSavingTI(true);
+        await supabase
+            .from('company_settings')
+            .update({
+                trade_in_evaluation_enabled: tradeIn.enabled,
+                trade_in_extra_questions: tradeIn.extraQuestions || null,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', user.id);
+        setSavingTI(false);
+        setSavedTI(true);
+        setTimeout(() => setSavedTI(false), 2000);
     };
 
     // ── Exceções / Feriados ───────────────────────────────────────────────────
@@ -871,6 +896,58 @@ const Settings = () => {
                                 ? <><CheckCircle size={18} /> Salvo!</>
                                 : savingVR ? 'Salvando...'
                                 : <><Save size={18} /> Salvar Lembrete de Visita</>}
+                        </button>
+
+                        {/* ── Sub-seção: Pré-avaliação de Carro (Troca) ───────────── */}
+                        <div style={{ borderTop: '1px solid var(--border)', margin: '1.5rem 0 1.25rem' }} />
+                        <strong style={{ display: 'block', marginBottom: 4 }}>Pré-avaliação de Carro (Troca)</strong>
+                        <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', lineHeight: 1.5, marginBottom: '0.75rem' }}>
+                            Quando o cliente mencionar que tem carro pra trocar, o vendedor coleta naturalmente informações sobre o veículo (modelo, ano, KM, etc.). Essas informações ficam disponíveis no perfil do lead e no card de agendamento.
+                        </p>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
+                            <button type="button" onClick={() => setTradeIn(t => ({ ...t, enabled: !t.enabled }))}
+                                title={tradeIn.enabled ? 'Desativar' : 'Ativar'}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, color: tradeIn.enabled ? '#10b981' : '#94a3b8' }}>
+                                {tradeIn.enabled ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
+                            </button>
+                            <div>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Ativar pré-avaliação de carro</span>
+                            </div>
+                        </div>
+                        {tradeIn.enabled && (
+                            <>
+                                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: 4 }}>Perguntas padrão que o vendedor faz:</p>
+                                <ul style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '0 0 1rem', paddingLeft: '1.1rem', lineHeight: 1.6 }}>
+                                    <li>Modelo (marca e modelo)</li>
+                                    <li>Ano</li>
+                                    <li>Quilometragem</li>
+                                    <li>Há quanto tempo é dono</li>
+                                    <li>Nota que daria pro carro (0-10)</li>
+                                    <li>Forma de pagamento desejada (à vista, financiamento, troca, diferença)</li>
+                                </ul>
+                                <div className="form-group">
+                                    <label>Perguntas adicionais (opcional)</label>
+                                    <textarea
+                                        rows={3}
+                                        value={tradeIn.extraQuestions}
+                                        onChange={e => setTradeIn(t => ({ ...t, extraQuestions: e.target.value }))}
+                                        placeholder={"Uma pergunta por linha. Ex:\nTem algum dano na lataria?\nJá bateu o carro?"}
+                                        style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.6 }}
+                                    />
+                                    <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '-0.25rem' }}>Cada linha = 1 pergunta extra que o bot vai fazer.</p>
+                                </div>
+                            </>
+                        )}
+                        <button
+                            className="btn-primary"
+                            onClick={saveTradeIn}
+                            disabled={savingTI}
+                            style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                            {savedTI
+                                ? <><CheckCircle size={18} /> Salvo!</>
+                                : savingTI ? 'Salvando...'
+                                : <><Save size={18} /> Salvar Pré-avaliação de Carro</>}
                         </button>
                     </div>
                 </section>

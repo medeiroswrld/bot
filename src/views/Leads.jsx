@@ -31,6 +31,16 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
     const { updateLead } = useAppContext();
     const [savedField, setSavedField] = useState(null);
     if (!lead) return null;
+    const TRADE_FIELDS = [
+        ['trade_in_model', 'Modelo'],
+        ['trade_in_year', 'Ano'],
+        ['trade_in_km', 'Quilometragem'],
+        ['trade_in_ownership_time', 'Tempo de posse'],
+        ['trade_in_owner_rating', 'Nota do dono (0-10)'],
+        ['trade_in_payment_preference', 'Forma de pagamento'],
+        ['trade_in_difference_payment', 'Diferença (como paga)'],
+    ];
+    const hasTradeIn = [...TRADE_FIELDS.map(f => f[0]), 'trade_in_extra_info'].some(f => (lead[f] || '').toString().trim());
     const s = STATUS_MAP[lead.status] || STATUS_MAP.novo;
     return (
         <div className="drawer-overlay" onClick={onClose}>
@@ -114,6 +124,57 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
                                 />
                             </div>
                         ))}
+                    </div>
+
+                    {/* Carro pra Troca — editável pelo atendente */}
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.5rem' }}>🚗 Carro pra Troca</label>
+                        {!hasTradeIn ? (
+                            <p style={{ fontSize: '0.8rem', color: '#94a3b8', fontStyle: 'italic' }}>Cliente não mencionou troca de carro.</p>
+                        ) : (
+                            <>
+                                {TRADE_FIELDS.map(([field, label]) => (
+                                    <div key={field} style={{ marginBottom: '0.6rem' }}>
+                                        <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            {label}
+                                            {savedField === field && <span style={{ color: '#10b981', fontSize: '0.7rem', fontWeight: 600 }}>✓ salvo</span>}
+                                        </p>
+                                        <input
+                                            type="text"
+                                            defaultValue={lead[field] || ''}
+                                            placeholder="—"
+                                            onBlur={e => {
+                                                if (e.target.value !== (lead[field] || '')) {
+                                                    updateLead(lead.id, { [field]: e.target.value });
+                                                    setSavedField(field);
+                                                    setTimeout(() => setSavedField(s => (s === field ? null : s)), 1500);
+                                                }
+                                            }}
+                                            style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: 10, border: '1px solid #e2e8f0', fontSize: '0.85rem', boxSizing: 'border-box' }}
+                                        />
+                                    </div>
+                                ))}
+                                <div style={{ marginBottom: '0.6rem' }}>
+                                    <p style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        Informações extras
+                                        {savedField === 'trade_in_extra_info' && <span style={{ color: '#10b981', fontSize: '0.7rem', fontWeight: 600 }}>✓ salvo</span>}
+                                    </p>
+                                    <textarea
+                                        rows={3}
+                                        defaultValue={lead.trade_in_extra_info || ''}
+                                        placeholder="—"
+                                        onBlur={e => {
+                                            if (e.target.value !== (lead.trade_in_extra_info || '')) {
+                                                updateLead(lead.id, { trade_in_extra_info: e.target.value });
+                                                setSavedField('trade_in_extra_info');
+                                                setTimeout(() => setSavedField(s => (s === 'trade_in_extra_info' ? null : s)), 1500);
+                                            }
+                                        }}
+                                        style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: 10, border: '1px solid #e2e8f0', fontSize: '0.85rem', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                                    />
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
                 <div className="drawer-footer">

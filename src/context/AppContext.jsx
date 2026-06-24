@@ -273,6 +273,14 @@ export const AppProvider = ({ children }) => {
         occupation: l.occupation || '',
         recreation_info: l.recreation_info || '',
         financial_info: l.financial_info || '',
+        trade_in_model: l.trade_in_model || '',
+        trade_in_year: l.trade_in_year || '',
+        trade_in_km: l.trade_in_km || '',
+        trade_in_ownership_time: l.trade_in_ownership_time || '',
+        trade_in_owner_rating: l.trade_in_owner_rating || '',
+        trade_in_payment_preference: l.trade_in_payment_preference || '',
+        trade_in_difference_payment: l.trade_in_difference_payment || '',
+        trade_in_extra_info: l.trade_in_extra_info || '',
         avatar: l.name.charAt(0).toUpperCase()
       }));
 
@@ -1149,6 +1157,14 @@ export const AppProvider = ({ children }) => {
       if (updates.occupation !== undefined)      dbUpdates.occupation      = updates.occupation || null;
       if (updates.recreation_info !== undefined) dbUpdates.recreation_info = updates.recreation_info || null;
       if (updates.financial_info !== undefined)  dbUpdates.financial_info  = updates.financial_info || null;
+      if (updates.trade_in_model !== undefined)              dbUpdates.trade_in_model              = updates.trade_in_model || null;
+      if (updates.trade_in_year !== undefined)               dbUpdates.trade_in_year               = updates.trade_in_year || null;
+      if (updates.trade_in_km !== undefined)                 dbUpdates.trade_in_km                 = updates.trade_in_km || null;
+      if (updates.trade_in_ownership_time !== undefined)     dbUpdates.trade_in_ownership_time     = updates.trade_in_ownership_time || null;
+      if (updates.trade_in_owner_rating !== undefined)       dbUpdates.trade_in_owner_rating       = updates.trade_in_owner_rating || null;
+      if (updates.trade_in_payment_preference !== undefined) dbUpdates.trade_in_payment_preference = updates.trade_in_payment_preference || null;
+      if (updates.trade_in_difference_payment !== undefined) dbUpdates.trade_in_difference_payment = updates.trade_in_difference_payment || null;
+      if (updates.trade_in_extra_info !== undefined)         dbUpdates.trade_in_extra_info         = updates.trade_in_extra_info || null;
 
       const { error } = await supabase
         .from('leads')

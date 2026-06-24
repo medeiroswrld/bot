@@ -64,8 +64,21 @@ const NewAppointmentModal = ({ onClose, onSave }) => {
 };
 
 const AppointmentDetailModal = ({ appt, onClose, onStatusChange }) => {
+    const { leads } = useAppContext();
     if (!appt) return null;
     const s = STATUS_CONFIG[appt.status] || STATUS_CONFIG.agendado;
+    // Pré-avaliação de troca: pega do lead casado pelo telefone (sem query nova)
+    const lead = leads.find(l => l.phone === appt.phone);
+    const tradeIn = lead ? [
+        ['Modelo', lead.trade_in_model],
+        ['Ano', lead.trade_in_year],
+        ['KM', lead.trade_in_km],
+        ['Tempo de posse', lead.trade_in_ownership_time],
+        ['Nota do dono', lead.trade_in_owner_rating && `${lead.trade_in_owner_rating}/10`],
+        ['Pagamento', lead.trade_in_payment_preference],
+        ['Diferença', lead.trade_in_difference_payment],
+        ['Extras', lead.trade_in_extra_info],
+    ].filter(([, v]) => v && String(v).trim()) : [];
     return (
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content modal-sm" onClick={e => e.stopPropagation()}>
@@ -103,6 +116,16 @@ const AppointmentDetailModal = ({ appt, onClose, onStatusChange }) => {
                         <div style={{ marginBottom: '1.5rem' }}>
                             <p className="text-muted" style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' }}>Observações</p>
                             <p style={{ fontSize: '0.9rem' }}>{appt.notes}</p>
+                        </div>
+                    )}
+                    {tradeIn.length > 0 && (
+                        <div style={{ marginBottom: '1.5rem', padding: '0.75rem 1rem', borderRadius: 10, background: 'var(--input-bg)', border: '1px solid #e2e8f0' }}>
+                            <p style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.5rem' }}>🚗 Pré-avaliação de Troca</p>
+                            {tradeIn.map(([label, value]) => (
+                                <p key={label} style={{ fontSize: '0.82rem', marginBottom: 2 }}>
+                                    <span style={{ color: '#94a3b8' }}>{label}:</span> <strong>{value}</strong>
+                                </p>
+                            ))}
                         </div>
                     )}
                     <div>

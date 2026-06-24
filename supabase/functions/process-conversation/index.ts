@@ -272,6 +272,24 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: 'save_trade_in_evaluation',
+    description:
+      'Use quando coletar informações sobre o carro que o cliente quer dar como entrada/troca. Vai salvando aos poucos conforme descobrir cada info — não precisa ter todas de uma vez. NÃO faça interrogatório.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        model:              { type: 'string', description: 'Marca e modelo. Ex: "Toyota Corolla XEi"' },
+        year:               { type: 'string', description: 'Ano. Ex: "2018"' },
+        km:                 { type: 'string', description: 'Quilometragem. Ex: "65.000"' },
+        ownership_time:     { type: 'string', description: 'Há quanto tempo é dono. Ex: "3 anos"' },
+        owner_rating:       { type: 'string', description: 'Nota que o dono daria pro carro (0-10). Ex: "8"' },
+        payment_preference: { type: 'string', description: 'Forma desejada: troca pura, troca com diferença à vista, troca com diferença financiada. Ex: "troca + diferença financiada"' },
+        difference_payment: { type: 'string', description: 'Se for troca com diferença: como vai pagar a diferença. Ex: "10mil à vista + financiar o resto"' },
+        extra_info:         { type: 'string', description: 'Outras informações que o cliente compartilhou sobre o carro (cor, condição, modificações, perguntas extras configuradas pela loja). Texto livre.' },
+      },
+    },
+  },
 ]
 
 // ─── execução das ferramentas ─────────────────────────────────────────────────
@@ -907,6 +925,41 @@ async function executeTool(
     return { sucesso: true, campos: Object.keys(map), lead_id: created?.id };
   }
 
+  if (name === 'save_trade_in_evaluation') {
+    const map: Record<string, string> = {};
+    if (String(input.model ?? '').trim())              map.trade_in_model = String(input.model).trim();
+    if (String(input.year ?? '').trim())               map.trade_in_year = String(input.year).trim();
+    if (String(input.km ?? '').trim())                 map.trade_in_km = String(input.km).trim();
+    if (String(input.ownership_time ?? '').trim())     map.trade_in_ownership_time = String(input.ownership_time).trim();
+    if (String(input.owner_rating ?? '').trim())       map.trade_in_owner_rating = String(input.owner_rating).trim();
+    if (String(input.payment_preference ?? '').trim()) map.trade_in_payment_preference = String(input.payment_preference).trim();
+    if (String(input.difference_payment ?? '').trim()) map.trade_in_difference_payment = String(input.difference_payment).trim();
+    const extra = String(input.extra_info ?? '').trim();
+    if (Object.keys(map).length === 0 && !extra) return { sucesso: false, mensagem: 'Nada para salvar.' };
+
+    // Lê o lead atual (pra acumular extra_info e ter o id)
+    const { data: existing } = await supabase
+      .from('leads').select('id, trade_in_extra_info').eq('user_id', userId).eq('phone', customerPhone).maybeSingle();
+
+    if (extra) {
+      const atual = existing?.trade_in_extra_info ? String(existing.trade_in_extra_info) : '';
+      map.trade_in_extra_info = atual ? `${atual}\n${extra}` : extra; // acumula, não sobrescreve
+    }
+
+    if (existing) {
+      await supabase.from('leads').update({ ...map, updated_at: new Date().toISOString() }).eq('id', existing.id);
+      console.log('[save_trade_in_evaluation] atualizado:', existing.id, Object.keys(map));
+      return { sucesso: true, campos: Object.keys(map) };
+    }
+
+    const { data: created } = await supabase
+      .from('leads')
+      .insert({ user_id: userId, name: customerName ?? 'Cliente WhatsApp', phone: customerPhone, status: 'novo', ...map })
+      .select('id').single();
+    console.log('[save_trade_in_evaluation] lead criado:', created?.id, Object.keys(map));
+    return { sucesso: true, campos: Object.keys(map), lead_id: created?.id };
+  }
+
   return { erro: `Ferramenta desconhecida: ${name}` };
 }
 
@@ -965,6 +1018,14 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], convS
   const fordKeys = (['family', 'occupation', 'recreation', 'financial'] as const).filter((k) => ford?.[k] === true);
   const fordBlock = fordKeys.length > 0
     ? `\n\n## Qualificação natural do cliente (FORD)\n\nDurante a conversa, descubra naturalmente — SEM interrogatório — as seguintes informações sobre o cliente. Não pergunte tudo de uma vez nem em sequência. Distribua ao longo do diálogo quando fizer sentido no fluxo. Use linguagem leve, conversacional.\n\n${fordKeys.map((k) => FORD_LINES[k]).join('\n\n')}\n\n## Quando perguntar\n\n- Logo APÓS o cliente expressar interesse em um carro específico (já tem clareza do que quer)\n- ANTES de marcar visita (pra atendente já estar preparado)\n- DURANTE conversa fluida (não em momentos de urgência ou desconforto)\n\n## Como salvar\n\nQuando descobrir uma informação, use a tool save_lead_qualification passando o campo correspondente. NÃO precisa esperar ter as 4 — vai salvando aos poucos. Por exemplo:\n- Cliente diz "é pra minha esposa" → save_lead_qualification({ family: "casado, comprando carro pra esposa" })\n- Cliente diz "trabalho como pedreiro" → save_lead_qualification({ occupation: "pedreiro" })\n- Cliente diz "vou pagar à vista" → save_lead_qualification({ financial: "à vista" })`
+    : '';
+
+  // Pré-avaliação de troca — só inclui se o toggle estiver ativo no tenant.
+  const tradeInEnabled = settings.trade_in_evaluation_enabled !== false; // default ON
+  const tradeInExtra = String(settings.trade_in_extra_questions ?? '').trim();
+  const tradeInBlock = tradeInEnabled
+    ? `\n\n## Pré-avaliação do carro do cliente (quando há troca)\n\nQuando o cliente mencionar que TEM um carro pra dar de entrada/trocar/vender, OU quando você perceber que ele já tá decidido por um carro e ainda não falou sobre troca, descubra naturalmente as seguintes informações:\n\n1. **Modelo (marca e modelo)** — "E qual é o seu atual?", "Você tem o quê hoje?"\n2. **Ano** — "É de qual ano?"\n3. **Quilometragem aproximada** — "Tá com quantos km mais ou menos?"\n4. **Há quanto tempo é dono** — "Faz tempo que tá com ele?"\n5. **Nota de 0 a 10 que daria pro carro** — "Numa escala de 0 a 10, que nota você daria pra ele?"\n6. **Forma de pagamento desejada** — "Você quer trocar diretinho, ou já tá pensando em pagar uma diferença?"\n   - Se for diferença: "A diferença você quer pagar à vista ou financiar?"\n\nREGRAS importantes:\n- Distribua as perguntas ao longo da conversa, NÃO em sequência rápida (vira interrogatório)\n- Pergunte com naturalidade, frases curtas\n- Use a tool save_trade_in_evaluation pra ir salvando aos poucos cada informação que descobrir\n- Se o cliente mencionar algo extra sobre o carro (cor, modificações, "tá batidinho na lateral"), salve no campo extra_info`
+      + (tradeInExtra ? `\n\n## Perguntas adicionais (configuradas pela loja)\n\nAlém das perguntas padrão acima, descubra também:\n${tradeInExtra}\n\nQuando obter resposta dessas perguntas extras, salve no campo extra_info junto com as outras informações extras.` : '')
     : '';
 
   const visitReminderBlock = `\n\n## Resposta do cliente ao lembrete de visita\n\nSe o cliente responde algo como "não vou poder ir", "preciso desmarcar", "vou cancelar", "tô com problema" ou "vou ter que remarcar" (normalmente após um lembrete de visita):\n\n1. Mostre empatia ("Tudo bem, imprevistos acontecem!").\n2. Pergunte: "Você prefere remarcar pra outro horário ou cancelar de vez?"\n3. Se quiser REMARCAR: chame a tool cancelar_visita (cancela o agendamento atual) e em seguida conduza uma nova marcação seguindo o fluxo normal (dia → período → confirmação).\n4. Se quiser CANCELAR: chame a tool cancelar_visita e responda algo acolhedor: "Sem problemas, fica pra próxima! Quando quiser voltar, é só me chamar."\n\nSe o cliente responder positivamente ("ok", "tô indo", "estou a caminho"), apenas confirme: "Perfeito, te esperamos! 😊"`;
@@ -1139,7 +1200,7 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
     faqs.length > 0
       ? `\n\n## Perguntas frequentes — use estas respostas quando o cliente perguntar algo relacionado\n\n${faqs.map((f) => `P: ${f.question}\nR: ${f.answer}`).join('\n\n')}`
       : ''
-  }${paymentBlock}${fordBlock}${visitReminderBlock}`;
+  }${paymentBlock}${fordBlock}${tradeInBlock}${visitReminderBlock}`;
 }
 
 // ─── chamada à API do Claude ──────────────────────────────────────────────────
