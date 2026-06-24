@@ -848,7 +848,7 @@ export default function Conversations() {
               {selectedConv.status === 'bot'
                 ? 'O bot está respondendo. Clique em "Assumir conversa" para intervir.'
                 : selectedConv.status === 'pending'
-                  ? 'Bot respondendo — atendente notificado. Assuma para intervir ou devolva ao bot.'
+                  ? '⚠️ Cliente aguardando atendimento — o bot está em silêncio. Assuma para responder ou devolva ao bot.'
                   : 'Conversa encerrada.'}
             </div>
           )}

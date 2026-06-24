@@ -1020,7 +1020,7 @@ async function executeTool(
 
 interface Faq { question: string; answer: string }
 
-function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], convStatus: string, customerName: string | null): string {
+function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null): string {
   const company = String(settings.company_name        ?? 'nossa concessionária');
   const address = String(settings.address             ?? 'não informado');
   const phone   = String(settings.phone_number        ?? 'não informado');
@@ -1251,10 +1251,6 @@ Ao acionar, fale com o cliente de forma natural, como um vendedor que vai resolv
 ## Lembre-se
 
 Você representa a ${company}. Cada conversa é uma oportunidade de ajudar alguém a encontrar o carro certo e dar o próximo passo — uma visita à loja. Seja útil, seja humano, e quando não souber de algo, peça ajuda em vez de inventar.${
-    convStatus === 'pending'
-      ? '\n\n## Contexto atual\n\nA equipe da loja já foi avisada nos bastidores e vai dar sequência. Continue conversando normalmente como vendedor — não diga ao cliente que ele está esperando "um atendente".'
-      : ''
-  }${
     settings.bot_custom_instructions
       ? `\n\n## Instruções específicas desta concessionária (siga sempre)\n\n${settings.bot_custom_instructions}`
       : ''
@@ -1364,7 +1360,10 @@ serve(async (req) => {
     return new Response('Not Found', { status: 404 });
   }
 
-  if (conv.status === 'human') {
+  // Handoff: se a conversa está com humano (pending = aguardando atendente,
+  // human = atendente já assumiu), o bot fica 100% MUDO até o status voltar
+  // para 'bot' (atendente "Devolve ao bot" no CRM). Sem gerar nem enviar nada.
+  if (conv.status === 'human' || conv.status === 'pending') {
     return new Response('OK', { status: 200 });
   }
 
@@ -1388,6 +1387,16 @@ serve(async (req) => {
   //    então nada fica órfão. Pulado para boas-vindas (resposta imediata).
   if (!isFirstMessage) {
     await new Promise<void>((resolve) => setTimeout(resolve, 4000));
+
+    // Re-checa o status após a espera: uma invocação concorrente pode ter virado
+    // a conversa para pending/human durante os 4s. Sem isto, esta invocação (que
+    // passou pelo guard ANTES da espera) responderia com a conversa já em handoff.
+    const { data: fresh } = await supabase
+      .from('conversations').select('status').eq('id', conversationId).maybeSingle();
+    if (fresh?.status === 'human' || fresh?.status === 'pending') {
+      console.log('[PC] Conversa virou handoff durante o debounce — abortando.', fresh?.status);
+      return new Response('OK', { status: 200 });
+    }
   }
 
   // ── 3.5. Lock atômico: garante que só UMA invocação processa este lote ────
@@ -1471,7 +1480,6 @@ serve(async (req) => {
   const systemPrompt = buildSystemPrompt(
     (settings ?? {}) as Record<string, unknown>,
     faqRows ?? [],
-    String(conv.status ?? 'bot'),
     customerName,
   );
 
