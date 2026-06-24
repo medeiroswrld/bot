@@ -908,21 +908,46 @@ async function executeTool(
     if (String(input.financial ?? '').trim())  map.financial_info  = String(input.financial).trim();
     if (Object.keys(map).length === 0) return { sucesso: false, mensagem: 'Nada para salvar.' };
 
-    const { data: existing } = await supabase
-      .from('leads').select('id').eq('user_id', userId).eq('phone', customerPhone).maybeSingle();
+    try {
+      const { data: existing, error: readErr } = await supabase
+        .from('leads').select('id').eq('user_id', userId).eq('phone', customerPhone).maybeSingle();
 
-    if (existing) {
-      await supabase.from('leads').update({ ...map, updated_at: new Date().toISOString() }).eq('id', existing.id);
-      console.log('[save_lead_qualification] atualizado:', existing.id, Object.keys(map));
-      return { sucesso: true, campos: Object.keys(map) };
+      if (readErr) {
+        console.error(`[qualificacao] FALHA leitura | conversa=${conversationId} phone=${maskPhone(customerPhone)} | erro=${JSON.stringify(readErr)}`);
+        return { sucesso: false, error: 'Não consegui acessar o cadastro do cliente.' };
+      }
+
+      if (existing) {
+        const { data: updated, error: updErr } = await supabase
+          .from('leads')
+          .update({ ...map, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+          .select('id');
+
+        const rows = updated?.length ?? 0;
+        console.log(`[qualificacao] UPDATE | lead=${existing.id} conversa=${conversationId} phone=${maskPhone(customerPhone)} | linhas=${rows} campos=${Object.keys(map).join(',')} | erro=${updErr ? JSON.stringify(updErr) : 'nenhum'}`);
+
+        if (updErr || rows === 0) {
+          return { sucesso: false, error: 'Não consegui salvar a qualificação do cliente.' };
+        }
+        return { sucesso: true, campos: Object.keys(map) };
+      }
+
+      const { data: created, error: insErr } = await supabase
+        .from('leads')
+        .insert({ user_id: userId, name: customerName ?? 'Cliente WhatsApp', phone: customerPhone, status: 'novo', ...map })
+        .select('id').single();
+
+      console.log(`[qualificacao] INSERT | lead=${created?.id ?? 'null'} conversa=${conversationId} phone=${maskPhone(customerPhone)} | campos=${Object.keys(map).join(',')} | erro=${insErr ? JSON.stringify(insErr) : 'nenhum'}`);
+
+      if (insErr || !created) {
+        return { sucesso: false, error: 'Não consegui salvar a qualificação do cliente.' };
+      }
+      return { sucesso: true, campos: Object.keys(map), lead_id: created.id };
+    } catch (e) {
+      console.error(`[qualificacao] EXCEÇÃO | conversa=${conversationId} phone=${maskPhone(customerPhone)} |`, e instanceof Error ? e.message : String(e));
+      return { sucesso: false, error: 'Erro ao salvar a qualificação do cliente.' };
     }
-
-    const { data: created } = await supabase
-      .from('leads')
-      .insert({ user_id: userId, name: customerName ?? 'Cliente WhatsApp', phone: customerPhone, status: 'novo', ...map })
-      .select('id').single();
-    console.log('[save_lead_qualification] lead criado:', created?.id, Object.keys(map));
-    return { sucesso: true, campos: Object.keys(map), lead_id: created?.id };
   }
 
   if (name === 'save_trade_in_evaluation') {
@@ -1041,9 +1066,12 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], convS
     family:     '- **Família**: tente descobrir se é solteiro/casado, se tem filhos, com quem mora. Pergunte naturalmente, tipo "É carro pra você ou pra família?", "Tem criança pequena em casa?". NÃO use a palavra "família" como pergunta direta.',
     occupation: '- **Ocupação**: descubra a profissão dele. Pergunte de forma natural tipo "E você, trabalha com o quê?" ou "É pro trabalho ou só passeio?". Não soe formal.',
     recreation: '- **Recreação**: descubra como ele usa o carro/o que gosta de fazer. Pergunte tipo "Vai usar mais na cidade ou viaja bastante?", "Curte estrada?", "É pra trabalho ou passeio?".',
-    financial:  '- **Capacidade financeira**: descubra a forma de pagamento e o orçamento. Pergunte de forma leve no momento certo, tipo "Tá pensando em comprar à vista ou financiar?", "Já tem ideia de quanto quer investir?". Não pergunte se ele "tem dinheiro" — só explore a forma e a faixa.',
+    financial:  '- **Forma de compra (capacidade financeira, de forma DISCRETA)**: descubra COMO ele pretende comprar — financiamento, à vista, ou troca — sem perguntar sobre dinheiro/salário. Ex: "Tá pensando em financiar ou pagar à vista?", "Vai dar um carro na troca?". Nunca pergunte se ele "tem dinheiro" nem o quanto ganha.',
   };
-  const fordKeys = (['family', 'occupation', 'recreation', 'financial'] as const).filter((k) => ford?.[k] === true);
+  // ford null (coluna ford_qualification / migração 021 não configurada) → assume
+  // tudo ON (igual ao default da migração e ao trade-in); evita o bot deixar de
+  // qualificar só porque o SQL não rodou. Se a coluna existir, respeita os toggles.
+  const fordKeys = (['family', 'occupation', 'recreation', 'financial'] as const).filter((k) => ford ? ford[k] === true : true);
   const fordBlock = fordKeys.length > 0
     ? `\n\n## Qualificação natural do cliente (FORD)\n\nDurante a conversa, descubra naturalmente — SEM interrogatório — as seguintes informações sobre o cliente. Não pergunte tudo de uma vez nem em sequência. Distribua ao longo do diálogo quando fizer sentido no fluxo. Use linguagem leve, conversacional.\n\n${fordKeys.map((k) => FORD_LINES[k]).join('\n\n')}\n\n## Quando perguntar\n\n- Logo APÓS o cliente expressar interesse em um carro específico (já tem clareza do que quer)\n- ANTES de marcar visita (pra atendente já estar preparado)\n- DURANTE conversa fluida (não em momentos de urgência ou desconforto)\n\n## Como salvar\n\nQuando descobrir uma informação, use a tool save_lead_qualification passando o campo correspondente. NÃO precisa esperar ter as 4 — vai salvando aos poucos. Por exemplo:\n- Cliente diz "é pra minha esposa" → save_lead_qualification({ family: "casado, comprando carro pra esposa" })\n- Cliente diz "trabalho como pedreiro" → save_lead_qualification({ occupation: "pedreiro" })\n- Cliente diz "vou pagar à vista" → save_lead_qualification({ financial: "à vista" })`
     : '';
