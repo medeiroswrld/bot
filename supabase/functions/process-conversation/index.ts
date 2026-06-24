@@ -1319,33 +1319,13 @@ serve(async (req) => {
 
   const isFirstMessage = (botCount ?? 0) === 0;
 
-  // ── 3. Debounce 3s: aguarda e aborta se cliente enviou nova mensagem ───────
-  //    Pulado para boas-vindas (primeira mensagem → resposta imediata sem delay)
+  // ── 3. Debounce: aguarda 4s para o cliente terminar de digitar (mensagens
+  //    seguidas entram no mesmo lote). NÃO aborta se chegar mensagem nova — o
+  //    lock atômico abaixo garante que só UMA invocação processe o lote, e cada
+  //    mensagem nova dispara sua própria invocação (com batchKey diferente),
+  //    então nada fica órfão. Pulado para boas-vindas (resposta imediata).
   if (!isFirstMessage) {
-    const { data: lastMsgBefore } = await supabase
-      .from('messages')
-      .select('created_at')
-      .eq('conversation_id', conversationId)
-      .eq('role', 'customer')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
     await new Promise<void>((resolve) => setTimeout(resolve, 4000));
-
-    const { data: lastMsgAfter } = await supabase
-      .from('messages')
-      .select('created_at')
-      .eq('conversation_id', conversationId)
-      .eq('role', 'customer')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (lastMsgAfter?.created_at !== lastMsgBefore?.created_at) {
-      console.log('[debounce] mensagem mais nova detectada, abortando');
-      return new Response('OK', { status: 200 });
-    }
   }
 
   // ── 3.5. Lock atômico: garante que só UMA invocação processa este lote ────
@@ -1402,13 +1382,13 @@ serve(async (req) => {
     return new Response('OK', { status: 200 });
   }
 
-  // ── 4. Carrega as 20 mensagens mais recentes em ordem cronológica ──────────
+  // ── 4. Carrega as 40 mensagens mais recentes em ordem cronológica ──────────
   const { data: rawMessages } = await supabase
     .from('messages')
     .select('role, content')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })
-    .limit(20);
+    .limit(40);
 
   const orderedMessages = (rawMessages ?? []).reverse();
 
@@ -1462,6 +1442,10 @@ serve(async (req) => {
         content_types: response.content.map((c) => c.type),
         content_preview: response.content.slice(0, 2),
       }));
+
+      if (response.stop_reason === 'max_tokens') {
+        console.warn('[CLAUDE] resposta truncada (max_tokens) — iteração', iteration);
+      }
 
       const toolUseBlocks = response.content.filter((b) => b.type === 'tool_use');
       const textBlocks    = response.content.filter((b) => b.type === 'text');
@@ -1519,10 +1503,20 @@ serve(async (req) => {
     return new Response('OK', { status: 200 });
   }
 
-  // Resposta vazia sem erro (ex.: Claude só fez tool calls e não gerou texto):
-  // aborta em silêncio, sem poluir o chat com mensagem de erro.
+  // Resposta vazia sem erro (Claude só fez tool calls, ou estourou as 10
+  // iterações sem gerar texto): NÃO fica mudo — avisa o cliente e escala para
+  // um humano (handoff), porque resposta vazia costuma ser bot travado em
+  // lógica complexa, que uma pessoa resolve mais rápido.
   if (!finalText.trim()) {
-    console.error('[PC] Resposta vazia do Claude — abortando sem enviar nada ao cliente.');
+    console.error('[PC] Resposta vazia do Claude — enviando fallback e escalando (handoff).');
+    const emptyMsg = 'Opa, deixa eu confirmar uma coisa aqui com o gerente. Em instantes alguém da equipe te responde.';
+    try {
+      await sendMessage(customerPhone, emptyMsg, phoneNumberId || undefined);
+      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: emptyMsg });
+      await supabase.from('conversations').update({ status: 'pending', last_message_at: new Date().toISOString() }).eq('id', conversationId);
+    } catch (e) {
+      console.error('[PC] Erro ao enviar fallback de resposta vazia:', e);
+    }
     return new Response('OK', { status: 200 });
   }
 
