@@ -937,27 +937,55 @@ async function executeTool(
     const extra = String(input.extra_info ?? '').trim();
     if (Object.keys(map).length === 0 && !extra) return { sucesso: false, mensagem: 'Nada para salvar.' };
 
-    // Lê o lead atual (pra acumular extra_info e ter o id)
-    const { data: existing } = await supabase
-      .from('leads').select('id, trade_in_extra_info').eq('user_id', userId).eq('phone', customerPhone).maybeSingle();
+    try {
+      // Lê o lead atual (pra acumular extra_info e ter o id)
+      const { data: existing, error: readErr } = await supabase
+        .from('leads').select('id, trade_in_extra_info').eq('user_id', userId).eq('phone', customerPhone).maybeSingle();
 
-    if (extra) {
-      const atual = existing?.trade_in_extra_info ? String(existing.trade_in_extra_info) : '';
-      map.trade_in_extra_info = atual ? `${atual}\n${extra}` : extra; // acumula, não sobrescreve
+      if (readErr) {
+        console.error(`[avaliacao_troca] FALHA leitura | conversa=${conversationId} phone=${maskPhone(customerPhone)} | erro=${JSON.stringify(readErr)}`);
+        return { sucesso: false, error: 'Não consegui acessar o cadastro do cliente.' };
+      }
+
+      if (extra) {
+        const atual = existing?.trade_in_extra_info ? String(existing.trade_in_extra_info) : '';
+        map.trade_in_extra_info = atual ? `${atual}\n${extra}` : extra; // acumula, não sobrescreve
+      }
+
+      if (existing) {
+        // .select() devolve as linhas afetadas → dá pra contar (0 = falha silenciosa)
+        const { data: updated, error: updErr } = await supabase
+          .from('leads')
+          .update({ ...map, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+          .select('id');
+
+        const rows = updated?.length ?? 0;
+        console.log(`[avaliacao_troca] UPDATE | lead=${existing.id} conversa=${conversationId} phone=${maskPhone(customerPhone)} | linhas=${rows} campos=${Object.keys(map).join(',')} | erro=${updErr ? JSON.stringify(updErr) : 'nenhum'}`);
+
+        if (updErr || rows === 0) {
+          // erro OU 0 linhas afetadas (RLS, id errado, coluna inexistente) = falha
+          return { sucesso: false, error: 'Não consegui salvar os dados do carro de troca.' };
+        }
+        return { sucesso: true, campos: Object.keys(map) };
+      }
+
+      // Sem lead ainda → cria
+      const { data: created, error: insErr } = await supabase
+        .from('leads')
+        .insert({ user_id: userId, name: customerName ?? 'Cliente WhatsApp', phone: customerPhone, status: 'novo', ...map })
+        .select('id').single();
+
+      console.log(`[avaliacao_troca] INSERT | lead=${created?.id ?? 'null'} conversa=${conversationId} phone=${maskPhone(customerPhone)} | campos=${Object.keys(map).join(',')} | erro=${insErr ? JSON.stringify(insErr) : 'nenhum'}`);
+
+      if (insErr || !created) {
+        return { sucesso: false, error: 'Não consegui salvar os dados do carro de troca.' };
+      }
+      return { sucesso: true, campos: Object.keys(map), lead_id: created.id };
+    } catch (e) {
+      console.error(`[avaliacao_troca] EXCEÇÃO | conversa=${conversationId} phone=${maskPhone(customerPhone)} |`, e instanceof Error ? e.message : String(e));
+      return { sucesso: false, error: 'Erro ao salvar os dados do carro de troca.' };
     }
-
-    if (existing) {
-      await supabase.from('leads').update({ ...map, updated_at: new Date().toISOString() }).eq('id', existing.id);
-      console.log('[save_trade_in_evaluation] atualizado:', existing.id, Object.keys(map));
-      return { sucesso: true, campos: Object.keys(map) };
-    }
-
-    const { data: created } = await supabase
-      .from('leads')
-      .insert({ user_id: userId, name: customerName ?? 'Cliente WhatsApp', phone: customerPhone, status: 'novo', ...map })
-      .select('id').single();
-    console.log('[save_trade_in_evaluation] lead criado:', created?.id, Object.keys(map));
-    return { sucesso: true, campos: Object.keys(map), lead_id: created?.id };
   }
 
   return { erro: `Ferramenta desconhecida: ${name}` };
