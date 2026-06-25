@@ -119,7 +119,7 @@ const AppointmentDetailModal = ({ appt, onClose, onStatusChange }) => {
                         </div>
                     )}
                     {tradeIn.length > 0 && (
-                        <div style={{ marginBottom: '1.5rem', padding: '0.75rem 1rem', borderRadius: 10, background: 'var(--input-bg)', border: '1px solid #e2e8f0' }}>
+                        <div style={{ marginBottom: '1.5rem', padding: '0.75rem 1rem', borderRadius: 10, background: 'var(--input-bg)', border: '1px solid var(--border)' }}>
                             <p style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.5rem' }}>🚗 Pré-avaliação de Troca</p>
                             {tradeIn.map(([label, value]) => (
                                 <p key={label} style={{ fontSize: '0.82rem', marginBottom: 2 }}>
@@ -131,7 +131,7 @@ const AppointmentDetailModal = ({ appt, onClose, onStatusChange }) => {
                     <div>
                         <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.5rem' }}>Alterar Status</label>
                         <select value={appt.status} onChange={e => onStatusChange(appt.id, e.target.value)}
-                            style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: 12, border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
+                            style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: 12, border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '0.9rem' }}>
                             {Object.entries(STATUS_CONFIG).map(([key, val]) => (
                                 <option key={key} value={key}>{val.label}</option>
                             ))}

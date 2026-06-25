@@ -77,7 +77,7 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
                     <div style={{ marginBottom: '1.5rem' }}>
                         <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.5rem' }}>Atualizar Status</label>
                         <select value={lead.status} onChange={e => onStatusChange(lead.id, e.target.value)}
-                            style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: 12, border: '1px solid #e2e8f0', fontSize: '0.9rem' }}>
+                            style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: 12, border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '0.9rem' }}>
                             {Object.entries(STATUS_MAP).map(([key, val]) => (
                                 <option key={key} value={key}>{val.label}</option>
                             ))}
@@ -90,7 +90,7 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
                             type="date"
                             defaultValue={lead.birth_date || ''}
                             onBlur={e => { if (e.target.value !== (lead.birth_date || '')) updateLead(lead.id, { birth_date: e.target.value }); }}
-                            style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: 12, border: '1px solid #e2e8f0', fontSize: '0.9rem', boxSizing: 'border-box' }}
+                            style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: 12, border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '0.9rem', boxSizing: 'border-box' }}
                         />
                         <p style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>Usado pela mensagem automática de aniversário (se ativada em Configurações).</p>
                     </div>
@@ -120,7 +120,7 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
                                             setTimeout(() => setSavedField(s => (s === field ? null : s)), 1500);
                                         }
                                     }}
-                                    style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: 10, border: '1px solid #e2e8f0', fontSize: '0.85rem', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                                    style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '0.85rem', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
                                 />
                             </div>
                         ))}
@@ -150,7 +150,7 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
                                                     setTimeout(() => setSavedField(s => (s === field ? null : s)), 1500);
                                                 }
                                             }}
-                                            style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: 10, border: '1px solid #e2e8f0', fontSize: '0.85rem', boxSizing: 'border-box' }}
+                                            style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '0.85rem', boxSizing: 'border-box' }}
                                         />
                                     </div>
                                 ))}
@@ -170,7 +170,7 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
                                                 setTimeout(() => setSavedField(s => (s === 'trade_in_extra_info' ? null : s)), 1500);
                                             }
                                         }}
-                                        style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: 10, border: '1px solid #e2e8f0', fontSize: '0.85rem', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
+                                        style={{ width: '100%', padding: '0.5rem 0.75rem', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--input-bg)', color: 'var(--text-primary)', fontSize: '0.85rem', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}
                                     />
                                 </div>
                             </>
