@@ -1404,22 +1404,47 @@ serve(async (req) => {
 
   const isFirstMessage = (botCount ?? 0) === 0;
 
-  // ── 3. Debounce: aguarda 4s para o cliente terminar de digitar (mensagens
-  //    seguidas entram no mesmo lote). NÃO aborta se chegar mensagem nova — o
-  //    lock atômico abaixo garante que só UMA invocação processe o lote, e cada
-  //    mensagem nova dispara sua própria invocação (com batchKey diferente),
-  //    então nada fica órfão. Pulado para boas-vindas (resposta imediata).
+  // ── 3. Debounce com RESET: o cliente costuma responder em vários balões com
+  //    pausas. Espera ~9s de SILÊNCIO (o timer zera a cada mensagem nova), com
+  //    teto de 30s, pra juntar tudo num lote só. O lock atômico abaixo garante
+  //    que só UMA invocação processe o lote. Pulado para boas-vindas.
   if (!isFirstMessage) {
-    await new Promise<void>((resolve) => setTimeout(resolve, 4000));
+    const QUIET_MS = 9000;     // silêncio necessário pra considerar que terminou de digitar
+    const MAX_TOTAL_MS = 30000; // teto de segurança
+    const POLL_MS = 2000;
+    const startedAt = Date.now();
 
-    // Re-checa o status após a espera: uma invocação concorrente pode ter virado
-    // a conversa para pending/human durante os 4s. Sem isto, esta invocação (que
-    // passou pelo guard ANTES da espera) responderia com a conversa já em handoff.
-    const { data: fresh } = await supabase
-      .from('conversations').select('status').eq('id', conversationId).maybeSingle();
-    if (fresh?.status === 'human' || fresh?.status === 'pending') {
-      console.log('[PC] Conversa virou handoff durante o debounce — abortando.', fresh?.status);
-      return new Response('OK', { status: 200 });
+    const latestCustomerId = async (): Promise<string | null> => {
+      const { data } = await supabase
+        .from('messages').select('id')
+        .eq('conversation_id', conversationId).eq('role', 'customer')
+        .order('created_at', { ascending: false }).limit(1).maybeSingle();
+      return data?.id ?? null;
+    };
+
+    let lastMsgId = await latestCustomerId();
+    let lastChangeAt = Date.now();
+
+    while (true) {
+      await new Promise<void>((resolve) => setTimeout(resolve, POLL_MS));
+
+      // Aborta cedo se a conversa virou handoff (pending/human) durante a espera.
+      const { data: fresh } = await supabase
+        .from('conversations').select('status').eq('id', conversationId).maybeSingle();
+      if (fresh?.status === 'human' || fresh?.status === 'pending') {
+        console.log('[PC] Conversa virou handoff durante o debounce — abortando.', fresh?.status);
+        return new Response('OK', { status: 200 });
+      }
+
+      const nowId = await latestCustomerId();
+      if (nowId !== lastMsgId) { lastMsgId = nowId; lastChangeAt = Date.now(); } // msg nova → reseta o timer
+
+      const quietFor = Date.now() - lastChangeAt;
+      const total    = Date.now() - startedAt;
+      if (quietFor >= QUIET_MS || total >= MAX_TOTAL_MS) {
+        console.log(`[debounce] processando lote — silencio=${Math.round(quietFor / 1000)}s total=${Math.round(total / 1000)}s`);
+        break;
+      }
     }
   }
 
