@@ -930,7 +930,7 @@ async function executeTool(
         if (updErr || rows === 0) {
           return { sucesso: false, error: 'Não consegui salvar a qualificação do cliente.' };
         }
-        return { sucesso: true, campos: Object.keys(map) };
+        return { sucesso: true, campos: Object.keys(map), continuar: 'Dado salvo internamente. NÃO encerre o turno — comente brevemente e faça a PRÓXIMA pergunta (FORD/troca) ou siga o fluxo.' };
       }
 
       const { data: created, error: insErr } = await supabase
@@ -943,7 +943,7 @@ async function executeTool(
       if (insErr || !created) {
         return { sucesso: false, error: 'Não consegui salvar a qualificação do cliente.' };
       }
-      return { sucesso: true, campos: Object.keys(map), lead_id: created.id };
+      return { sucesso: true, campos: Object.keys(map), lead_id: created.id, continuar: 'Dado salvo internamente. NÃO encerre o turno — comente brevemente e faça a PRÓXIMA pergunta (FORD/troca) ou siga o fluxo.' };
     } catch (e) {
       console.error(`[qualificacao] EXCEÇÃO | conversa=${conversationId} phone=${maskPhone(customerPhone)} |`, e instanceof Error ? e.message : String(e));
       return { sucesso: false, error: 'Erro ao salvar a qualificação do cliente.' };
@@ -992,7 +992,7 @@ async function executeTool(
           // erro OU 0 linhas afetadas (RLS, id errado, coluna inexistente) = falha
           return { sucesso: false, error: 'Não consegui salvar os dados do carro de troca.' };
         }
-        return { sucesso: true, campos: Object.keys(map) };
+        return { sucesso: true, campos: Object.keys(map), continuar: 'Dado salvo internamente. NÃO encerre o turno — comente brevemente e faça a PRÓXIMA pergunta (FORD/troca) ou siga o fluxo.' };
       }
 
       // Sem lead ainda → cria
@@ -1006,7 +1006,7 @@ async function executeTool(
       if (insErr || !created) {
         return { sucesso: false, error: 'Não consegui salvar os dados do carro de troca.' };
       }
-      return { sucesso: true, campos: Object.keys(map), lead_id: created.id };
+      return { sucesso: true, campos: Object.keys(map), lead_id: created.id, continuar: 'Dado salvo internamente. NÃO encerre o turno — comente brevemente e faça a PRÓXIMA pergunta (FORD/troca) ou siga o fluxo.' };
     } catch (e) {
       console.error(`[avaliacao_troca] EXCEÇÃO | conversa=${conversationId} phone=${maskPhone(customerPhone)} |`, e instanceof Error ? e.message : String(e));
       return { sucesso: false, error: 'Erro ao salvar os dados do carro de troca.' };
@@ -1523,6 +1523,8 @@ serve(async (req) => {
   const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
   const ctx = { userId, conversationId, customerPhone, customerName, phoneNumberId };
   let finalText = '';
+  let lastWasTool = false;   // a iteração anterior executou uma tool?
+  let retriedEmpty = false;  // já re-chamamos uma vez por resposta vazia pós-tool?
 
   const claudeMessages: Array<{ role: 'user' | 'assistant'; content: string | unknown[] }> = [...history];
 
@@ -1546,9 +1548,22 @@ serve(async (req) => {
 
       if (!toolUseBlocks.length) {
         finalText = textBlocks.map((b) => b.text ?? '').join('\n').trim();
-        if (!finalText) {
-          console.error('[NO_TEXT_FROM_CLAUDE]', JSON.stringify(response.content));
+        if (finalText) break; // resposta pronta pro cliente
+
+        // finalText VAZIO. Se foi logo após uma tool (save silencioso), o Claude
+        // às vezes encerra o turno sem falar — NÃO encerra a conversa: cutuca e
+        // re-chama UMA vez pra ele gerar a próxima mensagem.
+        if (lastWasTool && !retriedEmpty) {
+          console.warn('[PC] Vazio após tool — re-chamando Claude (retry de continuação).');
+          const last = claudeMessages[claudeMessages.length - 1];
+          if (last && last.role === 'user' && Array.isArray(last.content)) {
+            last.content.push({ type: 'text', text: 'Continue a conversa com o cliente: comente brevemente e faça a PRÓXIMA pergunta (ex.: próxima dimensão do FORD) ou siga o fluxo. NUNCA encerre o turno em silêncio.' });
+          }
+          retriedEmpty = true;
+          lastWasTool = false;
+          continue;
         }
+        console.error('[NO_TEXT_FROM_CLAUDE]', JSON.stringify(response.content));
         break;
       }
 
@@ -1566,6 +1581,7 @@ serve(async (req) => {
       }
 
       claudeMessages.push({ role: 'user', content: toolResults });
+      lastWasTool = true;
     }
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
@@ -1597,19 +1613,18 @@ serve(async (req) => {
     return new Response('OK', { status: 200 });
   }
 
-  // Resposta vazia sem erro (Claude só fez tool calls, ou estourou as 10
-  // iterações sem gerar texto): NÃO fica mudo — avisa o cliente e escala para
-  // um humano (handoff), porque resposta vazia costuma ser bot travado em
-  // lógica complexa, que uma pessoa resolve mais rápido.
+  // Resposta vazia mesmo após o retry de continuação: NÃO escala pra humano
+  // (vazio após save é hiccup do modelo, não "precisa de gente"). Manda uma
+  // PONTE que continua a conversa — o próximo turno do cliente reativa o bot.
   if (!finalText.trim()) {
-    console.error('[PC] Resposta vazia do Claude — enviando fallback e escalando (handoff).');
-    const emptyMsg = 'Opa, deixa eu confirmar uma coisa aqui com o gerente. Em instantes alguém da equipe te responde.';
+    console.error('[PC] Resposta vazia mesmo após retry — enviando ponte (sem handoff).');
+    const bridge = 'Opa, me perdi aqui rapidinho 😅 me lembra o que a gente tava vendo? Quero te ajudar a achar o carro certo.';
     try {
-      await sendMessage(customerPhone, emptyMsg, phoneNumberId || undefined);
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: emptyMsg });
-      await supabase.from('conversations').update({ status: 'pending', last_message_at: new Date().toISOString() }).eq('id', conversationId);
+      await sendMessage(customerPhone, bridge, phoneNumberId || undefined);
+      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: bridge });
+      await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
     } catch (e) {
-      console.error('[PC] Erro ao enviar fallback de resposta vazia:', e);
+      console.error('[PC] Erro ao enviar ponte de resposta vazia:', e);
     }
     return new Response('OK', { status: 200 });
   }
