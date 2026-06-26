@@ -888,19 +888,21 @@ export const AppProvider = ({ children }) => {
   };
 
   // Aviso automático via template (edge function notify-waiting-list-match)
-  const notifyWaitingListMatch = async (carId, interestIds) => {
+  const notifyWaitingListMatch = async (carId, interestIds, opts = {}) => {
     if (!carId || !interestIds?.length) return false;
     try {
-      addToast('Enviando avisos...', 'info');
+      if (!opts.auto) addToast('Enviando avisos...', 'info');
       const { data, error } = await supabase.functions.invoke('notify-waiting-list-match', {
-        body: { car_id: carId, interest_ids: interestIds },
+        body: { car_id: carId, interest_ids: interestIds, auto: !!opts.auto },
       });
       if (error || data?.error) {
         addToast(`Erro ao avisar: ${data?.error || error?.message || 'desconhecido'}`, 'error');
         return false;
       }
       if (user?.id) await fetchVehicleInterests(user.id);
-      addToast(`${data.sent} aviso(s) enviado(s)${data.failed ? `, ${data.failed} falha(s)` : ''}.`, 'success');
+      addToast(opts.auto
+        ? `${data.sent} cliente(s) avisado(s) automaticamente sobre ${opts.carName || 'o carro'}${data.failed ? ` (${data.failed} falha)` : ''}.`
+        : `${data.sent} aviso(s) enviado(s)${data.failed ? `, ${data.failed} falha(s)` : ''}.`, 'success');
       return true;
     } catch (e) {
       console.error('[INTERESTS] notify erro:', e);

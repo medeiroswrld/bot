@@ -13,7 +13,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
-    const { car_id, interest_ids } = await req.json();
+    const { car_id, interest_ids, auto } = await req.json();
     if (!car_id || !Array.isArray(interest_ids) || interest_ids.length === 0) {
       return new Response(JSON.stringify({ error: 'car_id e interest_ids[] obrigatórios' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -135,6 +135,7 @@ serve(async (req) => {
       await new Promise((r) => setTimeout(r, 1100));
     }
 
+    if (auto) console.log(`[auto-notify] car=${car_id} sent=${sent} failed=${failed}`);
     console.log('[notify-waiting-list] concluído:', { sent, failed, car_id });
     return new Response(JSON.stringify({ sent, failed }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

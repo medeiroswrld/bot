@@ -440,7 +440,7 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
 
 
 const Inventory = () => {
-    const { inventory, addInventoryCar, updateInventoryCar, removeInventoryCar, sellCar } = useAppContext();
+    const { inventory, addInventoryCar, updateInventoryCar, removeInventoryCar, sellCar, waitingListTemplateReady, notifyWaitingListMatch } = useAppContext();
     const [search, setSearch] = useState('');
     const [filterStatus, setFilterStatus] = useState('todos');
     const [showAddModal, setShowAddModal] = useState(false);
@@ -464,7 +464,17 @@ const Inventory = () => {
                 body: { car_id: car.id },
             });
             if (error) { console.error('[Inventory] match error:', error); return; }
-            if (data?.matches_count > 0) setMatchModalData(data);
+            const count = data?.matches_count ?? 0;
+            if (count === 0) return;
+
+            const AUTO_LIMIT = 20;
+            // Auto-dispara só se o template estiver pronto (aprovado + selecionado)
+            // E dentro do limite de segurança. Senão, abre o modal pra revisar.
+            if (waitingListTemplateReady && count <= AUTO_LIMIT) {
+                await notifyWaitingListMatch(car.id, data.matches.map(m => m.id), { auto: true, carName: data.car?.name });
+                return; // sem modal — o toast é o recibo
+            }
+            setMatchModalData(data);
         } catch (e) {
             console.error('[Inventory] match exception:', e);
         }
