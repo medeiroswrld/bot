@@ -18,6 +18,12 @@ interface ClaudeResponse {
   type: string
   stop_reason: string
   content: ClaudeContentBlock[]
+  usage?: {
+    input_tokens?: number
+    output_tokens?: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
+  }
 }
 
 // ─── Supabase admin ───────────────────────────────────────────────────────────
@@ -1311,13 +1317,18 @@ async function callClaude(
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'prompt-caching-2024-07-31',
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
         max_tokens: 1024,
-        system: systemPrompt,
+        system: [
+          { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+        ],
         messages,
-        tools: TOOLS,
+        tools: TOOLS.map((t, i) =>
+          i === TOOLS.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t
+        ),
       }),
       signal: controller.signal,
     });
@@ -1348,7 +1359,10 @@ async function callClaude(
     console.error(`[CLAUDE_FATAL] ${res.status} após ${attempt} retries: ${body.slice(0, 300)}`);
     throw new Error(`Claude API error ${res.status}: ${body}`);
   }
-  return res.json() as Promise<ClaudeResponse>;
+  const data = await res.json() as ClaudeResponse;
+  const u = data.usage ?? {};
+  console.log(`[cache] criado=${u.cache_creation_input_tokens ?? 0} lido=${u.cache_read_input_tokens ?? 0} input=${u.input_tokens ?? 0} output=${u.output_tokens ?? 0}`);
+  return data;
 }
 
 // ─── serve ────────────────────────────────────────────────────────────────────
