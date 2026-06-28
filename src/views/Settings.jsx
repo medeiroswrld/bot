@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     Building2, Calendar, MapPin, Phone, MessageSquare, Save, CheckCircle,
     User, Mail, ToggleLeft, ToggleRight, Plus, Trash2, CalendarOff,
-    Image as ImageIcon, Upload, RefreshCw, Gift, Bell, CreditCard, Bot
+    Image as ImageIcon, Upload, RefreshCw, Gift, Bell, CreditCard, Bot, Landmark
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
@@ -244,6 +244,44 @@ const Settings = () => {
         setSavingPay(false);
         setSavedPay(true);
         setTimeout(() => setSavedPay(false), 2000);
+    };
+
+    // ── Financiamento ─────────────────────────────────────────────────────────
+    const [financing, setFinancing] = useState({ enabled: false, rate: '', maxInstallments: 48, minDownPct: 20, banks: '' });
+    const [savingFin, setSavingFin] = useState(false);
+    const [savedFin,  setSavedFin]  = useState(false);
+
+    useEffect(() => {
+        if (!user?.id) return;
+        supabase.from('company_settings')
+            .select('financing_enabled, financing_interest_rate, financing_max_installments, financing_min_down_payment_percent, financing_banks')
+            .eq('user_id', user.id).single()
+            .then(({ data }) => {
+                if (!data) return;
+                setFinancing({
+                    enabled: data.financing_enabled === true,
+                    rate: data.financing_interest_rate ?? '',
+                    maxInstallments: data.financing_max_installments ?? 48,
+                    minDownPct: data.financing_min_down_payment_percent ?? 20,
+                    banks: data.financing_banks ?? '',
+                });
+            });
+    }, [user?.id]);
+
+    const saveFinancing = async () => {
+        if (!user?.id) return;
+        setSavingFin(true);
+        await supabase.from('company_settings').update({
+            financing_enabled: financing.enabled,
+            financing_interest_rate: financing.rate === '' ? null : Number(financing.rate),
+            financing_max_installments: Number(financing.maxInstallments) || 48,
+            financing_min_down_payment_percent: financing.minDownPct === '' ? null : Number(financing.minDownPct),
+            financing_banks: financing.banks || null,
+            updated_at: new Date().toISOString(),
+        }).eq('user_id', user.id);
+        setSavingFin(false);
+        setSavedFin(true);
+        setTimeout(() => setSavedFin(false), 2000);
     };
 
     // ── Comportamento do Bot ──────────────────────────────────────────────────
@@ -948,6 +986,56 @@ const Settings = () => {
                                 ? <><CheckCircle size={18} /> Salvo!</>
                                 : savingTI ? 'Salvando...'
                                 : <><Save size={18} /> Salvar Pré-avaliação de Carro</>}
+                        </button>
+                    </div>
+                </section>
+            </div>
+
+            {/* ── Financiamento ────────────────────────────────────────────── */}
+            <div style={{ marginTop: '2rem' }}>
+                <section className="settings-section card">
+                    <div className="section-title"><Landmark size={20} /><h2>Financiamento</h2></div>
+                    <div className="settings-form">
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+                            <button type="button" onClick={() => setFinancing(f => ({ ...f, enabled: !f.enabled }))}
+                                title={financing.enabled ? 'Desativar' : 'Ativar'}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, color: financing.enabled ? '#10b981' : '#94a3b8' }}>
+                                {financing.enabled ? <ToggleRight size={32} /> : <ToggleLeft size={32} />}
+                            </button>
+                            <div>
+                                <strong style={{ display: 'block', marginBottom: 4 }}>Ativar simulação de financiamento</strong>
+                                <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>Quando ligado, o bot pode simular parcelas (estimativa) se o cliente pedir.</p>
+                            </div>
+                        </div>
+                        <div className="form-row">
+                            <div className="form-group">
+                                <label>Taxa de juros ao mês (%)</label>
+                                <input type="number" step="0.01" placeholder="Ex: 2.2" value={financing.rate} onChange={e => setFinancing(f => ({ ...f, rate: e.target.value }))} />
+                            </div>
+                            <div className="form-group">
+                                <label>Prazo máximo (parcelas)</label>
+                                <input type="number" placeholder="Ex: 48" value={financing.maxInstallments} onChange={e => setFinancing(f => ({ ...f, maxInstallments: e.target.value }))} />
+                            </div>
+                        </div>
+                        <div className="form-row">
+                            <div className="form-group">
+                                <label>Entrada mínima (%)</label>
+                                <input type="number" step="0.1" placeholder="Ex: 20" value={financing.minDownPct} onChange={e => setFinancing(f => ({ ...f, minDownPct: e.target.value }))} />
+                            </div>
+                            <div className="form-group">
+                                <label>Bancos que trabalha (opcional)</label>
+                                <input type="text" placeholder="Ex: BV, Santander, Omni" value={financing.banks} onChange={e => setFinancing(f => ({ ...f, banks: e.target.value }))} />
+                            </div>
+                        </div>
+                        <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', background: 'var(--input-bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '0.6rem 0.85rem', lineHeight: 1.5 }}>
+                            ⚠️ Os valores simulados são estimativas. O valor final depende da análise de crédito do banco.
+                        </p>
+                        <button className="btn-primary" onClick={saveFinancing} disabled={savingFin}
+                            style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {savedFin
+                                ? <><CheckCircle size={18} /> Salvo!</>
+                                : savingFin ? 'Salvando...'
+                                : <><Save size={18} /> Salvar Financiamento</>}
                         </button>
                     </div>
                 </section>
