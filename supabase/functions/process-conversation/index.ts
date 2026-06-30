@@ -63,13 +63,17 @@ function getBrazilDateInfo(): { label: string; iso: string } {
   // ISO date no fuso América/São Paulo (sv-SE usa formato YYYY-MM-DD)
   const iso = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(now);
 
-  // Rótulo legível: "sexta-feira, 23/05/2026"
+  // Rótulo legível com HORA: "sexta-feira, 23/05/2026 19:32"
+  // (a hora importa pro bot não oferecer horário que já passou hoje)
   const label = new Intl.DateTimeFormat('pt-BR', {
     timeZone: 'America/Sao_Paulo',
     weekday: 'long',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
   }).format(now);
 
   return { label, iso };
@@ -328,6 +332,101 @@ const TOOLS = [
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SupabaseClient = ReturnType<typeof createClient<any>>
 
+// Calcula os horários LIVRES de uma data lendo a config da loja (business_hours
+// + exceções + dias que abre + agendamentos). Fonte única usada tanto pelo
+// ver_horarios_disponiveis quanto pela validação do agendar_visita — nada
+// hardcoded, cada loja com a sua agenda. Para "hoje", remove horários já passados.
+async function computeFreeSlots(
+  supabase: SupabaseClient,
+  userId: string,
+  dateStr: string,
+): Promise<{ open: boolean; reason?: string; dayLabel: string; freeSlots: string[] }> {
+  const DOW_KEYS   = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
+  const DOW_LABELS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+  const dateObj  = new Date(`${dateStr}T12:00:00Z`);
+  const dayKey   = DOW_KEYS[dateObj.getUTCDay()];
+  const dayLabel = DOW_LABELS[dateObj.getUTCDay()];
+
+  const { data: settings } = await supabase
+    .from('company_settings')
+    .select('business_hours, appointment_duration, appointment_interval, max_appointments_per_slot, working_days, business_hours_start, business_hours_end')
+    .eq('user_id', userId)
+    .single();
+
+  // Exceção da data (feriado ou horário especial — ex.: domingo que abre)
+  const { data: exception } = await supabase
+    .from('schedule_exceptions')
+    .select('closed, start_time, end_time, note')
+    .eq('user_id', userId)
+    .eq('date', dateStr)
+    .maybeSingle();
+
+  let slotStart: string;
+  let slotEnd: string;
+
+  if (exception) {
+    if (exception.closed) {
+      return { open: false, reason: exception.note || 'a loja está fechada nesse dia', dayLabel, freeSlots: [] };
+    }
+    slotStart = String(exception.start_time ?? '09:00');
+    slotEnd   = String(exception.end_time   ?? '18:00');
+  } else {
+    type DayHours = { open?: boolean; start?: string; end?: string };
+    const bh = settings?.business_hours as Record<string, DayHours> | null;
+    const dayHours = bh?.[dayKey];
+
+    if (!dayHours?.open) {
+      if (!bh) {
+        // business_hours não configurado — usa campos legados
+        const LEGACY_MAP: Record<string, string> = {
+          sun: 'Dom', mon: 'Seg', tue: 'Ter', wed: 'Qua', thu: 'Qui', fri: 'Sex', sat: 'Sáb',
+        };
+        const workingDays = String(settings?.working_days ?? 'Seg,Ter,Qua,Qui,Sex')
+          .split(',').map((s: string) => s.trim());
+        if (!workingDays.includes(LEGACY_MAP[dayKey] ?? '')) {
+          return { open: false, reason: `a loja não abre ${dayLabel === 'Sábado' || dayLabel === 'Domingo' ? 'no' : 'na'} ${dayLabel.toLowerCase()}`, dayLabel, freeSlots: [] };
+        }
+        slotStart = String(settings?.business_hours_start ?? '09:00');
+        slotEnd   = String(settings?.business_hours_end   ?? '18:00');
+      } else {
+        return { open: false, reason: `a loja não abre ${dayLabel === 'Sábado' || dayLabel === 'Domingo' ? 'no' : 'na'} ${dayLabel.toLowerCase()}`, dayLabel, freeSlots: [] };
+      }
+    } else {
+      slotStart = dayHours.start ?? '09:00';
+      slotEnd   = dayHours.end   ?? '18:00';
+    }
+  }
+
+  const duration = Number(settings?.appointment_duration ?? 60);
+  const interval = Number(settings?.appointment_interval ?? 15);
+  let slots = generateTimeSlots(slotStart, slotEnd, duration, interval);
+
+  // Se a data for HOJE (fuso de Brasília), remove horários que já passaram.
+  const { iso: todayIso } = getBrazilDateInfo();
+  if (dateStr === todayIso) {
+    const nowHm = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(new Date()); // "HH:MM"
+    slots = slots.filter((s) => s > nowHm);
+  }
+
+  const maxPerSlot = Number(settings?.max_appointments_per_slot ?? 1);
+  const { data: existingAppts } = await supabase
+    .from('appointments')
+    .select('appointment_time')
+    .eq('user_id', userId)
+    .eq('appointment_date', dateStr)
+    .neq('status', 'cancelled');
+
+  const count = new Map<string, number>();
+  for (const a of (existingAppts ?? [])) {
+    const t = String(a.appointment_time).substring(0, 5);
+    count.set(t, (count.get(t) ?? 0) + 1);
+  }
+  const freeSlots = slots.filter((s) => (count.get(s) ?? 0) < maxPerSlot);
+  return { open: true, dayLabel, freeSlots };
+}
+
 async function executeTool(
   name: string,
   input: Record<string, unknown>,
@@ -385,93 +484,12 @@ async function executeTool(
     const dateStr = String(input.data ?? '');
     if (!dateStr) return { erro: 'Data não fornecida' };
 
-    const DOW_KEYS   = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
-    const DOW_LABELS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
-    const dateObj    = new Date(`${dateStr}T12:00:00Z`);
-    const dayKey     = DOW_KEYS[dateObj.getUTCDay()];
-    const dayLabel   = DOW_LABELS[dateObj.getUTCDay()];
-
-    const { data: settings } = await supabase
-      .from('company_settings')
-      .select('business_hours, appointment_duration, appointment_interval, max_appointments_per_slot, working_days, business_hours_start, business_hours_end')
-      .eq('user_id', userId)
-      .single();
-
-    // Verifica exceção para esta data (feriado ou horário especial)
-    const { data: exception } = await supabase
-      .from('schedule_exceptions')
-      .select('closed, start_time, end_time, note')
-      .eq('user_id', userId)
-      .eq('date', dateStr)
-      .maybeSingle();
-
-    let slotStart: string;
-    let slotEnd: string;
-
-    if (exception) {
-      if (exception.closed) {
-        // Item 8: retorna estrutura closed com reason para o bot informar ao cliente
-        return {
-          closed: true,
-          reason: exception.note || 'Loja fechada nesse dia',
-          mensagem: `A concessionária está fechada em ${dateStr}. Tente outro dia.`,
-        };
-      }
-      slotStart = String(exception.start_time ?? '09:00');
-      slotEnd   = String(exception.end_time   ?? '18:00');
-    } else {
-      type DayHours = { open?: boolean; start?: string; end?: string };
-      const bh = settings?.business_hours as Record<string, DayHours> | null;
-      const dayHours = bh?.[dayKey];
-
-      if (!dayHours?.open) {
-        if (!bh) {
-          // business_hours não configurado no novo formato — usa campos legados ou padrões
-          const LEGACY_MAP: Record<string, string> = {
-            sun: 'Dom', mon: 'Seg', tue: 'Ter', wed: 'Qua', thu: 'Qui', fri: 'Sex', sat: 'Sáb',
-          };
-          const workingDays = String(settings?.working_days ?? 'Seg,Ter,Qua,Qui,Sex')
-            .split(',').map((s: string) => s.trim());
-          const legacyLabel = LEGACY_MAP[dayKey] ?? '';
-          console.log('[AGENDA] business_hours null — fallback legacy, dia:', legacyLabel, 'workingDays:', workingDays);
-          if (!workingDays.includes(legacyLabel)) {
-            return { disponivel: false, mensagem: `A concessionária não funciona às ${dayLabel}. Tente outro dia.` };
-          }
-          slotStart = String(settings?.business_hours_start ?? '09:00');
-          slotEnd   = String(settings?.business_hours_end   ?? '18:00');
-        } else {
-          console.log('[AGENDA] Dia fechado no business_hours:', dayKey, dayHours);
-          return { disponivel: false, mensagem: `A concessionária não funciona às ${dayLabel}. Tente outro dia.` };
-        }
-      } else {
-        slotStart = dayHours.start ?? '09:00';
-        slotEnd   = dayHours.end   ?? '18:00';
-      }
+    const { open, reason, dayLabel, freeSlots } = await computeFreeSlots(supabase, userId, dateStr);
+    if (!open) {
+      return { closed: true, disponivel: false, reason, mensagem: `Nesse dia ${reason}. Ofereça outro dia dentro do funcionamento da loja.` };
     }
-
-    const duration = Number(settings?.appointment_duration ?? 60);
-    const interval = Number(settings?.appointment_interval ?? 15);
-    const slots = generateTimeSlots(slotStart, slotEnd, duration, interval);
-
-    const maxPerSlot = Number(settings?.max_appointments_per_slot ?? 1);
-
-    const { data: existingAppts } = await supabase
-      .from('appointments')
-      .select('appointment_time')
-      .eq('user_id', userId)
-      .eq('appointment_date', dateStr)
-      .neq('status', 'cancelled');
-
-    const slotCount = new Map<string, number>();
-    for (const a of (existingAppts ?? [])) {
-      const t = String(a.appointment_time).substring(0, 5);
-      slotCount.set(t, (slotCount.get(t) ?? 0) + 1);
-    }
-    // Slot disponível enquanto count < max_appointments_per_slot
-    const free = slots.filter((s) => (slotCount.get(s) ?? 0) < maxPerSlot);
-    console.log('[slot] ver_horarios:', { data: dateStr, maxPerSlot, ocupacao: Object.fromEntries(slotCount), livres: free.length });
-
-    return { data: dateStr, dia_semana: dayLabel, horarios_livres: free, total_disponivel: free.length };
+    console.log('[slot] ver_horarios:', { data: dateStr, livres: freeSlots.length });
+    return { data: dateStr, dia_semana: dayLabel, horarios_livres: freeSlots, total_disponivel: freeSlots.length };
   }
 
   if (name === 'agendar_visita') {
@@ -487,41 +505,33 @@ async function executeTool(
       return { sucesso: false, error: 'Data ou horário não informado.' };
     }
 
-    // user_id é SEMPRE o dono do bot (vem de conv.user_id), nunca o cliente
-    const { data: settings, error: settingsErr } = await supabase
+    // VALIDAÇÃO de expediente + disponibilidade (mesma fonte do ver_horarios_disponiveis):
+    // o horário pedido PRECISA ser um slot válido e livre. Barra fora do funcionamento,
+    // dia fechado, exceção e horário já passado hoje — independente do que o modelo mandar.
+    const horarioHm = horario.substring(0, 5);
+    const slotInfo = await computeFreeSlots(supabase, userId, dateStr);
+
+    if (!slotInfo.open) {
+      console.log('[agendar_visita] dia fechado/indisponível:', dateStr, slotInfo.reason);
+      return { sucesso: false, fora_expediente: true, mensagem: `Não dá pra agendar em ${dateStr}: ${slotInfo.reason}. Ofereça ao cliente outro dia dentro do funcionamento da loja (use ver_horarios_disponiveis).` };
+    }
+
+    if (!slotInfo.freeSlots.includes(horarioHm)) {
+      console.log('[agendar_visita] fora do expediente/indisponível:', horarioHm, '| livres:', slotInfo.freeSlots.join(','));
+      return {
+        sucesso: false,
+        fora_expediente: true,
+        horarios_livres: slotInfo.freeSlots,
+        mensagem: `O horário ${horarioHm} não está disponível (fora do horário de funcionamento ou já ocupado). NÃO confirme esse horário. Ofereça ao cliente um destes horários válidos: ${slotInfo.freeSlots.join(', ') || '(nenhum nesse dia — sugira outro dia)'}.`,
+      };
+    }
+
+    // booking_mode define o status do agendamento
+    const { data: settings } = await supabase
       .from('company_settings')
-      .select('booking_mode, max_appointments_per_slot')
+      .select('booking_mode')
       .eq('user_id', userId)
       .single();
-
-    if (settingsErr) {
-      console.error('[agendar_visita] erro ao ler company_settings:', JSON.stringify(settingsErr));
-      return { sucesso: false, error: 'Não consegui acessar a agenda agora. Diga ao cliente que vai confirmar o horário com o gerente e acione chamar_atendente.' };
-    }
-
-    const maxPerSlot = Number(settings?.max_appointments_per_slot ?? 1);
-
-    // BUG 4: respeita max_appointments_per_slot — só bloqueia se já atingiu o máximo
-    const { data: existingAtSlot, error: countErr } = await supabase
-      .from('appointments')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('appointment_date', dateStr)
-      .eq('appointment_time', horario)
-      .neq('status', 'cancelled');
-
-    if (countErr) {
-      console.error('[agendar_visita] erro ao contar slot:', JSON.stringify(countErr));
-      return { sucesso: false, error: 'Não consegui verificar a disponibilidade. Diga ao cliente que vai confirmar com o gerente e acione chamar_atendente.' };
-    }
-
-    const slotCount = existingAtSlot?.length ?? 0;
-    console.log('[slot]', { hora: horario, count: slotCount, max: maxPerSlot });
-
-    if (slotCount >= maxPerSlot) {
-      console.log('[agendar_visita] slot lotado:', horario, slotCount, '>=', maxPerSlot);
-      return { sucesso: false, error: 'Este horário já está lotado. Escolha outro horário.' };
-    }
 
     const appointmentStatus = settings?.booking_mode === 'confirm' ? 'scheduled' : 'confirmed';
 
@@ -1264,9 +1274,9 @@ NUNCA ofereça agendar visita antes de ter: (a) qualificado com o FORD (pelo men
 - Endereço: ${address}
 - Telefone: ${phone}
 - Horário de funcionamento: ${horarios}
-- Data de hoje: ${todayLabel}${nomeInfo}
+- Data e hora agora (Brasília): ${todayLabel}${nomeInfo}
 
-Use a data de hoje como referência sempre que o cliente falar em datas relativas ("hoje", "amanhã", "sexta que vem", "fim de semana").
+Use a data de hoje como referência sempre que o cliente falar em datas relativas ("hoje", "amanhã", "sexta que vem", "fim de semana"). Considere a HORA atual: se a loja já fechou hoje (ou o horário pedido já passou), NÃO ofereça horário pra hoje — vá pro próximo dia/horário válido. Nunca ofereça nem confirme horário fora do funcionamento da loja; a agenda real vem sempre do ver_horarios_disponiveis.
 
 ## Seu papel
 
