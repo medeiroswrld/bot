@@ -95,6 +95,16 @@ function mergeConsecutiveRoles(
 
 // ─── definição das ferramentas ────────────────────────────────────────────────
 
+// Cálculo de financiamento — Tabela Price. Pura, sem IA.
+// parcela = VF * (i*(1+i)^n) / ((1+i)^n - 1); i = taxa mensal decimal; n = parcelas.
+function calcParcelaPrice(valorFinanciado: number, taxaMensalPct: number, n: number): number {
+  if (valorFinanciado <= 0 || n <= 0) return 0;
+  const i = (Number(taxaMensalPct) || 0) / 100;
+  if (i <= 0) return valorFinanciado / n; // sem juros
+  const fator = Math.pow(1 + i, n);
+  return valorFinanciado * (i * fator) / (fator - 1);
+}
+
 const TOOLS = [
   {
     name: 'consultar_estoque',
@@ -210,6 +220,21 @@ const TOOLS = [
         prazo_meses:    { type: 'integer', description: 'Prazo desejado em meses (ex: 24, 36, 48, 60)' },
       },
       required: ['nome_completo', 'valor_entrada', 'prazo_meses'],
+    },
+  },
+  {
+    name: 'simular_financiamento',
+    description:
+      'Calcula uma ESTIMATIVA de parcela de financiamento (Tabela Price) com a config da loja. Use quando o cliente pedir pra simular o financiamento de um carro específico. Apresente SEMPRE como estimativa, com o disclaimer retornado, e convide pra confirmar na loja. Nunca afirme que a parcela é o valor final.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        car_price:      { type: 'number',  description: 'Preço do carro escolhido (do consultar_estoque)' },
+        down_payment:   { type: 'number',  description: 'Entrada em dinheiro informada pelo cliente (default 0)' },
+        trade_in_value: { type: 'number',  description: 'Valor estimado da troca, se houver (default 0)' },
+        installments:   { type: 'integer', description: 'Prazo em meses; se não informado, usa o máximo da loja' },
+      },
+      required: ['car_price'],
     },
   },
   {
@@ -725,6 +750,72 @@ async function executeTool(
     return { sucesso: true, lead_id: newLead?.id, mensagem: 'Dados de financiamento registrados e lead criado.' };
   }
 
+  if (name === 'simular_financiamento') {
+    const carPrice = Number(input.car_price ?? 0);
+    const downPayment = Number(input.down_payment ?? 0);
+    const tradeIn = Number(input.trade_in_value ?? 0);
+
+    const { data: cfg } = await supabase
+      .from('company_settings')
+      .select('financing_enabled, financing_interest_rate, financing_max_installments, financing_min_down_payment_percent')
+      .eq('user_id', userId).single();
+
+    // Desligado → fallback: coletar + escalar (não calcula)
+    if (!cfg || cfg.financing_enabled !== true) {
+      return { disponivel: false, mensagem: 'Simulação automática não está ativa. Colete entrada/prazo e acione chamar_atendente pra um especialista simular.' };
+    }
+    if (!carPrice || carPrice <= 0) {
+      return { sucesso: false, mensagem: 'Preço do carro não informado — use consultar_estoque e passe o car_price.' };
+    }
+
+    const taxa   = Number(cfg.financing_interest_rate ?? 0);
+    const maxN   = Number(cfg.financing_max_installments ?? 48);
+    const minPct = Number(cfg.financing_min_down_payment_percent ?? 0);
+
+    let n = Number(input.installments ?? maxN) || maxN;
+    if (n > maxN) n = maxN; // teto de parcelas
+
+    const entradaTotal = downPayment + tradeIn;
+    const minEntrada   = carPrice * (minPct / 100);
+
+    // Validação: entrada mínima (dinheiro + troca)
+    if (minPct > 0 && entradaTotal < minEntrada) {
+      console.log(`[financiamento] entrada insuficiente: ${entradaTotal} < min ${Math.round(minEntrada)} (${minPct}%)`);
+      return {
+        sucesso: false, entrada_insuficiente: true,
+        entrada_informada: entradaTotal,
+        entrada_minima: Math.round(minEntrada),
+        entrada_minima_percent: minPct,
+        mensagem: `Entrada (dinheiro + troca = R$ ${entradaTotal.toLocaleString('pt-BR')}) abaixo do mínimo de ${minPct}% (R$ ${Math.round(minEntrada).toLocaleString('pt-BR')}). Diga o mínimo e pergunte se consegue complementar. NÃO calcule abaixo do mínimo.`,
+      };
+    }
+
+    const valorFinanciado = Math.max(0, carPrice - entradaTotal);
+    const parcela = calcParcelaPrice(valorFinanciado, taxa, n);
+
+    console.log(`[financiamento] preco=${carPrice} entrada=${entradaTotal} financiado=${valorFinanciado} taxa=${taxa}%/mes n=${n} parcela=${parcela.toFixed(2)}`);
+
+    // Salva no lead (na qualificação financeira — financial_info)
+    try {
+      const { data: lead } = await supabase.from('leads')
+        .select('id, financial_info').eq('user_id', userId).eq('phone', customerPhone).maybeSingle();
+      if (lead) {
+        const resumo = `Simulação: ${n}x de R$ ${parcela.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} | entrada R$ ${entradaTotal.toLocaleString('pt-BR')} (dinheiro ${downPayment.toLocaleString('pt-BR')} + troca ${tradeIn.toLocaleString('pt-BR')}) | financiado R$ ${valorFinanciado.toLocaleString('pt-BR')} | taxa ${taxa}%/mês`;
+        const novo = lead.financial_info ? `${lead.financial_info}\n${resumo}` : resumo;
+        await supabase.from('leads').update({ financial_info: novo, updated_at: new Date().toISOString() }).eq('id', lead.id);
+      }
+    } catch (e) { console.error('[financiamento] erro ao salvar no lead:', e); }
+
+    return {
+      sucesso: true,
+      valor_financiado: Math.round(valorFinanciado),
+      parcelas: n,
+      valor_parcela: Math.round(parcela * 100) / 100,
+      disclaimer: 'Esta é uma simulação aproximada. O valor exato depende da análise de crédito do banco e do perfil do cliente.',
+      mensagem: 'Apresente como ESTIMATIVA + disclaimer e convide pra confirmar na loja. Nunca diga que é o valor final.',
+    };
+  }
+
   if (name === 'chamar_atendente') {
     await supabase
       .from('conversations')
@@ -1092,6 +1183,12 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
 
   const visitReminderBlock = `\n\n## Resposta do cliente ao lembrete de visita\n\nSe o cliente responde algo como "não vou poder ir", "preciso desmarcar", "vou cancelar", "tô com problema" ou "vou ter que remarcar" (normalmente após um lembrete de visita):\n\n1. Mostre empatia ("Tudo bem, imprevistos acontecem!").\n2. Pergunte: "Você prefere remarcar pra outro horário ou cancelar de vez?"\n3. Se quiser REMARCAR: chame a tool cancelar_visita (cancela o agendamento atual) e em seguida conduza uma nova marcação seguindo o fluxo normal (dia → período → confirmação).\n4. Se quiser CANCELAR: chame a tool cancelar_visita e responda algo acolhedor: "Sem problemas, fica pra próxima! Quando quiser voltar, é só me chamar."\n\nSe o cliente responder positivamente ("ok", "tô indo", "estou a caminho"), apenas confirme: "Perfeito, te esperamos! 😊"`;
 
+  // Financiamento — bloco condicional ao toggle financing_enabled.
+  const financingEnabled = settings.financing_enabled === true;
+  const financingBlock = financingEnabled
+    ? `2. Pra SIMULAR financiamento de um carro específico, pergunte natural e UMA de cada vez só o que falta: entrada em dinheiro, se tem carro pra dar na troca, e prazo desejado (se não disser, usa o máximo da loja). NÃO precisa de nome nem CPF pra simular.\n3. Então chame a tool simular_financiamento (car_price = preço do carro do consultar_estoque; down_payment; trade_in_value; installments). Apresente o retorno SEMPRE como ESTIMATIVA, com o disclaimer, e convide pra confirmar na loja. NUNCA diga que a parcela é o valor final.\n4. Se a tool retornar entrada_insuficiente, diga o valor mínimo de entrada e pergunte se ele consegue complementar (mais dinheiro ou um carro na troca). NÃO calcule abaixo do mínimo.`
+    : `2. Se o cliente quiser simular financiamento, COLETE um por vez: entrada, prazo e (opcional) o veículo. NÃO peça CPF.\n3. Depois chame coletar_dados_financiamento e em seguida chamar_atendente. Diga: "Já anotei seus dados! Em instantes um especialista entra em contato com a simulação exata 😊".`;
+
   const delayedEnabled = settings.delayed_schedule_enabled !== false; // default ON
   const busyTimeRule = delayedEnabled
     ? `5. **Quando o cliente pedir um horário que está OCUPADO** (você confirmou via ver_horarios_disponiveis que ele NÃO aparece em horarios_livres): NÃO descarte na hora nem ofereça alternativa imediatamente — chame request_schedule_check e responda só "Deixa eu verificar com meu superior, te respondo em alguns minutos." A confirmação ou as alternativas chegam ao cliente depois, automaticamente. ATENÇÃO: isto vale SÓ para horário OCUPADO. Se o horário estiver livre, siga a regra 6 (agendar na hora).`
@@ -1241,14 +1338,7 @@ REGRA DE LIMPEZA: depois que o cliente aceitar uma opção ou recusar claramente
 
 Quando o cliente perguntar sobre pagamento ou financiamento:
 1. Informe as formas de pagamento aceitas conforme a seção "Formas de pagamento aceitas pela loja" (quando disponível) e o FAQ. Nunca invente formas que não estejam listadas.
-2. Se o cliente quiser simular um financiamento, COLETE os seguintes dados (um por vez, de forma natural):
-   - Nome completo
-   - Valor de entrada que pretende dar
-   - Prazo desejado em meses
-   - (Opcional) qual veículo tem interesse
-3. NÃO peça CPF — dados sensíveis são coletados pessoalmente pela equipe da loja.
-4. Após coletar todos os dados, chame \`coletar_dados_financiamento\` e em seguida \`chamar_atendente\`.
-5. Diga ao cliente: "Já anotei seus dados, [Nome]. Em instantes um especialista vai entrar em contato com a simulação exata!"
+${financingBlock}
 
 ## Regras que você NUNCA quebra
 
