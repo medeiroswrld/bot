@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendWhatsAppTemplate } from '../_shared/sendTemplate.ts';
+import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
 import { buildCors } from '../_shared/cors.ts';
@@ -64,6 +65,7 @@ serve(async (req) => {
       });
     }
     const companyName = String(settings.company_name ?? 'nossa loja');
+    const token = await resolveWhatsAppToken(supabase, car.user_id);
 
     // Template precisa estar aprovado
     const { data: template } = await supabase
@@ -110,7 +112,7 @@ serve(async (req) => {
             { type: 'text', text: carDescription },
           ],
           phoneNumberId,
-          token: whatsappToken,
+          token,
         });
 
         await supabase.from('vehicle_interests')

@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
-import { sendMessage } from '../_shared/whatsapp.ts';
+import { sendMessage, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 import { buildCors } from '../_shared/cors.ts';
 
@@ -164,6 +164,7 @@ serve(async (req) => {
     if (!settings) { console.error(`[pending] ${conv.id}: sem company_settings`); continue; }
 
     const pid = String(settings.whatsapp_phone_number_id ?? '');
+    const token = await resolveWhatsAppToken(supabase, conv.user_id);
     const nome = conv.customer_name ? String(conv.customer_name).split(' ')[0] : null;
     const greet = nome ? `${nome}, ` : '';
 
@@ -207,7 +208,7 @@ serve(async (req) => {
       console.log(`[pending] ${conv.id} ALTERNATIVAS [${collected.join(' | ')}] (${maskPhone(conv.customer_phone)})`);
     }
 
-    const sent = await sendMessage(conv.customer_phone, msg, pid || undefined);
+    const sent = await sendMessage(conv.customer_phone, msg, pid || undefined, token);
     if (!sent) console.error(`[pending] ${conv.id}: falha ao enviar WhatsApp (msg salva mesmo assim)`);
     await supabase.from('messages').insert({ conversation_id: conv.id, role: 'bot', content: msg });
     await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conv.id);

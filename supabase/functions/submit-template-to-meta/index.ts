@@ -1,8 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { buildCors } from '../_shared/cors.ts';
-
-const WABA_ID = '1284569480545489';
+import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 
 // Rate limit in-memory (por instância) — suficiente para evitar spam à Meta.
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
@@ -98,7 +97,24 @@ serve(async (req) => {
       components.push({ type: 'BUTTONS', buttons });
     }
 
-    const metaUrl = `https://graph.facebook.com/v25.0/${WABA_ID}/message_templates`;
+    // WABA ID por tenant: lê de company_settings (pelo dono do template); fallback para o secret.
+    const { data: wabaSettings } = await supabase
+      .from('company_settings')
+      .select('whatsapp_business_account_id')
+      .eq('user_id', template.user_id)
+      .maybeSingle();
+    const wabaId = String(
+      wabaSettings?.whatsapp_business_account_id || Deno.env.get('WHATSAPP_BUSINESS_ACCOUNT_ID') || '',
+    ).trim();
+    if (!wabaId) {
+      return new Response(JSON.stringify({
+        error: 'WABA não configurado para esta conta (company_settings.whatsapp_business_account_id ou secret WHATSAPP_BUSINESS_ACCOUNT_ID).',
+      }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    const tenantToken = await resolveWhatsAppToken(supabase, template.user_id);
+
+    const metaUrl = `https://graph.facebook.com/v25.0/${wabaId}/message_templates`;
     const metaPayload = {
       name: template.meta_template_name,
       category: template.category,
@@ -109,7 +125,7 @@ serve(async (req) => {
 
     const metaResponse = await fetch(metaUrl, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${whatsappToken}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${tenantToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(metaPayload),
     });
     const metaResult = await metaResponse.json();
@@ -120,7 +136,7 @@ serve(async (req) => {
       // Não é rejeição: buscamos o template existente pelo nome e marcamos como pending
       // pra consultar o status depois (em vez de marcar como rejeitado).
       if (metaResult.error?.error_subcode === 2388024) {
-        const listUrl = `https://graph.facebook.com/v25.0/${WABA_ID}/message_templates`
+        const listUrl = `https://graph.facebook.com/v25.0/${wabaId}/message_templates`
           + `?name=${encodeURIComponent(template.meta_template_name)}&limit=1`;
         const listResponse = await fetch(listUrl, {
           headers: { Authorization: `Bearer ${whatsappToken}` },

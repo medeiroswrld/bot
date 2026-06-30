@@ -1,5 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { buildCors } from '../_shared/cors.ts';
+import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 
 const WHISPER_TIMEOUT_MS = 30000;
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25MB — limite do Whisper
@@ -20,14 +22,21 @@ serve(async (req) => {
   const json = (b: unknown, status = 200) =>
     new Response(JSON.stringify(b), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 
-  let body: { media_id?: string; phone_number_id?: string };
+  let body: { media_id?: string; phone_number_id?: string; user_id?: string };
   try { body = await req.json(); } catch { return json({ success: false, code: 'bad_request', error: 'JSON inválido' }, 400); }
 
   const mediaId = String(body.media_id ?? '').trim();
   const phoneNumberId = String(body.phone_number_id ?? '');
+  const userId = String(body.user_id ?? '') || null;
   if (!mediaId) return json({ success: false, code: 'bad_request', error: 'media_id obrigatório' }, 400);
 
-  const waToken   = Deno.env.get('WHATSAPP_TOKEN') ?? '';
+  // Token do tenant (com fallback global) — o áudio está sob a WABA do dono da conversa.
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL') ?? '',
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
+    { auth: { autoRefreshToken: false, persistSession: false } },
+  );
+  const waToken   = await resolveWhatsAppToken(supabase, userId);
   const openaiKey = Deno.env.get('OPENAI_API_KEY') ?? '';
   if (!waToken)   return json({ success: false, code: 'download_failed', error: 'WHATSAPP_TOKEN ausente' });
   if (!openaiKey) return json({ success: false, code: 'openai_error',   error: 'OPENAI_API_KEY ausente' });

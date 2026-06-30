@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { timingSafeEqual } from 'https://deno.land/std@0.224.0/crypto/timing_safe_equal.ts';
-import { parseInboundMessage, sendMessage } from '../_shared/whatsapp.ts';
+import { parseInboundMessage, sendMessage, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -299,7 +299,7 @@ serve(async (req) => {
         const res = await fetch(`${supabaseUrl}/functions/v1/transcribe-audio`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
-          body: JSON.stringify({ media_id: mediaId, phone_number_id: pid }),
+          body: JSON.stringify({ media_id: mediaId, phone_number_id: pid, user_id: userId }),
         });
         const result = await res.json().catch(() => ({ success: false, code: 'openai_error' }));
 
@@ -323,7 +323,8 @@ serve(async (req) => {
         };
         const fb = FALLBACKS[code] ?? FALLBACKS.openai_error;
 
-        const sent = await sendMessage(from, fb.msg, pid || undefined);
+        const token = await resolveWhatsAppToken(supabase, userId);
+        const sent = await sendMessage(from, fb.msg, pid || undefined, token);
         if (!sent) console.error('[WH-audio] falha ao enviar fallback (salvo no banco mesmo assim)');
         await supabase.from('messages').insert({ conversation_id: convId, role: 'bot', content: fb.msg });
         await supabase.from('conversations').update({

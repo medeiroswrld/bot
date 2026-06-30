@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendWhatsAppTemplate } from '../_shared/sendTemplate.ts';
+import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 import { buildCors } from '../_shared/cors.ts';
 
@@ -28,8 +29,6 @@ serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
     { auth: { autoRefreshToken: false, persistSession: false } },
   );
-  const waToken = Deno.env.get('WHATSAPP_TOKEN') ?? '';
-
   // Tenants com lembrete ativo
   const { data: tenants } = await supabase
     .from('company_settings')
@@ -50,7 +49,8 @@ serve(async (req) => {
   for (const t of tenants) {
     const minutesBefore = Number(t.visit_reminder_minutes_before ?? 15);
     const pid = String(t.whatsapp_phone_number_id ?? '');
-    if (!pid || !waToken) { console.warn(`[reminder] tenant ${t.user_id} sem phone_number_id/token`); continue; }
+    const token = await resolveWhatsAppToken(supabase, t.user_id);
+    if (!pid || !token) { console.warn(`[reminder] tenant ${t.user_id} sem phone_number_id/token`); continue; }
 
     // Template lembrete_visita aprovado para este tenant?
     const { data: tpl } = await supabase
@@ -115,7 +115,7 @@ serve(async (req) => {
             { type: 'text', text: String(t.address ?? '') },
           ],
           phoneNumberId: pid,
-          token: waToken,
+          token,
         });
         await supabase.from('appointments').update({ reminder_status: 'sent' }).eq('id', a.id);
         sent++;

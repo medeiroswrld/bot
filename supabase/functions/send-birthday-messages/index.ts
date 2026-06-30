@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendWhatsAppTemplate } from '../_shared/sendTemplate.ts';
+import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
 import { buildCors } from '../_shared/cors.ts';
@@ -46,6 +47,7 @@ serve(async (req) => {
     for (const settings of settingsList) {
       const phoneNumberId = String(settings.whatsapp_phone_number_id ?? '');
       if (!phoneNumberId) continue;
+      const token = await resolveWhatsAppToken(supabase, settings.user_id);
 
       const { data: template } = await supabase
         .from('message_templates')
@@ -79,7 +81,7 @@ serve(async (req) => {
             language: template.language,
             bodyParameters: [{ type: 'text', text: firstName }],
             phoneNumberId,
-            token: whatsappToken,
+            token,
           });
           totalSent++;
           await new Promise((r) => setTimeout(r, 1100));

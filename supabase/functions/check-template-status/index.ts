@@ -1,8 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { buildCors } from '../_shared/cors.ts';
-
-const WABA_ID = '1284569480545489';
+import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 
 serve(async (req) => {
   const corsHeaders = buildCors(req);
@@ -41,12 +40,31 @@ serve(async (req) => {
       });
     }
 
-    const url = `https://graph.facebook.com/v25.0/${WABA_ID}/message_templates?limit=200`;
-    const response = await fetch(url, { headers: { Authorization: `Bearer ${whatsappToken}` } });
+    // WABA ID por tenant: lê de company_settings; fallback para o secret de ambiente.
+    const { data: wabaSettings } = await supabase
+      .from('company_settings')
+      .select('whatsapp_business_account_id')
+      .eq('user_id', user_id)
+      .maybeSingle();
+    const wabaId = String(
+      wabaSettings?.whatsapp_business_account_id || Deno.env.get('WHATSAPP_BUSINESS_ACCOUNT_ID') || '',
+    ).trim();
+    if (!wabaId) {
+      return new Response(JSON.stringify({
+        error: 'WABA não configurado para esta conta (company_settings.whatsapp_business_account_id ou secret WHATSAPP_BUSINESS_ACCOUNT_ID).',
+      }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
+    const tenantToken = await resolveWhatsAppToken(supabase, user_id);
+
+    const url = `https://graph.facebook.com/v25.0/${wabaId}/message_templates?limit=200`;
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${tenantToken}` } });
     const data = await response.json();
 
     if (!response.ok) {
-      return new Response(JSON.stringify({ error: 'Erro ao consultar Meta', details: data }), {
+      // Loga o erro cru da Meta (code/message/subcode) para diagnóstico
+      console.error('[check-template-status] Meta error:', response.status, JSON.stringify(data?.error ?? data));
+      return new Response(JSON.stringify({ error: 'Erro ao consultar Meta', details: data?.error ?? data }), {
         status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

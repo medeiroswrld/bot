@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
-import { sendMessage, sendImage, sendVideo } from '../_shared/whatsapp.ts';
+import { sendMessage, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskPhone, maskName } from '../_shared/maskPII.ts';
 
 // ─── tipos locais ─────────────────────────────────────────────────────────────
@@ -430,10 +430,10 @@ async function computeFreeSlots(
 async function executeTool(
   name: string,
   input: Record<string, unknown>,
-  ctx: { userId: string; conversationId: string; customerPhone: string; customerName: string | null; phoneNumberId: string },
+  ctx: { userId: string; conversationId: string; customerPhone: string; customerName: string | null; phoneNumberId: string; token: string },
   supabase: SupabaseClient,
 ): Promise<unknown> {
-  const { userId, conversationId, customerPhone, customerName, phoneNumberId } = ctx;
+  const { userId, conversationId, customerPhone, customerName, phoneNumberId, token } = ctx;
 
   if (name === 'consultar_estoque') {
     let query = supabase
@@ -883,7 +883,7 @@ async function executeTool(
     // 4. Foto primeiro
     if (specsImageUrl) {
       try {
-        const ok = await sendImage(customerPhone, specsImageUrl, pid);
+        const ok = await sendImage(customerPhone, specsImageUrl, pid, token);
         if (ok) {
           sentItems.push('foto');
           await supabase.from('messages').insert({
@@ -900,7 +900,7 @@ async function executeTool(
     // 5. Vídeo depois
     if (videoUrl) {
       try {
-        const ok = await sendVideo(customerPhone, videoUrl, pid);
+        const ok = await sendVideo(customerPhone, videoUrl, pid, undefined, token);
         if (ok) {
           sentItems.push('vídeo');
           await supabase.from('messages').insert({
@@ -1602,6 +1602,7 @@ serve(async (req) => {
 
     const companyName = String(wSettings?.company_name ?? 'nossa concessionária');
     const wPid        = String(wSettings?.whatsapp_phone_number_id ?? '');
+    const wToken      = await resolveWhatsAppToken(supabase, userId);
 
     const welcomeText =
       `Olá! 👋 Bem-vindo à ${companyName}.\n\nPra começar, qual o seu nome?`;
@@ -1610,7 +1611,7 @@ serve(async (req) => {
     await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: welcomeText });
     await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);
 
-    const wSent = await sendMessage(customerPhone, welcomeText, wPid || undefined);
+    const wSent = await sendMessage(customerPhone, welcomeText, wPid || undefined, wToken);
     if (!wSent) console.error(`[PC] Falha ao enviar boas-vindas para ${maskPhone(customerPhone)}`);
 
     return new Response('OK', { status: 200 });
@@ -1660,7 +1661,8 @@ serve(async (req) => {
 
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
   const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
-  const ctx = { userId, conversationId, customerPhone, customerName, phoneNumberId };
+  const waToken = await resolveWhatsAppToken(supabase, userId);
+  const ctx = { userId, conversationId, customerPhone, customerName, phoneNumberId, token: waToken };
   let finalText = '';
   let lastWasTool = false;   // a iteração anterior executou uma tool?
   let retriedEmpty = false;  // já re-chamamos uma vez por resposta vazia pós-tool?
@@ -1733,7 +1735,7 @@ serve(async (req) => {
     const fallbackMsg = 'Opa, deixa eu confirmar uma coisa aqui com o gerente. Em instantes alguém da equipe te responde.';
 
     try {
-      const fbSent = await sendMessage(customerPhone, fallbackMsg, phoneNumberId || undefined);
+      const fbSent = await sendMessage(customerPhone, fallbackMsg, phoneNumberId || undefined, waToken);
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: fallbackMsg });
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
       if (!fbSent) console.error(`[PC] Falha ao enviar mensagem de fallback para ${maskPhone(customerPhone)} (salva no banco mesmo assim)`);
@@ -1759,7 +1761,7 @@ serve(async (req) => {
     console.error('[PC] Resposta vazia mesmo após retry — enviando ponte (sem handoff).');
     const bridge = 'Opa, me perdi aqui rapidinho 😅 me lembra o que a gente tava vendo? Quero te ajudar a achar o carro certo.';
     try {
-      await sendMessage(customerPhone, bridge, phoneNumberId || undefined);
+      await sendMessage(customerPhone, bridge, phoneNumberId || undefined, waToken);
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: bridge });
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
     } catch (e) {
@@ -1769,7 +1771,7 @@ serve(async (req) => {
   }
 
   // ── 8. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────
-  const sent = await sendMessage(customerPhone, finalText, phoneNumberId || undefined);
+  const sent = await sendMessage(customerPhone, finalText, phoneNumberId || undefined, waToken);
   if (!sent) {
     console.error(`[PC] Falha ao enviar WhatsApp para ${maskPhone(customerPhone)} — mensagem salva no banco mesmo assim`);
   }

@@ -95,6 +95,28 @@ function parseEvolution(payload: unknown): InboundMessage | null {
   }
 }
 
+// ─── token por tenant ──────────────────────────────────────────────────────────
+// Resolve o token do tenant (decifrado do Vault via get_whatsapp_token) com
+// FALLBACK pro WHATSAPP_TOKEN global. Tenant sem token próprio (ex.: cliente
+// atual) continua no token global — nada quebra. Falha no RPC → global também.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function resolveWhatsAppToken(supabase: any, userId?: string | null): Promise<string> {
+  const globalToken = Deno.env.get('WHATSAPP_TOKEN') ?? '';
+  if (!userId || !supabase) return globalToken;
+  try {
+    const { data, error } = await supabase.rpc('get_whatsapp_token', { p_user_id: userId });
+    if (error) {
+      console.warn('[WA] get_whatsapp_token falhou, usando token global:', error.message);
+      return globalToken;
+    }
+    const tenantToken = String(data ?? '').trim();
+    return tenantToken || globalToken;
+  } catch (e) {
+    console.warn('[WA] get_whatsapp_token exceção, usando token global:', e);
+    return globalToken;
+  }
+}
+
 // ─── sendMessage ──────────────────────────────────────────────────────────────
 // Retorna true em sucesso, false em falha.
 
@@ -102,12 +124,13 @@ export async function sendImage(
   to: string,
   imageUrl: string,
   phoneNumberId?: string,
+  token?: string,
 ): Promise<boolean> {
   const provider = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
-  const token    = Deno.env.get('WHATSAPP_TOKEN') ?? '';
+  const tk       = (token ?? Deno.env.get('WHATSAPP_TOKEN') ?? '').trim();
 
-  if (!token) {
-    console.error('[WA] WHATSAPP_TOKEN não configurado');
+  if (!tk) {
+    console.error('[WA] WHATSAPP_TOKEN não configurado (tenant e global)');
     return false;
   }
 
@@ -126,7 +149,7 @@ export async function sendImage(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${tk}`,
     },
     body: JSON.stringify({
       messaging_product: 'whatsapp',
@@ -150,12 +173,13 @@ export async function sendVideo(
   videoUrl: string,
   phoneNumberId?: string,
   caption?: string,
+  token?: string,
 ): Promise<boolean> {
   const provider = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
-  const token    = Deno.env.get('WHATSAPP_TOKEN') ?? '';
+  const tk       = (token ?? Deno.env.get('WHATSAPP_TOKEN') ?? '').trim();
 
-  if (!token) {
-    console.error('[WA] WHATSAPP_TOKEN não configurado');
+  if (!tk) {
+    console.error('[WA] WHATSAPP_TOKEN não configurado (tenant e global)');
     return false;
   }
 
@@ -174,7 +198,7 @@ export async function sendVideo(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${tk}`,
     },
     body: JSON.stringify({
       messaging_product: 'whatsapp',
@@ -199,18 +223,19 @@ export async function sendMessage(
   to: string,
   text: string,
   phoneNumberId?: string,
+  token?: string,
 ): Promise<boolean> {
   const provider = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
-  const token    = Deno.env.get('WHATSAPP_TOKEN') ?? '';
+  const tk       = (token ?? Deno.env.get('WHATSAPP_TOKEN') ?? '').trim();
 
-  if (!token) {
-    console.error('[WA] WHATSAPP_TOKEN não configurado');
+  if (!tk) {
+    console.error('[WA] WHATSAPP_TOKEN não configurado (tenant e global)');
     return false;
   }
 
   return provider === 'evolution'
-    ? sendEvolution(to, text, token, phoneNumberId)
-    : sendCloud(to, text, token, phoneNumberId);
+    ? sendEvolution(to, text, tk, phoneNumberId)
+    : sendCloud(to, text, tk, phoneNumberId);
 }
 
 async function sendCloud(

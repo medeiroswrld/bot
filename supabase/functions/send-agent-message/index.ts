@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
-import { sendMessage } from '../_shared/whatsapp.ts';
+import { sendMessage, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { buildCors } from '../_shared/cors.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
@@ -93,8 +93,9 @@ serve(async (req) => {
     .single();
 
   const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
+  const token = await resolveWhatsAppToken(adminClient, conv.user_id);
 
-  const sent = await sendMessage(conv.customer_phone as string, text.trim(), phoneNumberId || undefined);
+  const sent = await sendMessage(conv.customer_phone as string, text.trim(), phoneNumberId || undefined, token);
   if (!sent) {
     console.error(`[SAM] Falha ao enviar WhatsApp para ${maskPhone(conv.customer_phone as string)} — mensagem salva no banco`);
   }
