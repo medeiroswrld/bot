@@ -325,21 +325,31 @@ export default function Conversations() {
 
   const fetchConversations = useCallback(async (signal?: AbortSignal) => {
     if (!user?.id) { setLoading(false); return; }
+    // Watchdog de 10s: se a query travar (ex.: refresh de sessão preso), aborta
+    // pra não deixar o spinner girando pra sempre. O polling de 8s re-tenta depois.
+    const watchdog = new AbortController();
+    const timer = setTimeout(() => watchdog.abort(), 10_000);
+    if (signal) signal.addEventListener('abort', () => watchdog.abort(), { once: true });
     try {
-      let query = supabaseTyped
+      const { data, error } = await supabaseTyped
         .from('conversations')
         .select('*')
         .eq('user_id', user.id)
-        .order('last_message_at', { ascending: false });
-      if (signal) query = query.abortSignal(signal);
-      const { data, error } = await query;
+        .order('last_message_at', { ascending: false })
+        .abortSignal(watchdog.signal);
       if (signal?.aborted) return;
       if (error) throw error;
       setConversations(data ?? []);
     } catch (e) {
-      if (signal?.aborted || (e as { name?: string })?.name === 'AbortError') return;
+      if (signal?.aborted) return; // caller cancelou (unmount / troca de user)
+      if ((e as { name?: string })?.name === 'AbortError') { // watchdog estourou
+        console.warn('[Conversations] fetch travou (>10s) — sessão presa? polling re-tentará.');
+        return;
+      }
       console.error('[Conversations] fetchConversations:', e);
     } finally {
+      clearTimeout(timer);
+      // Solta o spinner exceto quando foi o caller que abortou (vai re-buscar).
       if (!signal?.aborted) setLoading(false);
     }
   }, [user?.id]);

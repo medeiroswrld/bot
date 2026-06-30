@@ -410,6 +410,12 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
+  // Re-busca company_settings sob demanda (usado pela tela de Configurações após
+  // salvar uma seção, pra manter o estado do contexto fresco — a tela hidrata dele).
+  const refreshCompanySettings = useCallback(async () => {
+    if (user?.id) await fetchCompanySettings(user.id);
+  }, [user?.id, fetchCompanySettings]);
+
   // ========== Auth State Listener ==========
   const subscriptionRef = useRef(null);
 
@@ -1566,6 +1572,7 @@ export const AppProvider = ({ children }) => {
 
     // Settings de notificação
     companySettings,
+    refreshCompanySettings,
     updateNotificationSettings,
   };
 

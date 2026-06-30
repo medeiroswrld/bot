@@ -39,19 +39,12 @@ const PAYMENT_OPTIONS = [
 ];
 
 const Settings = () => {
-    const { company, updateCompany, profile, user, companySettings, messageTemplates, updateNotificationSettings } = useAppContext();
+    const { company, updateCompany, profile, user, companySettings, messageTemplates, updateNotificationSettings, refreshCompanySettings } = useAppContext();
 
     // ── Notificações automáticas (aniversário / lista de espera) ──────────────
     const approvedTemplates = (messageTemplates || []).filter(t => t.status === 'approved');
     const [notif, setNotif] = useState({ birthday_enabled: false, birthday_template_id: '', waiting_list_template_id: '' });
     const [savingNotif, setSavingNotif] = useState(false);
-    useEffect(() => {
-        if (companySettings) setNotif({
-            birthday_enabled: !!companySettings.birthday_enabled,
-            birthday_template_id: companySettings.birthday_template_id || '',
-            waiting_list_template_id: companySettings.waiting_list_template_id || '',
-        });
-    }, [companySettings]);
     const saveNotif = async () => {
         setSavingNotif(true);
         await updateNotificationSettings({
@@ -86,21 +79,6 @@ const Settings = () => {
     const [savingSchedule, setSavingSchedule]   = useState(false);
     const [savedSchedule,  setSavedSchedule]    = useState(false);
 
-    useEffect(() => {
-        if (!user?.id) return;
-        supabase
-            .from('company_settings')
-            .select('business_hours, appointment_duration, appointment_interval, max_appointments_per_slot')
-            .eq('user_id', user.id)
-            .single()
-            .then(({ data }) => {
-                if (data?.business_hours) setBh({ ...DEFAULT_BH, ...data.business_hours });
-                if (data?.appointment_duration) setApptDuration(String(data.appointment_duration));
-                if (data?.appointment_interval) setApptInterval(String(data.appointment_interval));
-                if (data?.max_appointments_per_slot) setApptMaxPerSlot(String(data.max_appointments_per_slot));
-            });
-    }, [user?.id]);
-
     const setDayField = (key, field, value) =>
         setBh(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
 
@@ -114,6 +92,7 @@ const Settings = () => {
             max_appointments_per_slot: Math.min(10, Math.max(1, Number(apptMaxPerSlot) || 1)),
             updated_at: new Date().toISOString(),
         }).eq('user_id', user.id);
+        await refreshCompanySettings();
         setSavingSchedule(false);
         setSavedSchedule(true);
         setTimeout(() => setSavedSchedule(false), 2000);
@@ -128,19 +107,6 @@ const Settings = () => {
     const [savedWp,        setSavedWp]        = useState(false);
     const [wpError,        setWpError]        = useState('');
     const wpFileRef = useRef(null);
-
-    useEffect(() => {
-        if (!user?.id) return;
-        supabase
-            .from('company_settings')
-            .select('whatsapp_about, whatsapp_phone_number_id')
-            .eq('user_id', user.id)
-            .single()
-            .then(({ data }) => {
-                if (data?.whatsapp_about) setWpAbout(data.whatsapp_about);
-                if (data?.whatsapp_phone_number_id) setWpPhoneId(data.whatsapp_phone_number_id);
-            });
-    }, [user?.id]);
 
     const handleWpPhotoChange = (e) => {
         const file = e.target.files?.[0];
@@ -177,6 +143,7 @@ const Settings = () => {
                 .from('company_settings')
                 .update({ whatsapp_about: wpAbout, updated_at: new Date().toISOString() })
                 .eq('user_id', user.id);
+            await refreshCompanySettings();
 
             // 3. Chama edge function para atualizar perfil na API do WhatsApp
             const { data: sessionData } = await supabase.auth.getSession();
@@ -212,20 +179,6 @@ const Settings = () => {
     const [savingPay,  setSavingPay]  = useState(false);
     const [savedPay,   setSavedPay]   = useState(false);
 
-    useEffect(() => {
-        if (!user?.id) return;
-        supabase
-            .from('company_settings')
-            .select('payment_methods')
-            .eq('user_id', user.id)
-            .single()
-            .then(({ data }) => {
-                const saved = Array.isArray(data?.payment_methods) ? data.payment_methods : [];
-                setPayMethods(saved.filter(m => PAYMENT_OPTIONS.includes(m)));
-                setPayOther(saved.filter(m => !PAYMENT_OPTIONS.includes(m)).join(', '));
-            });
-    }, [user?.id]);
-
     const togglePay = (label) =>
         setPayMethods(prev =>
             prev.includes(label) ? prev.filter(m => m !== label) : [...prev, label]
@@ -241,6 +194,7 @@ const Settings = () => {
             .from('company_settings')
             .update({ payment_methods: methods, updated_at: new Date().toISOString() })
             .eq('user_id', user.id);
+        await refreshCompanySettings();
         setSavingPay(false);
         setSavedPay(true);
         setTimeout(() => setSavedPay(false), 2000);
@@ -250,23 +204,6 @@ const Settings = () => {
     const [financing, setFinancing] = useState({ enabled: false, rate: '', maxInstallments: 48, minDownPct: 20, banks: '' });
     const [savingFin, setSavingFin] = useState(false);
     const [savedFin,  setSavedFin]  = useState(false);
-
-    useEffect(() => {
-        if (!user?.id) return;
-        supabase.from('company_settings')
-            .select('financing_enabled, financing_interest_rate, financing_max_installments, financing_min_down_payment_percent, financing_banks')
-            .eq('user_id', user.id).single()
-            .then(({ data }) => {
-                if (!data) return;
-                setFinancing({
-                    enabled: data.financing_enabled === true,
-                    rate: data.financing_interest_rate ?? '',
-                    maxInstallments: data.financing_max_installments ?? 48,
-                    minDownPct: data.financing_min_down_payment_percent ?? 20,
-                    banks: data.financing_banks ?? '',
-                });
-            });
-    }, [user?.id]);
 
     const saveFinancing = async () => {
         if (!user?.id) return;
@@ -279,6 +216,7 @@ const Settings = () => {
             financing_banks: financing.banks || null,
             updated_at: new Date().toISOString(),
         }).eq('user_id', user.id);
+        await refreshCompanySettings();
         setSavingFin(false);
         setSavedFin(true);
         setTimeout(() => setSavedFin(false), 2000);
@@ -304,29 +242,58 @@ const Settings = () => {
     const [savingTI, setSavingTI] = useState(false);
     const [savedTI,  setSavedTI]  = useState(false);
 
+    // ── Hidratação ÚNICA a partir do contexto (companySettings) ────────────────
+    // O AppContext já carrega company_settings uma vez (select *). Em vez de cada
+    // seção disparar seu próprio fetch (5 queries em paralelo que corriam com o
+    // refresh de token → seção vazia até F5), hidratamos tudo daqui. Guardado por
+    // ref pra rodar só na 1ª vez que o companySettings fica disponível — assim um
+    // refresh pós-save NÃO sobrescreve edições não salvas de outra seção.
+    const hydratedRef = useRef(false);
     useEffect(() => {
-        if (!user?.id) return;
-        supabase
-            .from('company_settings')
-            .select('delayed_schedule_enabled, ford_qualification, visit_reminder_enabled, visit_reminder_minutes_before, trade_in_evaluation_enabled, trade_in_extra_questions')
-            .eq('user_id', user.id)
-            .single()
-            .then(({ data }) => {
-                if (!data) return;
-                setDelayedSched(data.delayed_schedule_enabled !== false);
-                if (data.ford_qualification && typeof data.ford_qualification === 'object') {
-                    setFord({ family: true, occupation: true, recreation: true, financial: true, ...data.ford_qualification });
-                }
-                setVisitReminder({
-                    enabled: data.visit_reminder_enabled === true,
-                    minutes: Number(data.visit_reminder_minutes_before ?? 15),
-                });
-                setTradeIn({
-                    enabled: data.trade_in_evaluation_enabled !== false,
-                    extraQuestions: data.trade_in_extra_questions || '',
-                });
-            });
-    }, [user?.id]);
+        if (!companySettings || hydratedRef.current) return;
+        hydratedRef.current = true;
+        const s = companySettings;
+
+        // Notificações
+        setNotif({
+            birthday_enabled: !!s.birthday_enabled,
+            birthday_template_id: s.birthday_template_id || '',
+            waiting_list_template_id: s.waiting_list_template_id || '',
+        });
+        // Horário / agenda
+        if (s.business_hours) setBh({ ...DEFAULT_BH, ...s.business_hours });
+        if (s.appointment_duration) setApptDuration(String(s.appointment_duration));
+        if (s.appointment_interval) setApptInterval(String(s.appointment_interval));
+        if (s.max_appointments_per_slot) setApptMaxPerSlot(String(s.max_appointments_per_slot));
+        // WhatsApp
+        if (s.whatsapp_about) setWpAbout(s.whatsapp_about);
+        if (s.whatsapp_phone_number_id) setWpPhoneId(s.whatsapp_phone_number_id);
+        // Formas de pagamento
+        const pay = Array.isArray(s.payment_methods) ? s.payment_methods : [];
+        setPayMethods(pay.filter(m => PAYMENT_OPTIONS.includes(m)));
+        setPayOther(pay.filter(m => !PAYMENT_OPTIONS.includes(m)).join(', '));
+        // Financiamento
+        setFinancing({
+            enabled: s.financing_enabled === true,
+            rate: s.financing_interest_rate ?? '',
+            maxInstallments: s.financing_max_installments ?? 48,
+            minDownPct: s.financing_min_down_payment_percent ?? 20,
+            banks: s.financing_banks ?? '',
+        });
+        // Comportamento do bot / FORD / lembrete / troca
+        setDelayedSched(s.delayed_schedule_enabled !== false);
+        if (s.ford_qualification && typeof s.ford_qualification === 'object') {
+            setFord({ family: true, occupation: true, recreation: true, financial: true, ...s.ford_qualification });
+        }
+        setVisitReminder({
+            enabled: s.visit_reminder_enabled === true,
+            minutes: Number(s.visit_reminder_minutes_before ?? 15),
+        });
+        setTradeIn({
+            enabled: s.trade_in_evaluation_enabled !== false,
+            extraQuestions: s.trade_in_extra_questions || '',
+        });
+    }, [companySettings]);
 
     const saveBehavior = async () => {
         if (!user?.id) return;
@@ -335,6 +302,7 @@ const Settings = () => {
             .from('company_settings')
             .update({ delayed_schedule_enabled: delayedSched, updated_at: new Date().toISOString() })
             .eq('user_id', user.id);
+        await refreshCompanySettings();
         setSavingBehav(false);
         setSavedBehav(true);
         setTimeout(() => setSavedBehav(false), 2000);
@@ -347,6 +315,7 @@ const Settings = () => {
             .from('company_settings')
             .update({ ford_qualification: ford, updated_at: new Date().toISOString() })
             .eq('user_id', user.id);
+        await refreshCompanySettings();
         setSavingFord(false);
         setSavedFord(true);
         setTimeout(() => setSavedFord(false), 2000);
@@ -363,6 +332,7 @@ const Settings = () => {
                 updated_at: new Date().toISOString(),
             })
             .eq('user_id', user.id);
+        await refreshCompanySettings();
         setSavingVR(false);
         setSavedVR(true);
         setTimeout(() => setSavedVR(false), 2000);
@@ -379,6 +349,7 @@ const Settings = () => {
                 updated_at: new Date().toISOString(),
             })
             .eq('user_id', user.id);
+        await refreshCompanySettings();
         setSavingTI(false);
         setSavedTI(true);
         setTimeout(() => setSavedTI(false), 2000);
