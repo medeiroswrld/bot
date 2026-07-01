@@ -3,6 +3,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskPhone, maskName } from '../_shared/maskPII.ts';
 
+// deploy: vendas ETAPA A (consultar_estoque cruza visitas) + fixes agendamento (8380dc1)
+
 // ─── tipos locais ─────────────────────────────────────────────────────────────
 
 interface ClaudeContentBlock {
