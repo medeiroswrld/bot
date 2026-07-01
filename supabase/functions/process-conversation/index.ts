@@ -65,17 +65,17 @@ function getBrazilDateInfo(): { label: string; iso: string } {
   // ISO date no fuso América/São Paulo (sv-SE usa formato YYYY-MM-DD)
   const iso = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(now);
 
-  // Rótulo legível com HORA: "sexta-feira, 23/05/2026 19:32"
-  // (a hora importa pro bot não oferecer horário que já passou hoje)
+  // Rótulo legível SÓ com a data: "sexta-feira, 23/05/2026".
+  // A hora NÃO entra aqui de propósito: o label vai no system prompt (cacheado) e
+  // um timestamp que muda a cada minuto quebraria o prompt caching (invalidador
+  // silencioso). A validação de horário passado/fechado é server-side no
+  // computeFreeSlots — o bot não perde nada.
   const label = new Intl.DateTimeFormat('pt-BR', {
     timeZone: 'America/Sao_Paulo',
     weekday: 'long',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
   }).format(now);
 
   return { label, iso };
@@ -1305,9 +1305,9 @@ NUNCA ofereça agendar visita antes de ter: (a) qualificado com o FORD (pelo men
 - Endereço: ${address}
 - Telefone: ${phone}
 - Horário de funcionamento: ${horarios}
-- Data e hora agora (Brasília): ${todayLabel}${nomeInfo}
+- Data de hoje (Brasília): ${todayLabel}${nomeInfo}
 
-Use a data de hoje como referência sempre que o cliente falar em datas relativas ("hoje", "amanhã", "sexta que vem", "fim de semana"). Considere a HORA atual: se a loja já fechou hoje (ou o horário pedido já passou), NÃO ofereça horário pra hoje — vá pro próximo dia/horário válido. Nunca ofereça nem confirme horário fora do funcionamento da loja; a agenda real vem sempre do ver_horarios_disponiveis.
+Use a data de hoje como referência sempre que o cliente falar em datas relativas ("hoje", "amanhã", "sexta que vem", "fim de semana"). Nunca ofereça nem confirme horário fora do funcionamento da loja: a agenda real — só com horários válidos e que ainda não passaram hoje — vem sempre do ver_horarios_disponiveis; ofereça apenas os horarios_livres que ela retornar.
 
 ## Seu papel
 
