@@ -43,8 +43,10 @@ const CampaignDetails = () => {
 
     useEffect(() => {
         const controller = new AbortController();
-        load(controller.signal);
-        return () => controller.abort();
+        // Watchdog: se pendurar (conexão morta após dormir a aba), aborta e solta o spinner.
+        const timer = setTimeout(() => { controller.abort(); setLoading(false); }, 10000);
+        load(controller.signal).finally(() => clearTimeout(timer));
+        return () => { clearTimeout(timer); controller.abort(); };
     }, [load]);
 
     // Realtime nos envios desta campanha

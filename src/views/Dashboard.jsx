@@ -257,6 +257,8 @@ const Dashboard = () => {
     useEffect(() => {
         if (!user?.id) return;
         const controller = new AbortController();
+        // Watchdog: se a query pendurar (conexão morta após dormir a aba), aborta e solta o spinner.
+        const timer = setTimeout(() => { controller.abort(); setLoadingConvs(false); }, 10000);
         supabase
             .from('conversations')
             .select('id, customer_name, customer_phone, status, last_message_at')
@@ -271,9 +273,10 @@ const Dashboard = () => {
             })
             .catch(() => { /* abort/erro: ignora */ })
             .finally(() => {
+                clearTimeout(timer);
                 if (!controller.signal.aborted) setLoadingConvs(false);
             });
-        return () => controller.abort();
+        return () => { clearTimeout(timer); controller.abort(); };
     }, [user?.id]);
 
     // ── Métricas calculadas ───────────────────────────────────────────────────

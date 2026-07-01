@@ -418,6 +418,8 @@ const Settings = () => {
     useEffect(() => {
         if (!user?.id) return;
         const controller = new AbortController();
+        // Watchdog: se pendurar (conexão morta após dormir a aba), aborta e solta o spinner.
+        const timer = setTimeout(() => { controller.abort(); setLoadingEx(false); }, 10000);
         supabase
             .from('schedule_exceptions')
             .select('*')
@@ -430,9 +432,10 @@ const Settings = () => {
             })
             .catch(() => { /* abort/erro: ignora */ })
             .finally(() => {
+                clearTimeout(timer);
                 if (!controller.signal.aborted) setLoadingEx(false);
             });
-        return () => controller.abort();
+        return () => { clearTimeout(timer); controller.abort(); };
     }, [user?.id]);
 
     const addException = async () => {

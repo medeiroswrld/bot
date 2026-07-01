@@ -435,19 +435,24 @@ export const AppProvider = ({ children }) => {
           setUser(newSession?.user ?? null);
 
           if (newSession?.user) {
-            try {
-              // Chamadas sequenciais para evitar conflito de lock do auth token
-              await fetchProfile(newSession.user.id);
-              await fetchInventory(newSession.user.id);
-              await fetchLeads(newSession.user.id);
-              await fetchAppointments(newSession.user.id);
-              await fetchCompanySettings(newSession.user.id);
-              await fetchVehicleInterests(newSession.user.id);
-              await fetchMessageTemplates(newSession.user.id);
-              await fetchCampaigns(newSession.user.id);
-            } catch (err) {
-              console.error('[AUTH] Erro ao carregar dados iniciais:', err);
-            }
+            const uid = newSession.user.id;
+            const loadAll = (async () => {
+              try {
+                // Chamadas sequenciais para evitar conflito de lock do auth token
+                await fetchProfile(uid);
+                await fetchInventory(uid);
+                await fetchLeads(uid);
+                await fetchAppointments(uid);
+                await fetchCompanySettings(uid);
+                await fetchVehicleInterests(uid);
+                await fetchMessageTemplates(uid);
+                await fetchCampaigns(uid);
+              } catch (err) {
+                console.error('[AUTH] Erro ao carregar dados iniciais:', err);
+              }
+            })();
+            // Timeout: não deixa o spinner GLOBAL preso se alguma query pendurar (conexão morta).
+            await Promise.race([loadAll, new Promise((r) => setTimeout(r, 8000))]);
           }
           if (mounted) setIsLoading(false);
 
@@ -457,19 +462,23 @@ export const AppProvider = ({ children }) => {
 
           if (!profileFetchedRef.current) {
             profileFetchedRef.current = true;
-            try {
-              // Chamadas sequenciais para evitar conflito de lock do auth token
-              await fetchProfile(newSession.user.id);
-              await fetchInventory(newSession.user.id);
-              await fetchLeads(newSession.user.id);
-              await fetchAppointments(newSession.user.id);
-              await fetchCompanySettings(newSession.user.id);
-              await fetchVehicleInterests(newSession.user.id);
-              await fetchMessageTemplates(newSession.user.id);
-              await fetchCampaigns(newSession.user.id);
-            } catch (err) {
-              console.error('[AUTH] Erro ao carregar dados pós-login:', err);
-            }
+            const uid = newSession.user.id;
+            const loadAll = (async () => {
+              try {
+                // Chamadas sequenciais para evitar conflito de lock do auth token
+                await fetchProfile(uid);
+                await fetchInventory(uid);
+                await fetchLeads(uid);
+                await fetchAppointments(uid);
+                await fetchCompanySettings(uid);
+                await fetchVehicleInterests(uid);
+                await fetchMessageTemplates(uid);
+                await fetchCampaigns(uid);
+              } catch (err) {
+                console.error('[AUTH] Erro ao carregar dados pós-login:', err);
+              }
+            })();
+            await Promise.race([loadAll, new Promise((r) => setTimeout(r, 8000))]);
           }
           if (mounted) setIsLoading(false);
 
@@ -1489,6 +1498,49 @@ export const AppProvider = ({ children }) => {
       supabase.removeChannel(channel);
     };
   }, [user?.id, fetchLeads, fetchVehicleInterests, fetchMessageTemplates, fetchCampaigns]);
+
+  // ========== Recuperação ao voltar pra aba (sai e volta) ==========
+  // Aba em background: o token pode expirar e o websocket do Realtime morre.
+  // Ao voltar ao foco: revalida a sessão e reconecta o Realtime — senão as
+  // queries ficam penduradas na conexão morta (spinner eterno até F5).
+  useEffect(() => {
+    if (!user?.id) return;
+    let recovering = false;
+    const withTimeout = (p, ms) =>
+      Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);
+
+    const recover = async () => {
+      if (document.visibilityState !== 'visible' || recovering) return;
+      recovering = true;
+      try {
+        // 1) sessão: valida e, se preciso, força refresh (com timeout pra não pendurar)
+        try {
+          await withTimeout(supabase.auth.getSession(), 5000);
+        } catch {
+          try { await withTimeout(supabase.auth.refreshSession(), 5000); }
+          catch (e) { console.warn('[recover] refreshSession falhou:', e); }
+        }
+        // 2) Realtime: revive o socket (morre no background); canais reingressam
+        try { supabase.realtime.disconnect(); supabase.realtime.connect(); }
+        catch (e) { console.warn('[recover] realtime reconnect:', e); }
+        // 3) re-sincroniza os dados principais (podem ter mudado enquanto dormia)
+        const uid = user.id;
+        fetchLeads(uid);
+        fetchAppointments(uid);
+        fetchCompanySettings(uid);
+        fetchVehicleInterests(uid);
+      } finally {
+        recovering = false;
+      }
+    };
+
+    document.addEventListener('visibilitychange', recover);
+    window.addEventListener('focus', recover);
+    return () => {
+      document.removeEventListener('visibilitychange', recover);
+      window.removeEventListener('focus', recover);
+    };
+  }, [user?.id, fetchLeads, fetchAppointments, fetchCompanySettings, fetchVehicleInterests]);
 
   // ========== Context Value ==========
   const value = {

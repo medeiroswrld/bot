@@ -37,6 +37,8 @@ const BotSettings = () => {
     useEffect(() => {
         if (!user?.id) return;
         const controller = new AbortController();
+        // Watchdog: se a query pendurar (conexão morta após dormir a aba), aborta e solta o spinner.
+        const timer = setTimeout(() => { controller.abort(); setLoadingFaqs(false); }, 10000);
 
         supabase
             .from('company_settings')
@@ -62,10 +64,11 @@ const BotSettings = () => {
             })
             .catch(() => { /* abort/erro: ignora */ })
             .finally(() => {
+                clearTimeout(timer);
                 if (!controller.signal.aborted) setLoadingFaqs(false);
             });
 
-        return () => controller.abort();
+        return () => { clearTimeout(timer); controller.abort(); };
     }, [user?.id]);
 
     const saveInstructions = async () => {
