@@ -146,7 +146,7 @@ const TOOLS = [
   {
     name: 'agendar_visita',
     description:
-      'Agenda uma visita na concessionária. Use somente após confirmar data e horário com o cliente. SEMPRE informe o car_id do veículo que motivou a visita (pegue do consultar_estoque) — é essencial pra contar quantas visitas cada carro tem.',
+      'Agenda uma visita na concessionária. Chame assim que tiver dia + horário LIVRE (em horarios_livres) + nome do cliente — NÃO peça confirmação extra nem escale pro gerente quando o horário está livre. SEMPRE informe o car_id do veículo que motivou a visita (do consultar_estoque) — é essencial pra contar quantas visitas cada carro tem.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1252,7 +1252,7 @@ Você conduz a conversa em microcompromissos, não lista opções. Regras:
 3. **Outras decisões: perguntas binárias** quando possível ("À vista ou financiamento?", "É pra você ou pra família?", "Tem carro pra dar de entrada ou compra direto?").
 4. **Microcompromissos contínuos:** cada mensagem leva o cliente um passo adiante ("Posso já deixar reservado pra você?", "Me passa seu nome pra confirmar?", "Tá fechado então pra [dia] às [hora]?").
 ${busyTimeRule}
-6. **Quando o cliente CONFIRMAR um horário** ("sim", "pode ser", "tá ok", "fechado") **e esse horário estava em horarios_livres, chame agendar_visita IMEDIATAMENTE.** NUNCA chame request_schedule_check para um horário que já foi confirmado como livre — a "verificação com o gerente" (request_schedule_check) existe APENAS para horário OCUPADO (que não está em horarios_livres). Horário livre + cliente confirmou = agendar_visita, sempre.
+6. **Horário LIVRE = agendar na hora, sem escalar e sem reconfirmar.** Assim que o cliente aceitar um horário que você ofereceu OU propuser um horário próprio (ex.: "prefiro 17h"), verifique em horarios_livres: se estiver livre (dentro do expediente), chame **agendar_visita IMEDIATAMENTE**. Tanto faz se o horário partiu de você ou do cliente — livre = agenda. Se ainda não checou aquele horário específico, chame ver_horarios_disponiveis antes; apareceu em horarios_livres, agende. Confirme os dados NO MÁXIMO UMA vez: com dia + horário livre + nome, agende direto, sem pedir "tá certo?" de novo. request_schedule_check é EXCLUSIVO pra horário OCUPADO — NUNCA pra horário livre, e NUNCA fale em "alinhar com o gerente" pra um horário que está livre.
 
 ## Postura de venda (você é um vendedor consultivo ATIVO)
 
@@ -1758,26 +1758,17 @@ serve(async (req) => {
     console.error('[FALLBACK]', err.message, err.stack);
     console.error('[PC] Erro ao chamar Claude (após retries):', e);
 
-    // Falha persistente após os retries. Avisa o cliente de forma amigável
-    // PRIMEIRO e só DEPOIS faz o handoff — garantindo que a mensagem chegue
-    // mesmo se a atualização de status falhar.
-    const fallbackMsg = 'Opa, deixa eu confirmar uma coisa aqui com o gerente. Em instantes alguém da equipe te responde.';
+    // Erro transitório do modelo NÃO é motivo de handoff — manda uma ponte
+    // amigável e mantém a conversa com o bot (o próximo turno do cliente reativa).
+    const fallbackMsg = 'Opa, me perdi aqui rapidinho 😅 me lembra o que a gente tava vendo? Já te ajudo.';
 
     try {
       const fbSent = await sendMessage(customerPhone, fallbackMsg, phoneNumberId || undefined, waToken);
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: fallbackMsg });
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
-      if (!fbSent) console.error(`[PC] Falha ao enviar mensagem de fallback para ${maskPhone(customerPhone)} (salva no banco mesmo assim)`);
+      if (!fbSent) console.error(`[PC] Falha ao enviar ponte de erro para ${maskPhone(customerPhone)} (salva no banco mesmo assim)`);
     } catch (sendErr) {
-      console.error('[PC] Erro ao enviar mensagem de fallback:', sendErr);
-    }
-
-    // Handoff em bloco separado: se falhar, o cliente já recebeu o aviso acima.
-    try {
-      await supabase.from('conversations').update({ status: 'pending' }).eq('id', conversationId);
-      console.error('[PC] Conversa marcada como pending (handoff) após falha do Claude.');
-    } catch (handoffErr) {
-      console.error('[PC] Falha ao fazer handoff (status pending):', handoffErr);
+      console.error('[PC] Erro ao enviar ponte de erro:', sendErr);
     }
 
     return new Response('OK', { status: 200 });
