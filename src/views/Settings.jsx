@@ -108,6 +108,15 @@ const Settings = () => {
     const [wpError,        setWpError]        = useState('');
     const wpFileRef = useRef(null);
 
+    // ── Integração WhatsApp (API): IDs editáveis + token cifrado (write-only) ──
+    const [wpWabaId,    setWpWabaId]    = useState('');    // whatsapp_business_account_id
+    const [wpTokenSet,  setWpTokenSet]  = useState(false); // flag whatsapp_token_set (do contexto)
+    const [wpToken,     setWpToken]     = useState('');    // input write-only (limpa após salvar)
+    const [savingInteg, setSavingInteg] = useState(false);
+    const [savedInteg,  setSavedInteg]  = useState(false);
+    const [savingToken, setSavingToken] = useState(false);
+    const [tokenMsg,    setTokenMsg]    = useState('');
+
     const handleWpPhotoChange = (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -171,6 +180,46 @@ const Settings = () => {
         } finally {
             setSavingWp(false);
         }
+    };
+
+    // Phone Number ID + WABA: NÃO são segredo → update direto (RLS protege a linha).
+    const saveIntegration = async () => {
+        if (!user?.id) return;
+        setSavingInteg(true);
+        await supabase.from('company_settings').update({
+            whatsapp_phone_number_id:     wpPhoneId || null,
+            whatsapp_business_account_id: wpWabaId  || null,
+            updated_at: new Date().toISOString(),
+        }).eq('user_id', user.id);
+        await refreshCompanySettings();
+        setSavingInteg(false);
+        setSavedInteg(true);
+        setTimeout(() => setSavedInteg(false), 2000);
+    };
+
+    // Token: SEMPRE via Edge Function dedicada (nunca PATCH direto; nunca volta pro front).
+    const saveToken = async () => {
+        const t = wpToken.trim();
+        if (!t) { setTokenMsg('Cole o token antes de salvar.'); return; }
+        setSavingToken(true); setTokenMsg('');
+        const { data, error } = await supabase.functions.invoke('set-whatsapp-token', { body: { token: t } });
+        setSavingToken(false);
+        if (error || data?.error) { setTokenMsg(data?.error || error?.message || 'Erro ao salvar token.'); return; }
+        setWpToken('');                 // limpa o input (write-only)
+        setWpTokenSet(true);
+        setTokenMsg('Token cadastrado ✓');
+        await refreshCompanySettings();
+    };
+
+    const removeToken = async () => {
+        setSavingToken(true); setTokenMsg('');
+        const { data, error } = await supabase.functions.invoke('set-whatsapp-token', { body: { remove: true } });
+        setSavingToken(false);
+        if (error || data?.error) { setTokenMsg(data?.error || error?.message || 'Erro ao remover token.'); return; }
+        setWpToken('');
+        setWpTokenSet(false);
+        setTokenMsg('Token removido — usando o padrão.');
+        await refreshCompanySettings();
     };
 
     // ── Formas de pagamento ───────────────────────────────────────────────────
@@ -268,6 +317,8 @@ const Settings = () => {
         // WhatsApp
         if (s.whatsapp_about) setWpAbout(s.whatsapp_about);
         if (s.whatsapp_phone_number_id) setWpPhoneId(s.whatsapp_phone_number_id);
+        if (s.whatsapp_business_account_id) setWpWabaId(s.whatsapp_business_account_id);
+        setWpTokenSet(s.whatsapp_token_set === true);
         // Formas de pagamento
         const pay = Array.isArray(s.payment_methods) ? s.payment_methods : [];
         setPayMethods(pay.filter(m => PAYMENT_OPTIONS.includes(m)));
@@ -725,6 +776,79 @@ const Settings = () => {
                                     ? <><RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> Atualizando...</>
                                     : <><MessageSquare size={18} /> Atualizar no WhatsApp</>}
                         </button>
+                    </div>
+                </section>
+            </div>
+
+            {/* ── Integração WhatsApp (API) ──────────────────────────────────── */}
+            <div style={{ marginTop: '2rem' }}>
+                <section className="settings-section card">
+                    <div className="section-title">
+                        <MessageSquare size={20} />
+                        <h2>Integração WhatsApp (API)</h2>
+                    </div>
+                    <div className="settings-form">
+                        <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+                            Credenciais da API do WhatsApp Business (Meta Cloud API) desta concessionária.
+                            O token fica <strong>criptografado</strong> e nunca é exibido de volta.
+                        </p>
+
+                        <div className="form-group">
+                            <label>Phone Number ID</label>
+                            <input type="text" value={wpPhoneId}
+                                onChange={e => setWpPhoneId(e.target.value)}
+                                placeholder="Ex: 123456789012345" />
+                        </div>
+                        <div className="form-group">
+                            <label>WhatsApp Business Account ID (WABA)</label>
+                            <input type="text" value={wpWabaId}
+                                onChange={e => setWpWabaId(e.target.value)}
+                                placeholder="Ex: 987654321098765" />
+                        </div>
+                        <button className="btn-outline" onClick={saveIntegration} disabled={savingInteg}
+                            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.5rem' }}>
+                            {savedInteg ? <><CheckCircle size={16} /> Salvo!</>
+                                : savingInteg ? <><RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} /> Salvando...</>
+                                : <><Save size={16} /> Salvar IDs</>}
+                        </button>
+
+                        <div className="form-group">
+                            <label>Token de acesso (WhatsApp Cloud API)</label>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem',
+                                fontSize: '0.85rem', color: wpTokenSet ? '#16a34a' : 'var(--color-text-muted)' }}>
+                                {wpTokenSet
+                                    ? <><CheckCircle size={16} /> Token próprio cadastrado</>
+                                    : <span>Nenhum token próprio — usando o token padrão da agência.</span>}
+                            </div>
+                            <input type="password" value={wpToken}
+                                onChange={e => setWpToken(e.target.value)}
+                                autoComplete="new-password"
+                                placeholder={wpTokenSet ? 'Cole um novo token para substituir' : 'Cole o token do WhatsApp Cloud API'} />
+                            <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: '-0.25rem' }}>
+                                Por segurança, o token salvo não é exibido de volta. Deixe em branco para manter o atual.
+                            </p>
+                        </div>
+
+                        {tokenMsg && (
+                            <p style={{ fontSize: '0.85rem', marginBottom: '0.5rem',
+                                color: (tokenMsg.includes('✓') || tokenMsg.includes('removido')) ? '#16a34a' : '#ef4444' }}>
+                                {tokenMsg}
+                            </p>
+                        )}
+
+                        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                            <button className="btn-primary" onClick={saveToken} disabled={savingToken || !wpToken.trim()}
+                                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                {savingToken ? <><RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> Salvando...</>
+                                    : <><Save size={18} /> Salvar token</>}
+                            </button>
+                            {wpTokenSet && (
+                                <button className="btn-outline" onClick={removeToken} disabled={savingToken}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ef4444' }}>
+                                    <Trash2 size={16} /> Remover token
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </section>
             </div>
