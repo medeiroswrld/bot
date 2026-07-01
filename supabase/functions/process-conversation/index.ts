@@ -146,14 +146,14 @@ const TOOLS = [
   {
     name: 'agendar_visita',
     description:
-      'Agenda uma visita na concessionária. Use somente após confirmar data e horário com o cliente.',
+      'Agenda uma visita na concessionária. Use somente após confirmar data e horário com o cliente. SEMPRE informe o car_id do veículo que motivou a visita (pegue do consultar_estoque) — é essencial pra contar quantas visitas cada carro tem.',
     input_schema: {
       type: 'object',
       properties: {
         nome_cliente: { type: 'string', description: 'Nome do cliente' },
         data:         { type: 'string', description: 'Data no formato YYYY-MM-DD' },
         horario:      { type: 'string', description: 'Horário no formato HH:MM' },
-        car_id:       { type: 'string', description: 'ID do veículo de interesse (opcional)' },
+        car_id:       { type: 'string', description: 'ID do veículo de interesse (do consultar_estoque). SEMPRE informe quando a visita for pra ver um carro específico.' },
       },
       required: ['nome_cliente', 'data', 'horario'],
     },
@@ -460,23 +460,52 @@ async function executeTool(
     if (error) return { erro: 'Falha ao buscar estoque' };
     if (!data?.length) return { mensagem: 'Nenhum veículo encontrado com esses critérios.' };
 
+    // Cruza agendamentos FUTUROS por carro → urgência real ("já tem gente vindo ver").
+    const carIds = data.map((c) => c.id);
+    const { iso: hojeIso } = getBrazilDateInfo();
+    const visitasPorCarro = new Map<string, { quantas: number; proxima: string }>();
+    if (carIds.length) {
+      const { data: appts } = await supabase
+        .from('appointments')
+        .select('car_id, appointment_date, appointment_time')
+        .eq('user_id', userId)
+        .in('car_id', carIds)
+        .in('status', ['scheduled', 'confirmed'])
+        .gte('appointment_date', hojeIso)
+        .order('appointment_date', { ascending: true })
+        .order('appointment_time', { ascending: true });
+      for (const a of (appts ?? [])) {
+        const cid = String(a.car_id);
+        const cur = visitasPorCarro.get(cid);
+        if (cur) cur.quantas += 1;
+        else visitasPorCarro.set(cid, {
+          quantas: 1,
+          proxima: `${a.appointment_date} ${String(a.appointment_time).substring(0, 5)}`,
+        });
+      }
+    }
+
     return {
       total: data.length,
-      veiculos: data.map((c) => ({
-        id: c.id,
-        marca: c.brand,
-        modelo: c.model,
-        versao: c.version,
-        ano: c.year,
-        preco: c.price,
-        km: c.mileage,
-        cambio: c.transmission,
-        combustivel: c.fuel,
-        cor: c.color,
-        tipo: (c.vehicle_type as string) === 'moto' ? 'moto' : 'carro',
-        status: c.status === 'available' ? 'disponível' : 'reservado',
-        fotos: Array.isArray(c.car_images) ? c.car_images.length : 0,
-      })),
+      veiculos: data.map((c) => {
+        const v = visitasPorCarro.get(String(c.id));
+        return {
+          id: c.id,
+          marca: c.brand,
+          modelo: c.model,
+          versao: c.version,
+          ano: c.year,
+          preco: c.price,
+          km: c.mileage,
+          cambio: c.transmission,
+          combustivel: c.fuel,
+          cor: c.color,
+          tipo: (c.vehicle_type as string) === 'moto' ? 'moto' : 'carro',
+          status: c.status === 'available' ? 'disponível' : 'reservado',
+          fotos: Array.isArray(c.car_images) ? c.car_images.length : 0,
+          visita_agendada: v ? { tem: true, proxima_data: v.proxima, quantas: v.quantas } : { tem: false },
+        };
+      }),
     };
   }
 
