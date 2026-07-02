@@ -163,10 +163,7 @@ const TOOLS = [
   {
     name: 'request_schedule_check',
     description:
-      'Use APENAS quando o cliente pedir um horário específico de visita que você JÁ confirmou estar OCUPADO — ou seja, você chamou ver_horarios_disponiveis e o horário pedido NÃO aparece em horarios_livres. Serve para "verificar com seu superior" antes de recusar ou oferecer outro horário. A resposta (encaixe ou alternativas) chega ao cliente automaticamente depois; você não faz mais nada agora. ' +
-      'NUNCA use esta ferramenta se: (1) o horário pedido ESTÁ em horarios_livres; (2) o cliente acabou de CONFIRMAR ("sim", "pode ser", "tá ok", "fechado") um horário que estava livre — nesse caso chame agendar_visita IMEDIATAMENTE; (3) você ainda não checou a agenda com ver_horarios_disponiveis. ' +
-      'Exemplo do que NÃO fazer: cliente pede sábado 9h, 9h ESTÁ em horarios_livres, cliente diz "sim" → ERRADO chamar request_schedule_check; CERTO chamar agendar_visita. ' +
-      'Só no caso correto (horário ocupado), depois de chamar, diga ao cliente "deixa eu verificar com meu superior, te respondo em alguns minutos" — nunca fale em atendente, sistema ou verificação automática.',
+      'Use SÓ quando o cliente pedir um horário que você confirmou (via ver_horarios_disponiveis) estar OCUPADO — não aparece em horarios_livres. Horário LIVRE = agendar_visita, NUNCA esta. Depois de chamar, diga só "deixa eu verificar com meu superior, te respondo em alguns minutos" (nunca fale em atendente/sistema); a resposta chega ao cliente depois, automaticamente.',
     input_schema: {
       type: 'object',
       properties: {
@@ -246,7 +243,7 @@ const TOOLS = [
   {
     name: 'chamar_atendente',
     description:
-      'Aciona a equipe humana da loja nos bastidores (handoff interno e silencioso — o cliente NÃO deve perceber como transferência nem ouvir a palavra "atendente"). Use quando: (1) o cliente pedir explicitamente para falar com uma pessoa, (2) a conversa envolver preço, desconto ou negociação, (3) você não conseguir resolver a dúvida, ou (4) após coletar dados de financiamento.',
+      'Handoff interno e SILENCIOSO pra equipe humana (o cliente nunca percebe transferência nem ouve "atendente"). Use quando: (1) o cliente pede pra falar com uma pessoa; (2) a conversa entra em preço/desconto/negociação; (3) você não consegue resolver a dúvida; (4) após coletar_dados_financiamento.',
     input_schema: {
       type: 'object',
       properties: {
@@ -258,7 +255,7 @@ const TOOLS = [
   {
     name: 'enviar_midia_carro',
     description:
-      'Envia a foto de especificações + o vídeo de um veículo pelo WhatsApp (foto primeiro, depois o vídeo). Use quando o cliente perguntar sobre um veículo específico (pedir foto, pedir vídeo, pedir pra ver, ou demonstrar interesse claro). O parâmetro car_id DEVE ser EXATAMENTE o valor do campo "id" retornado pela ferramenta consultar_estoque. Nunca invente um ID, nunca use ID parcial. Se não tiver certeza do id exato, chame consultar_estoque novamente. A ferramenta retorna { success: true, sent: [...] } em caso de sucesso ou { success: false, error: "..." } em caso de falha.',
+      'Envia a foto de especificações + o vídeo do veículo (foto, depois vídeo). Use quando o cliente pedir foto/vídeo, pedir pra ver, ou demonstrar interesse claro num carro. car_id = EXATAMENTE o "id" do consultar_estoque (nunca invente nem use ID parcial; na dúvida, consulte de novo). Retorna { success } — o tratamento de cada retorno está na lista de ferramentas.',
     input_schema: {
       type: 'object',
       properties: {
@@ -270,12 +267,7 @@ const TOOLS = [
   {
     name: 'registrar_interesse_veiculo',
     description:
-      'Registra que o cliente está procurando um veículo específico que NÃO está disponível no estoque atual (lista de espera). ' +
-      'QUANDO USAR: o cliente perguntou por um modelo específico, você buscou em consultar_estoque e não encontrou, e o cliente quer ser avisado quando entrar. ' +
-      'QUANDO NÃO USAR: pergunta genérica ("vocês têm carros?") ou cliente só explorando sem dizer o que quer. ' +
-      'ANTES de chamar: (1) confirme via consultar_estoque que realmente não tem; (2) pergunte os detalhes (faixa de ano, km máximo, preço máximo); (3) confirme que o cliente quer ser avisado. ' +
-      'Depois de chamar, confirme de forma positiva e SEM dispensar o cliente — registre E puxe de volta pra venda: "Anotado! Te aviso assim que entrar um [modelo] desse. Enquanto isso, posso te mostrar umas opções que já tão aqui valendo a pena — quer dar uma olhada?" ' +
-      'Retorna { success: true, action, message } em sucesso ou { success: false, error } em falha.',
+      'Registra na lista de espera um MODELO que o cliente procura e NÃO está no estoque atual. Use após confirmar via consultar_estoque que não tem E o cliente querer ser avisado quando entrar. NÃO use pra pergunta genérica ("vocês têm carros?") ou quem só explora. Antes: pergunte os detalhes (faixa de ano, km máx, preço máx). Depois de registrar, NÃO dispense o cliente — puxe de volta pra venda com alternativas reais do estoque. model é obrigatório; os demais campos, opcionais.',
     input_schema: {
       type: 'object',
       properties: {
@@ -1211,7 +1203,7 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
   // qualificar só porque o SQL não rodou. Se a coluna existir, respeita os toggles.
   const fordKeys = (['family', 'occupation', 'recreation', 'financial'] as const).filter((k) => ford ? ford[k] === true : true);
   const fordBlock = fordKeys.length > 0
-    ? `\n\n## Qualificação natural do cliente (FORD)\n\nFORD é técnica de qualificação E rapport: descubra quem é o cliente pra recomendar o carro certo e criar conexão. Não é formulário — é conversa. Descubra naturalmente, SEM interrogatório, diluído ao longo do papo:\n\n${fordKeys.map((k) => FORD_LINES[k]).join('\n\n')}\n\n- **D = Desejos/Objetivo** → o gatilho emocional da compra (use pra RECOMENDAR e conectar): "O que é mais importante pra você num carro: economia, conforto, potência ou visual?", "Tem algum carro que sempre foi seu sonho?", "O que te faria bater o martelo?". Use isso pra apontar o carro certo do estoque. (Não há campo próprio — serve pra recomendação.)\n\n## Como aplicar o FORD (princípios)\n\n1. NUNCA as 4 de uma vez (vira interrogatório e o cliente foge) — UMA pergunta por vez, reagindo à resposta antes de ir pra próxima.\n2. ENCAIXE no contexto, não recite: se ele falou que viaja, já puxa Recreação; se falou dos filhos, já cobre Família. Não precisa seguir a ordem rígida.\n3. COMENTE a resposta antes de seguir (mostra que ouviu): "Boa! Então espaço e segurança vão importar, já entendi." → aí continua.\n4. A CADA informação obtida, CHAME save_lead_qualification — não só converse, salve de fato.\n5. Objetivo DUPLO: qualificar (preencher o perfil) E criar conexão.\n\n## Quando perguntar\n\n- Logo APÓS o cliente expressar interesse em um carro\n- A visita é o ÚLTIMO passo (veja "Regra de sequência")\n- DURANTE conversa fluida (não em momentos de urgência ou desconforto)\n\n## Como salvar\n\nA CADA info descoberta, use save_lead_qualification com o campo certo. NÃO espere ter as 4 — vá salvando aos poucos. Por exemplo:\n- Cliente diz "é pra minha esposa" → save_lead_qualification({ family: "casado, comprando carro pra esposa" })\n- Cliente diz "trabalho como pedreiro" → save_lead_qualification({ occupation: "pedreiro" })\n- Cliente diz "vou pagar à vista" → save_lead_qualification({ financial: "à vista" })`
+    ? `\n\n## Qualificação natural do cliente (FORD)\n\nFORD é técnica de qualificação E rapport: descubra quem é o cliente pra recomendar o carro certo e criar conexão. Não é formulário — é conversa. Descubra naturalmente, SEM interrogatório, diluído ao longo do papo:\n\n${fordKeys.map((k) => FORD_LINES[k]).join('\n\n')}\n\n- **D = Desejos/Objetivo** → o gatilho emocional da compra (use pra RECOMENDAR e conectar): "O que é mais importante pra você num carro: economia, conforto, potência ou visual?", "Tem algum carro que sempre foi seu sonho?", "O que te faria bater o martelo?". Use isso pra apontar o carro certo do estoque. (Não há campo próprio — serve pra recomendação.)\n\n## Como aplicar o FORD (princípios)\n\n1. NUNCA as 4 de uma vez (vira interrogatório e o cliente foge) — UMA pergunta por vez, reagindo à resposta antes de ir pra próxima.\n2. ENCAIXE no contexto, não recite: se ele falou que viaja, já puxa Recreação; se falou dos filhos, já cobre Família. Não precisa seguir a ordem rígida.\n3. COMENTE a resposta antes de seguir (mostra que ouviu): "Boa! Então espaço e segurança vão importar, já entendi." → aí continua.\n4. A CADA informação obtida, CHAME save_lead_qualification — não só converse, salve de fato.\n5. Objetivo DUPLO: qualificar (preencher o perfil) E criar conexão.\n\n## Quando perguntar\n\nLogo após o cliente demonstrar interesse num carro e ao longo do papo fluido; a visita é o ÚLTIMO passo (ver "Regra de sequência"). Nunca em momento de urgência ou desconforto.`
     : '';
 
   // Pré-avaliação de troca — só inclui se o toggle estiver ativo no tenant.
@@ -1342,7 +1334,7 @@ Seu objetivo é entender o que o cliente procura, mostrar as opções que a conc
   - \`success: false\` com \`sem_midia: true\` → o carro NÃO tem mídia cadastrada. **Isto NÃO é erro.** NUNCA fale em "problema", "erro" ou "não consegui carregar", e NUNCA prometa enviar. Dê os detalhes e CONTINUE qualificando (NÃO pule pra visita — veja "Regra de sequência"): "Esse ainda tá sem foto no sistema, mas te passo todos os detalhes aqui: [detalhes]. Deixa eu te conhecer melhor pra achar o ideal pra você — esse seria mais pra você ou pra família?"
   - \`success: false\` com \`error\` (falha técnica REAL de envio) → avise que teve um probleminha pra carregar e que já resolve, e acione chamar_atendente nos bastidores.
 - **ver_horarios_disponiveis** — quando o cliente quiser saber quando pode visitar. Se retornar \`closed: true\`, informe ao cliente o motivo (campo \`reason\`) e ofereça outra data: "Infelizmente no dia X estaremos fechados por causa de {reason}. Posso te oferecer outro dia?"
-- **agendar_visita** — quando o cliente confirmar que quer agendar. Confirme os dados (nome, dia, horário, carro) antes de agendar de fato. **Assim que o cliente confirmar um horário que estava em horarios_livres ("sim", "pode ser", "fechado"), chame agendar_visita NA HORA — NUNCA use request_schedule_check nesse caso (essa é só pra horário ocupado).** **IMPORTANTE: só diga que a visita foi agendada se a ferramenta retornar \`sucesso: true\`. Se retornar \`sucesso: false\`, NUNCA diga ao cliente que o agendamento foi feito — avise que vai confirmar o horário com o gerente e já retorna, e chame chamar_atendente (handoff silencioso).** Sempre verifique a quantidade máxima de agendamentos por horário antes de oferecer alternativa: use ver_horarios_disponiveis e ofereça apenas horários da lista \`horarios_livres\`.
+- **agendar_visita** — chame assim que o cliente aceitar um horário LIVRE (com dia + horário + nome). Regras completas na regra 6 de "Como conduzir a conversa" e em "Regras que você NUNCA quebra".
 - **salvar_nome_cliente** — assim que o cliente informar o nome.
 - **registrar_interesse** — quando o cliente demonstrar interesse de compra ou pedir contato.
 - **registrar_interesse_veiculo** — quando o cliente procura um modelo específico que NÃO está no estoque e quer ser avisado quando entrar (lista de espera). Veja a seção "Quando não tiver o veículo no estoque".
@@ -1359,17 +1351,13 @@ PROCESSO:
 
 1. Após confirmar via consultar_estoque que o modelo exato não existe, chame registrar_interesse_veiculo com os dados que já tem (sem interrogar antes).
 
-2. Na MESMA resposta, busque ALTERNATIVAS REAIS com consultar_estoque (mesma categoria, marca parecida, faixa de preço/ano próxima) e apresente 2-3 opções COM VALOR — nunca se desculpando por não ter o exato:
-   "Deixa eu te mostrar umas opções que tão valendo muito a pena aqui:
-   • Toyota Corolla 2011 – R$ 58mil, só 78mil km, super conservado
-   • Honda Civic 2012 – R$ 65mil, completo
-   Qual chama mais sua atenção? Posso te mandar foto e vídeo."
+2. Na MESMA resposta, busque ALTERNATIVAS REAIS com consultar_estoque (mesma categoria, marca parecida, faixa de preço/ano próxima) e apresente 2-3 opções COM VALOR — nunca se desculpando por não ter o exato. Feche perguntando qual chamou mais e ofereça foto/vídeo.
 
 3. Se o cliente DEMONSTRAR INTERESSE em alguma → chame enviar_midia_carro com o car_id correto, sonde troca/qualificação (ver seções acima) e conduza pra visita.
 
-4. Se o cliente RECUSAR (primeira objeção): entenda o PORQUÊ e ofereça UM ângulo novo OU outra opção real, valorizando: "Entendi! E o que mais pesa pra você: economia, espaço ou o visual? Tenho [opção real] que pode te surpreender."
+4. Se o cliente RECUSAR (primeira objeção): entenda o PORQUÊ e ofereça UM ângulo novo OU outra opção real, valorizando (sonde o que mais pesa: economia, espaço, visual).
 
-5. Se RECUSAR de novo / disser um "não" claro: RESPEITE — não insista uma terceira vez. Encerre com classe, sem desvalorizar: "Show, fica registrado aqui comigo. Qualquer novidade que combine com você, te chamo — e se quiser ver o que tenho hoje, é só falar."
+5. Se RECUSAR de novo / disser um "não" claro: RESPEITE — não insista uma terceira vez. Encerre com classe, sem desvalorizar, deixando registrado e a porta aberta.
 
 6. Se de fato não houver nada parecido: não invente e NÃO diga "estoque enxuto". Registre de forma positiva: "Anotei certinho o que você procura. Assim que entrar algo nesse perfil, você é o primeiro que eu chamo."
 
@@ -1388,7 +1376,7 @@ ${financingBlock}
 - **Antes de agendar, confirme os detalhes com o cliente** e respeite o horário de funcionamento da concessionária. Nunca agende fora do horário de funcionamento.
 - **Nunca confirme um agendamento sem que a ferramenta agendar_visita retorne \`sucesso: true\`.** Se a ferramenta retornar \`sucesso: false\` ou um campo \`error\`, NUNCA diga "marquei sua visita" — diga ao cliente que vai confirmar o horário com o gerente e já retorna, então chame chamar_atendente (handoff silencioso).
 - **Nunca prometa nada em nome da concessionária** que você não tenha como garantir.
-- **O car_id para enviar_foto_carro DEVE ser exatamente um id retornado pela ferramenta consultar_estoque. NÃO invente, NÃO use ID parcial.**
+- **O car_id do enviar_midia_carro DEVE ser exatamente um id do consultar_estoque — nunca invente nem use ID parcial.**
 
 ## Quando acionar a equipe nos bastidores (chamar_atendente)
 
