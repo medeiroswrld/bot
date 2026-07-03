@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskPhone, maskName } from '../_shared/maskPII.ts';
+import { withRequest, type Logger } from '../_shared/logger.ts';
 
 // deploy: vendas ETAPA A (consultar_estoque cruza visitas) + fixes agendamento (8380dc1)
 
@@ -424,10 +425,10 @@ async function computeFreeSlots(
 async function executeTool(
   name: string,
   input: Record<string, unknown>,
-  ctx: { userId: string; conversationId: string; customerPhone: string; customerName: string | null; phoneNumberId: string; token: string },
+  ctx: { userId: string; conversationId: string; customerPhone: string; customerName: string | null; phoneNumberId: string; token: string; log: Logger },
   supabase: SupabaseClient,
 ): Promise<unknown> {
-  const { userId, conversationId, customerPhone, customerName, phoneNumberId, token } = ctx;
+  const { userId, conversationId, customerPhone, customerName, phoneNumberId, token, log } = ctx;
 
   if (name === 'consultar_estoque') {
     let query = supabase
@@ -906,7 +907,7 @@ async function executeTool(
     // 4. Foto primeiro
     if (specsImageUrl) {
       try {
-        const ok = await sendImage(customerPhone, specsImageUrl, pid, token);
+        const ok = await sendImage(customerPhone, specsImageUrl, pid, token, log);
         if (ok) {
           sentItems.push('foto');
           await supabase.from('messages').insert({
@@ -923,7 +924,7 @@ async function executeTool(
     // 5. Vídeo depois
     if (videoUrl) {
       try {
-        const ok = await sendVideo(customerPhone, videoUrl, pid, undefined, token);
+        const ok = await sendVideo(customerPhone, videoUrl, pid, undefined, token, log);
         if (ok) {
           sentItems.push('vídeo');
           await supabase.from('messages').insert({
@@ -1486,7 +1487,7 @@ async function callClaude(
 
 // ─── serve ────────────────────────────────────────────────────────────────────
 
-serve(async (req) => {
+serve((req) => withRequest(req, 'process-conversation', async (base) => {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 });
   }
@@ -1527,6 +1528,7 @@ serve(async (req) => {
   const userId        = conv.user_id        as string;
   const customerPhone = conv.customer_phone as string;
   let   customerName  = conv.customer_name  as string | null;
+  const log = base.child({ userId, conversationId });
 
   // ── 2. Verifica se é a primeira mensagem (boas-vindas) — sem debounce ─────
   const { count: botCount } = await supabase
@@ -1630,7 +1632,7 @@ serve(async (req) => {
     await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: welcomeText });
     await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);
 
-    const wSent = await sendMessage(customerPhone, welcomeText, wPid || undefined, wToken);
+    const wSent = await sendMessage(customerPhone, welcomeText, wPid || undefined, wToken, log);
     if (!wSent) console.error(`[PC] Falha ao enviar boas-vindas para ${maskPhone(customerPhone)}`);
 
     return new Response('OK', { status: 200 });
@@ -1681,7 +1683,7 @@ serve(async (req) => {
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
   const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
   const waToken = await resolveWhatsAppToken(supabase, userId);
-  const ctx = { userId, conversationId, customerPhone, customerName, phoneNumberId, token: waToken };
+  const ctx = { userId, conversationId, customerPhone, customerName, phoneNumberId, token: waToken, log };
   let finalText = '';
   let lastWasTool = false;   // a iteração anterior executou uma tool?
   let retriedEmpty = false;  // já re-chamamos uma vez por resposta vazia pós-tool?
@@ -1753,7 +1755,7 @@ serve(async (req) => {
     const fallbackMsg = 'Opa, me perdi aqui rapidinho 😅 me lembra o que a gente tava vendo? Já te ajudo.';
 
     try {
-      const fbSent = await sendMessage(customerPhone, fallbackMsg, phoneNumberId || undefined, waToken);
+      const fbSent = await sendMessage(customerPhone, fallbackMsg, phoneNumberId || undefined, waToken, log);
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: fallbackMsg });
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
       if (!fbSent) console.error(`[PC] Falha ao enviar ponte de erro para ${maskPhone(customerPhone)} (salva no banco mesmo assim)`);
@@ -1771,7 +1773,7 @@ serve(async (req) => {
     console.error('[PC] Resposta vazia mesmo após retry — enviando ponte (sem handoff).');
     const bridge = 'Opa, me perdi aqui rapidinho 😅 me lembra o que a gente tava vendo? Quero te ajudar a achar o carro certo.';
     try {
-      await sendMessage(customerPhone, bridge, phoneNumberId || undefined, waToken);
+      await sendMessage(customerPhone, bridge, phoneNumberId || undefined, waToken, log);
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: bridge });
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
     } catch (e) {
@@ -1781,7 +1783,7 @@ serve(async (req) => {
   }
 
   // ── 8. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────
-  const sent = await sendMessage(customerPhone, finalText, phoneNumberId || undefined, waToken);
+  const sent = await sendMessage(customerPhone, finalText, phoneNumberId || undefined, waToken, log);
   if (!sent) {
     console.error(`[PC] Falha ao enviar WhatsApp para ${maskPhone(customerPhone)} — mensagem salva no banco mesmo assim`);
   }
@@ -1792,4 +1794,4 @@ serve(async (req) => {
   await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);
 
   return new Response('OK', { status: 200 });
-});
+}));

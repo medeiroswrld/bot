@@ -2,6 +2,8 @@
 // Suporta dois providers: 'cloud' (Meta Business Cloud API) e 'evolution' (Evolution API v2).
 // Escolha via variável de ambiente WHATSAPP_PROVIDER.
 
+import { logger, type Logger } from './logger.ts';
+
 export interface InboundMessage {
   phoneNumberId: string   // Cloud: phone_number_id do metadata; Evolution: nome da instância
   from: string            // Telefone do cliente (formato internacional, ex.: 5515999998888)
@@ -106,13 +108,13 @@ export async function resolveWhatsAppToken(supabase: any, userId?: string | null
   try {
     const { data, error } = await supabase.rpc('get_whatsapp_token', { p_user_id: userId });
     if (error) {
-      console.warn('[WA] get_whatsapp_token falhou, usando token global:', error.message);
+      logger.warn('get_whatsapp_token → fallback global', { action: 'resolveWhatsAppToken', error: error.message });
       return globalToken;
     }
     const tenantToken = String(data ?? '').trim();
     return tenantToken || globalToken;
   } catch (e) {
-    console.warn('[WA] get_whatsapp_token exceção, usando token global:', e);
+    logger.warn('get_whatsapp_token exceção → fallback global', { action: 'resolveWhatsAppToken', error: e });
     return globalToken;
   }
 }
@@ -125,25 +127,17 @@ export async function sendImage(
   imageUrl: string,
   phoneNumberId?: string,
   token?: string,
+  log?: Logger,
 ): Promise<boolean> {
+  const l = log ?? logger;
   const provider = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
   const tk       = (token ?? Deno.env.get('WHATSAPP_TOKEN') ?? '').trim();
 
-  if (!tk) {
-    console.error('[WA] WHATSAPP_TOKEN não configurado (tenant e global)');
-    return false;
-  }
-
-  if (provider !== 'cloud') {
-    console.warn('[WA] sendImage disponível apenas para provider cloud');
-    return false;
-  }
+  if (!tk) { l.error('token ausente', { action: 'sendImage' }); return false; }
+  if (provider !== 'cloud') { l.warn('sendImage só no provider cloud', { action: 'sendImage' }); return false; }
 
   const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
-  if (!pid) {
-    console.error('[WA Cloud] phone_number_id não fornecido para sendImage');
-    return false;
-  }
+  if (!pid) { l.error('phone_number_id ausente', { action: 'sendImage' }); return false; }
 
   const res = await fetch(`https://graph.facebook.com/v20.0/${pid}/messages`, {
     method: 'POST',
@@ -162,7 +156,7 @@ export async function sendImage(
 
   if (!res.ok) {
     const body = await res.text();
-    console.error(`[WA Cloud] Erro ao enviar imagem para ${to}: ${res.status} ${body}`);
+    l.error('falha ao enviar imagem', { action: 'sendImage', to, status: res.status, body });
     return false;
   }
   return true;
@@ -174,25 +168,17 @@ export async function sendVideo(
   phoneNumberId?: string,
   caption?: string,
   token?: string,
+  log?: Logger,
 ): Promise<boolean> {
+  const l = log ?? logger;
   const provider = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
   const tk       = (token ?? Deno.env.get('WHATSAPP_TOKEN') ?? '').trim();
 
-  if (!tk) {
-    console.error('[WA] WHATSAPP_TOKEN não configurado (tenant e global)');
-    return false;
-  }
-
-  if (provider !== 'cloud') {
-    console.warn('[WA] sendVideo disponível apenas para provider cloud');
-    return false;
-  }
+  if (!tk) { l.error('token ausente', { action: 'sendVideo' }); return false; }
+  if (provider !== 'cloud') { l.warn('sendVideo só no provider cloud', { action: 'sendVideo' }); return false; }
 
   const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
-  if (!pid) {
-    console.error('[WA Cloud] phone_number_id não fornecido para sendVideo');
-    return false;
-  }
+  if (!pid) { l.error('phone_number_id ausente', { action: 'sendVideo' }); return false; }
 
   const res = await fetch(`https://graph.facebook.com/v25.0/${pid}/messages`, {
     method: 'POST',
@@ -210,10 +196,10 @@ export async function sendVideo(
   });
 
   const result = await res.text();
-  console.log('[sendVideo] response:', res.status, result);
+  l.debug('sendVideo resposta', { action: 'sendVideo', status: res.status });
 
   if (!res.ok) {
-    console.error(`[WA Cloud] Erro ao enviar vídeo para ${to}: ${res.status} ${result}`);
+    l.error('falha ao enviar vídeo', { action: 'sendVideo', to, status: res.status, result });
     return false;
   }
   return true;
@@ -224,18 +210,17 @@ export async function sendMessage(
   text: string,
   phoneNumberId?: string,
   token?: string,
+  log?: Logger,
 ): Promise<boolean> {
+  const l = log ?? logger;
   const provider = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
   const tk       = (token ?? Deno.env.get('WHATSAPP_TOKEN') ?? '').trim();
 
-  if (!tk) {
-    console.error('[WA] WHATSAPP_TOKEN não configurado (tenant e global)');
-    return false;
-  }
+  if (!tk) { l.error('token ausente', { action: 'sendMessage' }); return false; }
 
   return provider === 'evolution'
-    ? sendEvolution(to, text, tk, phoneNumberId)
-    : sendCloud(to, text, tk, phoneNumberId);
+    ? sendEvolution(to, text, tk, phoneNumberId, l)
+    : sendCloud(to, text, tk, phoneNumberId, l);
 }
 
 async function sendCloud(
@@ -243,12 +228,11 @@ async function sendCloud(
   text: string,
   token: string,
   phoneNumberId?: string,
+  log?: Logger,
 ): Promise<boolean> {
+  const l = log ?? logger;
   const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
-  if (!pid) {
-    console.error('[WA Cloud] phone_number_id não fornecido e WHATSAPP_PHONE_NUMBER_ID não configurado');
-    return false;
-  }
+  if (!pid) { l.error('phone_number_id ausente', { action: 'sendCloud' }); return false; }
 
   const res = await fetch(`https://graph.facebook.com/v20.0/${pid}/messages`, {
     method: 'POST',
@@ -267,7 +251,7 @@ async function sendCloud(
 
   if (!res.ok) {
     const body = await res.text();
-    console.error(`[WA Cloud] Erro ao enviar para ${to}: ${res.status} ${body}`);
+    l.error('falha ao enviar', { action: 'sendCloud', to, status: res.status, body });
     return false;
   }
   return true;
@@ -278,14 +262,13 @@ async function sendEvolution(
   text: string,
   token: string,
   instance?: string,
+  log?: Logger,
 ): Promise<boolean> {
+  const l = log ?? logger;
   const baseUrl = Deno.env.get('WHATSAPP_EVOLUTION_URL') ?? '';
   const inst    = instance ?? Deno.env.get('WHATSAPP_EVOLUTION_INSTANCE') ?? '';
 
-  if (!baseUrl || !inst) {
-    console.error('[WA Evolution] WHATSAPP_EVOLUTION_URL ou instância não configurados');
-    return false;
-  }
+  if (!baseUrl || !inst) { l.error('Evolution URL/instância não configurados', { action: 'sendEvolution' }); return false; }
 
   // Evolution API v2: { number, text }
   const res = await fetch(`${baseUrl}/message/sendText/${inst}`, {
@@ -299,7 +282,7 @@ async function sendEvolution(
 
   if (!res.ok) {
     const body = await res.text();
-    console.error(`[WA Evolution] Erro ao enviar para ${to}: ${res.status} ${body}`);
+    l.error('falha ao enviar', { action: 'sendEvolution', to, status: res.status, body });
     return false;
   }
   return true;
