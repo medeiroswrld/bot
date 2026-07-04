@@ -512,7 +512,7 @@ async function executeTool(
     if (!open) {
       return { closed: true, disponivel: false, reason, mensagem: `Nesse dia ${reason}. Ofereça outro dia dentro do funcionamento da loja.` };
     }
-    console.log('[slot] ver_horarios:', { data: dateStr, livres: freeSlots.length });
+    log.info('horários livres', { action: 'ver_horarios_disponiveis', data: dateStr, livres: freeSlots.length });
     return { data: dateStr, dia_semana: dayLabel, horarios_livres: freeSlots, total_disponivel: freeSlots.length };
   }
 
@@ -522,10 +522,10 @@ async function executeTool(
     const nomeCliente = String(input.nome_cliente ?? customerName ?? 'Cliente');
     const carId       = input.car_id ? String(input.car_id) : null;
 
-    console.log('[agendar_visita] params:', { dateStr, horario, nomeCliente: maskName(nomeCliente), carId, userId, customerPhone: maskPhone(customerPhone) });
+    log.info('params', { action: 'agendar_visita', data: dateStr, horario, nome: maskName(nomeCliente), carId });
 
     if (!dateStr || !horario) {
-      console.error('[agendar_visita] data ou horario ausente:', { dateStr, horario });
+      log.error('data ou horário ausente', { action: 'agendar_visita', data: dateStr, horario });
       return { sucesso: false, error: 'Data ou horário não informado.' };
     }
 
@@ -536,12 +536,12 @@ async function executeTool(
     const slotInfo = await computeFreeSlots(supabase, userId, dateStr);
 
     if (!slotInfo.open) {
-      console.log('[agendar_visita] dia fechado/indisponível:', dateStr, slotInfo.reason);
+      log.warn('dia fechado/indisponível', { action: 'agendar_visita', data: dateStr, reason: slotInfo.reason });
       return { sucesso: false, fora_expediente: true, mensagem: `Não dá pra agendar em ${dateStr}: ${slotInfo.reason}. Ofereça ao cliente outro dia dentro do funcionamento da loja (use ver_horarios_disponiveis).` };
     }
 
     if (!slotInfo.freeSlots.includes(horarioHm)) {
-      console.log('[agendar_visita] fora do expediente/indisponível:', horarioHm, '| livres:', slotInfo.freeSlots.join(','));
+      log.warn('fora do expediente/indisponível', { action: 'agendar_visita', horario: horarioHm, livres: slotInfo.freeSlots });
       return {
         sucesso: false,
         fora_expediente: true,
@@ -569,7 +569,7 @@ async function executeTool(
       car_id: carId,
       status: appointmentStatus,
     };
-    console.log('[agendar_visita] inserindo:', JSON.stringify(insertData));
+    log.info('inserindo', { action: 'agendar_visita', insertData });
 
     const { data: appt, error } = await supabase
       .from('appointments')
@@ -577,15 +577,15 @@ async function executeTool(
       .select()
       .single();
 
-    console.log('[agendar_visita] resultado:', JSON.stringify(appt ?? null), 'erro:', error ? JSON.stringify(error) : 'nenhum');
+    log.info('resultado', { action: 'agendar_visita', appt, error });
 
     // BUG 1: se o INSERT falhar, retorna erro REAL ao Claude — nunca finge sucesso
     if (error || !appt) {
-      console.error('[agendar_visita] INSERT FALHOU:', JSON.stringify(error));
+      log.error('insert falhou', { action: 'agendar_visita', error });
       return { sucesso: false, error: `Falha ao salvar o agendamento no banco: ${error?.message ?? 'desconhecido'}` };
     }
 
-    console.log('[agendar_visita] Agendamento criado:', appt.id, appt.appointment_date, appt.appointment_time);
+    log.info('agendamento criado', { action: 'agendar_visita', apptId: appt.id, data: appt.appointment_date, horario: appt.appointment_time });
 
     return {
       sucesso: true,
@@ -615,10 +615,10 @@ async function executeTool(
       .eq('id', conversationId);
 
     if (error) {
-      console.error('[request_schedule_check] erro ao salvar:', JSON.stringify(error));
+      log.error('erro ao salvar', { action: 'request_schedule_check', error });
       return { sucesso: false, mensagem: 'Não consegui registrar agora. Tente de novo em instantes.' };
     }
-    console.log('[request_schedule_check] registrado:', conversationId, requestedDatetime);
+    log.info('registrado', { action: 'request_schedule_check', requestedDatetime });
     return {
       sucesso: true,
       mensagem: 'Registrado. Diga ao cliente que vai verificar com seu superior e responde em alguns minutos. NÃO ofereça outro horário agora nem fale em atendente/sistema.',
@@ -645,7 +645,7 @@ async function executeTool(
       .maybeSingle();
 
     if (!appt) {
-      console.log('[cancelar_visita] nenhum agendamento ativo encontrado para', maskPhone(customerPhone));
+      log.info('nenhum agendamento ativo', { action: 'cancelar_visita' });
       return { sucesso: false, mensagem: 'Nenhuma visita agendada encontrada para cancelar.' };
     }
 
@@ -658,11 +658,11 @@ async function executeTool(
       .eq('id', appt.id);
 
     if (error) {
-      console.error('[cancelar_visita] erro ao cancelar:', JSON.stringify(error));
+      log.error('erro ao cancelar', { action: 'cancelar_visita', error });
       return { sucesso: false, error: 'Falha ao cancelar o agendamento.' };
     }
 
-    console.log('[cancelar_visita] cancelado:', appt.id, appt.appointment_date, appt.appointment_time);
+    log.info('cancelado', { action: 'cancelar_visita', apptId: appt.id, data: appt.appointment_date, horario: appt.appointment_time });
     return {
       sucesso: true,
       data: appt.appointment_date,
