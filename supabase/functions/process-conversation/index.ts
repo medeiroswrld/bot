@@ -1416,6 +1416,7 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
 async function callClaude(
   systemPrompt: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string | unknown[] }>,
+  log: Logger,
   attempt = 0,
 ): Promise<ClaudeResponse> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY') ?? '';
@@ -1457,9 +1458,15 @@ async function callClaude(
     if (attempt < MAX_RETRIES) {
       const delay = BACKOFF_MS[attempt];
       const isTimeout = (netErr as Error)?.name === 'AbortError';
-      console.warn(`[CLAUDE] ${isTimeout ? `timeout ${TIMEOUT_MS}ms` : 'erro de rede'} — retry ${attempt + 1}/${MAX_RETRIES} em ${delay}ms`);
+      log.warn('retry da chamada ao Claude', {
+        action: 'claude_call',
+        reason: isTimeout ? `timeout ${TIMEOUT_MS}ms` : 'erro de rede',
+        attempt: attempt + 1,
+        maxRetries: MAX_RETRIES,
+        delayMs: delay,
+      });
       await new Promise((r) => setTimeout(r, delay));
-      return callClaude(systemPrompt, messages, attempt + 1);
+      return callClaude(systemPrompt, messages, log, attempt + 1);
     }
     throw netErr;
   } finally {
@@ -1472,16 +1479,33 @@ async function callClaude(
     const retriable = [408, 409, 429, 500, 502, 503, 504, 529].includes(res.status);
     if (retriable && attempt < MAX_RETRIES) {
       const delay = BACKOFF_MS[attempt]; // 2s, 5s, 10s
-      console.warn(`[CLAUDE] ${res.status} — retry ${attempt + 1}/${MAX_RETRIES} em ${delay}ms`);
+      log.warn('retry da chamada ao Claude', {
+        action: 'claude_call',
+        status: res.status,
+        attempt: attempt + 1,
+        maxRetries: MAX_RETRIES,
+        delayMs: delay,
+      });
       await new Promise((r) => setTimeout(r, delay));
-      return callClaude(systemPrompt, messages, attempt + 1);
+      return callClaude(systemPrompt, messages, log, attempt + 1);
     }
-    console.error(`[CLAUDE_FATAL] ${res.status} após ${attempt} retries: ${body.slice(0, 300)}`);
+    log.error('Claude API falhou após retries', {
+      action: 'claude_call',
+      status: res.status,
+      retries: attempt,
+      body: body.slice(0, 300),
+    });
     throw new Error(`Claude API error ${res.status}: ${body}`);
   }
   const data = await res.json() as ClaudeResponse;
   const u = data.usage ?? {};
-  console.log(`[cache] criado=${u.cache_creation_input_tokens ?? 0} lido=${u.cache_read_input_tokens ?? 0} input=${u.input_tokens ?? 0} output=${u.output_tokens ?? 0}`);
+  log.info('cache/usage da chamada', {
+    action: 'claude_call',
+    cacheCreated: u.cache_creation_input_tokens ?? 0,
+    cacheRead: u.cache_read_input_tokens ?? 0,
+    inputTokens: u.input_tokens ?? 0,
+    outputTokens: u.output_tokens ?? 0,
+  });
   return data;
 }
 
@@ -1514,7 +1538,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
     .single();
 
   if (convErr || !conv) {
-    console.error('[PC] Conversa não encontrada:', conversationId);
+    base.warn('conversa não encontrada', { action: 'load_conversation', conversationId, error: convErr?.message });
     return new Response('Not Found', { status: 404 });
   }
 
@@ -1522,6 +1546,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
   // human = atendente já assumiu), o bot fica 100% MUDO até o status voltar
   // para 'bot' (atendente "Devolve ao bot" no CRM). Sem gerar nem enviar nada.
   if (conv.status === 'human' || conv.status === 'pending') {
+    base.info('conversa em handoff — bot mudo', { action: 'handoff', conversationId, status: conv.status });
     return new Response('OK', { status: 200 });
   }
 
@@ -1567,7 +1592,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
       const { data: fresh } = await supabase
         .from('conversations').select('status').eq('id', conversationId).maybeSingle();
       if (fresh?.status === 'human' || fresh?.status === 'pending') {
-        console.log('[PC] Conversa virou handoff durante o debounce — abortando.', fresh?.status);
+        log.info('conversa virou handoff durante o debounce — abortando', { action: 'debounce', status: fresh?.status });
         return new Response('OK', { status: 200 });
       }
 
@@ -1577,7 +1602,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
       const quietFor = Date.now() - lastChangeAt;
       const total    = Date.now() - startedAt;
       if (quietFor >= QUIET_MS || total >= MAX_TOTAL_MS) {
-        console.log(`[debounce] processando lote — silencio=${Math.round(quietFor / 1000)}s total=${Math.round(total / 1000)}s`);
+        log.info('processando lote', { action: 'debounce', silencioSeg: Math.round(quietFor / 1000), totalSeg: Math.round(total / 1000) });
         break;
       }
     }
@@ -1607,9 +1632,9 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
   if (claimErr) {
     // A coluna last_handled_msg_id pode ainda não existir — não bloqueia o bot,
     // apenas registra. A dedupe passa a valer assim que a coluna for criada.
-    console.warn('[PC] Claim ignorado (coluna last_handled_msg_id existe?):', claimErr.message);
+    log.warn('claim ignorado (coluna last_handled_msg_id existe?) — dedupe desativada', { action: 'claim', error: claimErr.message });
   } else if (!claimed) {
-    console.log('[PC] Lote já assumido por outra invocação — abortando.', batchKey);
+    log.info('lote já assumido por outra invocação — abortando', { action: 'claim', batchKey });
     return new Response('OK', { status: 200 });
   }
 
@@ -1633,7 +1658,8 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
     await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);
 
     const wSent = await sendMessage(customerPhone, welcomeText, wPid || undefined, wToken, log);
-    if (!wSent) console.error(`[PC] Falha ao enviar boas-vindas para ${maskPhone(customerPhone)}`);
+    if (wSent) log.info('boas-vindas enviadas', { action: 'welcome' });
+    else log.error('falha ao enviar boas-vindas', { action: 'welcome', phone: customerPhone });
 
     return new Response('OK', { status: 200 });
   }
@@ -1692,17 +1718,18 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
 
   try {
     for (let iteration = 0; iteration < 10; iteration++) {
-      const response = await callClaude(systemPrompt, claudeMessages);
+      const response = await callClaude(systemPrompt, claudeMessages, log);
 
-      console.log('[CLAUDE_RESPONSE]', JSON.stringify({
+      log.info('resposta do Claude', {
+        action: 'claude_loop',
         iteration,
-        stop_reason: response.stop_reason,
-        content_types: response.content.map((c) => c.type),
-        content_preview: response.content.slice(0, 2),
-      }));
+        stopReason: response.stop_reason,
+        contentTypes: response.content.map((c) => c.type),
+      });
+      log.debug('preview da resposta', { action: 'claude_loop', iteration, preview: response.content.slice(0, 2) });
 
       if (response.stop_reason === 'max_tokens') {
-        console.warn('[CLAUDE] resposta truncada (max_tokens) — iteração', iteration);
+        log.warn('resposta truncada (max_tokens)', { action: 'claude_loop', iteration });
       }
 
       const toolUseBlocks = response.content.filter((b) => b.type === 'tool_use');
@@ -1716,7 +1743,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
         // às vezes encerra o turno sem falar — NÃO encerra a conversa: cutuca e
         // re-chama UMA vez pra ele gerar a próxima mensagem.
         if (lastWasTool && !retriedEmpty) {
-          console.warn('[PC] Vazio após tool — re-chamando Claude (retry de continuação).');
+          log.warn('vazio após tool — re-chamando Claude (retry de continuação)', { action: 'claude_loop', iteration });
           const last = claudeMessages[claudeMessages.length - 1];
           if (last && last.role === 'user' && Array.isArray(last.content)) {
             last.content.push({ type: 'text', text: 'Continue a conversa com o cliente: comente brevemente e faça a PRÓXIMA pergunta (ex.: próxima dimensão do FORD) ou siga o fluxo. NUNCA encerre o turno em silêncio.' });
@@ -1725,7 +1752,12 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
           lastWasTool = false;
           continue;
         }
-        console.error('[NO_TEXT_FROM_CLAUDE]', JSON.stringify(response.content));
+        log.error('sem texto do Claude após retry de continuação', {
+          action: 'claude_loop',
+          iteration,
+          contentTypes: response.content.map((c) => c.type),
+          content: response.content,
+        });
         break;
       }
 
@@ -1747,8 +1779,11 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
     }
   } catch (e) {
     const err = e instanceof Error ? e : new Error(String(e));
-    console.error('[FALLBACK]', err.message, err.stack);
-    console.error('[PC] Erro ao chamar Claude (após retries):', e);
+    log.error('erro no loop do Claude (após retries) — enviando ponte', {
+      action: 'fallback',
+      error: err.message,
+      stack: err.stack,
+    });
 
     // Erro transitório do modelo NÃO é motivo de handoff — manda uma ponte
     // amigável e mantém a conversa com o bot (o próximo turno do cliente reativa).
@@ -1758,9 +1793,9 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
       const fbSent = await sendMessage(customerPhone, fallbackMsg, phoneNumberId || undefined, waToken, log);
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: fallbackMsg });
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
-      if (!fbSent) console.error(`[PC] Falha ao enviar ponte de erro para ${maskPhone(customerPhone)} (salva no banco mesmo assim)`);
+      if (!fbSent) log.error('falha ao enviar ponte de erro (salva no banco mesmo assim)', { action: 'fallback', phone: customerPhone });
     } catch (sendErr) {
-      console.error('[PC] Erro ao enviar ponte de erro:', sendErr);
+      log.error('erro ao enviar ponte de erro', { action: 'fallback', error: sendErr });
     }
 
     return new Response('OK', { status: 200 });
@@ -1770,22 +1805,24 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
   // (vazio após save é hiccup do modelo, não "precisa de gente"). Manda uma
   // PONTE que continua a conversa — o próximo turno do cliente reativa o bot.
   if (!finalText.trim()) {
-    console.error('[PC] Resposta vazia mesmo após retry — enviando ponte (sem handoff).');
+    log.error('resposta vazia mesmo após retry — enviando ponte (sem handoff)', { action: 'fallback' });
     const bridge = 'Opa, me perdi aqui rapidinho 😅 me lembra o que a gente tava vendo? Quero te ajudar a achar o carro certo.';
     try {
       await sendMessage(customerPhone, bridge, phoneNumberId || undefined, waToken, log);
       await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: bridge });
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
     } catch (e) {
-      console.error('[PC] Erro ao enviar ponte de resposta vazia:', e);
+      log.error('erro ao enviar ponte de resposta vazia', { action: 'fallback', error: e });
     }
     return new Response('OK', { status: 200 });
   }
 
   // ── 8. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────
   const sent = await sendMessage(customerPhone, finalText, phoneNumberId || undefined, waToken, log);
-  if (!sent) {
-    console.error(`[PC] Falha ao enviar WhatsApp para ${maskPhone(customerPhone)} — mensagem salva no banco mesmo assim`);
+  if (sent) {
+    log.info('resposta enviada', { action: 'send_final', chars: finalText.length });
+  } else {
+    log.error('falha ao enviar WhatsApp — mensagem salva no banco mesmo assim', { action: 'send_final', phone: customerPhone });
   }
 
   // ── 9. Salva resposta do bot e atualiza last_message_at ────────────────────
