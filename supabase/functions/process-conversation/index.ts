@@ -452,7 +452,11 @@ async function executeTool(
     // o filtro real é por marca/preço/ano. Ignorado na query para não quebrar.
 
     const { data, error } = await query;
-    if (error) return { erro: 'Falha ao buscar estoque' };
+    if (error) {
+      log.error('falha ao buscar estoque', { action: 'consultar_estoque', error });
+      return { erro: 'Falha ao buscar estoque' };
+    }
+    log.info('estoque consultado', { action: 'consultar_estoque', filtros: input, total: data?.length ?? 0 });
     if (!data?.length) return { mensagem: 'Nenhum veículo encontrado com esses critérios.' };
 
     // Cruza agendamentos FUTUROS por carro → urgência real ("já tem gente vindo ver").
@@ -814,7 +818,7 @@ async function executeTool(
 
     // Validação: entrada mínima (dinheiro + troca)
     if (minPct > 0 && entradaTotal < minEntrada) {
-      console.log(`[financiamento] entrada insuficiente: ${entradaTotal} < min ${Math.round(minEntrada)} (${minPct}%)`);
+      log.info('entrada insuficiente', { action: 'simular_financiamento', entradaTotal, entradaMinima: Math.round(minEntrada), minPct });
       return {
         sucesso: false, entrada_insuficiente: true,
         entrada_informada: entradaTotal,
@@ -827,7 +831,15 @@ async function executeTool(
     const valorFinanciado = Math.max(0, carPrice - entradaTotal);
     const parcela = calcParcelaPrice(valorFinanciado, taxa, n);
 
-    console.log(`[financiamento] preco=${carPrice} entrada=${entradaTotal} financiado=${valorFinanciado} taxa=${taxa}%/mes n=${n} parcela=${parcela.toFixed(2)}`);
+    log.info('simulação calculada', {
+      action: 'simular_financiamento',
+      preco: carPrice,
+      entrada: entradaTotal,
+      financiado: valorFinanciado,
+      taxaMes: taxa,
+      parcelas: n,
+      parcela: Math.round(parcela * 100) / 100,
+    });
 
     // Salva no lead (na qualificação financeira — financial_info)
     try {
@@ -838,7 +850,7 @@ async function executeTool(
         const novo = lead.financial_info ? `${lead.financial_info}\n${resumo}` : resumo;
         await supabase.from('leads').update({ financial_info: novo, updated_at: new Date().toISOString() }).eq('id', lead.id);
       }
-    } catch (e) { console.error('[financiamento] erro ao salvar no lead:', e); }
+    } catch (e) { log.error('erro ao salvar simulação no lead', { action: 'simular_financiamento', error: e }); }
 
     return {
       sucesso: true,
@@ -861,7 +873,7 @@ async function executeTool(
 
   if (name === 'enviar_midia_carro') {
     const carId = String(input.car_id ?? '');
-    console.log('[enviar_midia_carro] car_id:', carId, 'user_id:', userId);
+    log.info('enviando mídia', { action: 'enviar_midia_carro', carId });
 
     if (!carId) return { success: false, error: 'ID do carro não fornecido' };
 
@@ -873,11 +885,11 @@ async function executeTool(
       .eq('user_id', userId)
       .single();
 
-    console.log('[enviar_midia_carro] car:', JSON.stringify(car ?? null), 'error:', carErr ? JSON.stringify(carErr) : 'nenhum');
-
     if (carErr || !car) {
+      log.warn('veículo não encontrado (car_id inválido/alucinado?)', { action: 'enviar_midia_carro', carId, error: carErr?.message });
       return { success: false, error: 'Veículo não encontrado' };
     }
+    log.debug('carro carregado', { action: 'enviar_midia_carro', car });
 
     const carName = [car.brand, car.model].filter(Boolean).join(' ') || 'veículo';
     let specsImageUrl: string | null = car.specs_image_url;
@@ -898,6 +910,7 @@ async function executeTool(
 
     // 3. Sem nada cadastrado — NÃO é erro técnico, é só ausência de mídia.
     if (!specsImageUrl && !videoUrl) {
+      log.info('veículo sem mídia cadastrada', { action: 'enviar_midia_carro', carId });
       return { success: false, sem_midia: true, message: 'Este veículo não tem foto nem vídeo cadastrados (ausência de mídia, não é falha técnica).' };
     }
 
@@ -917,7 +930,7 @@ async function executeTool(
           await new Promise((r) => setTimeout(r, 1500));
         }
       } catch (e) {
-        console.error('[enviar_midia_carro] erro foto:', e);
+        log.error('erro ao enviar foto', { action: 'enviar_midia_carro', carId, error: e });
       }
     }
 
@@ -932,7 +945,7 @@ async function executeTool(
           });
         }
       } catch (e) {
-        console.error('[enviar_midia_carro] erro vídeo:', e);
+        log.error('erro ao enviar vídeo', { action: 'enviar_midia_carro', carId, error: e });
       }
     }
 
@@ -940,6 +953,7 @@ async function executeTool(
       return { success: false, error: 'Falha ao enviar as mídias' };
     }
 
+    log.info('mídia enviada', { action: 'enviar_midia_carro', carId, sent: sentItems });
     return {
       success: true,
       sent: sentItems,
@@ -949,8 +963,8 @@ async function executeTool(
 
   if (name === 'registrar_interesse_veiculo') {
     const model = String(input.model ?? '').trim();
-    console.log('[registrar_interesse_veiculo] params:', JSON.stringify(input));
-    console.log('[registrar_interesse_veiculo] ctx:', { userId, customerPhone: maskPhone(customerPhone), conversationId });
+    log.info('registrando interesse', { action: 'registrar_interesse_veiculo', model, brand: input.brand });
+    log.debug('params completos', { action: 'registrar_interesse_veiculo', input });
 
     if (!model) return { success: false, error: 'Modelo não informado.' };
 
@@ -1000,10 +1014,10 @@ async function executeTool(
         .update(fields)
         .eq('id', existing.id);
       if (error) {
-        console.error('[registrar_interesse_veiculo] erro update:', JSON.stringify(error));
+        log.error('erro no update do interesse', { action: 'registrar_interesse_veiculo', interestId: existing.id, error });
         return { success: false, error: 'Não consegui salvar o interesse agora. Diga que vai resolver isso pessoalmente e acione chamar_atendente.' };
       }
-      console.log('[registrar_interesse_veiculo] atualizado:', existing.id);
+      log.info('interesse atualizado', { action: 'registrar_interesse_veiculo', interestId: existing.id, model });
       return { success: true, action: 'updated', message: `Interesse atualizado para ${model}.` };
     }
 
@@ -1020,12 +1034,11 @@ async function executeTool(
       .select('id')
       .single();
 
-    console.log('[registrar_interesse_veiculo] resultado:', JSON.stringify(created ?? null), 'erro:', error ? JSON.stringify(error) : 'nenhum');
-
     if (error || !created) {
-      console.error('[registrar_interesse_veiculo] erro insert:', JSON.stringify(error));
+      log.error('erro no insert do interesse', { action: 'registrar_interesse_veiculo', error });
       return { success: false, error: 'Falha ao salvar interesse no banco' };
     }
+    log.info('interesse registrado', { action: 'registrar_interesse_veiculo', interestId: created.id, model });
 
     const anoInfo = fields.year_min ? ` ${fields.year_min}-${fields.year_max ?? fields.year_min}` : '';
     return { success: true, action: 'created', message: `Interesse registrado: ${model}${anoInfo}.` };
