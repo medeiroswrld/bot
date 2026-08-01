@@ -31,7 +31,7 @@ serve(async (req) => {
 
     const { data: settingsList } = await supabase
       .from('company_settings')
-      .select('user_id, whatsapp_phone_number_id, birthday_template_id, birthday_enabled')
+      .select('user_id, whatsapp_phone_number_id, birthday_template_id, birthday_enabled, company_name')
       .eq('birthday_enabled', true)
       .not('birthday_template_id', 'is', null);
 
@@ -72,6 +72,11 @@ serve(async (req) => {
 
       console.log(`[birthday] user ${settings.user_id}: ${aniversariantes.length} aniversariante(s) hoje (${curDay}/${curMonth})`);
 
+      // O template aniversario_cliente tem 2 variáveis ({{1}} nome, {{2}} empresa).
+      // Mandar 1 só fazia a Meta rejeitar por contagem de parâmetros — o envio
+      // de aniversário nunca chegava ao cliente.
+      const companyName = String(settings.company_name ?? 'nossa loja');
+
       for (const lead of aniversariantes) {
         try {
           const firstName = String(lead.name ?? 'cliente').split(' ')[0];
@@ -79,7 +84,10 @@ serve(async (req) => {
             phone: lead.phone,
             templateName: template.meta_template_name,
             language: template.language,
-            bodyParameters: [{ type: 'text', text: firstName }],
+            bodyParameters: [
+              { type: 'text', text: firstName },
+              { type: 'text', text: companyName },
+            ],
             phoneNumberId,
             token,
           });
