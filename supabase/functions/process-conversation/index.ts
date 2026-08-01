@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
-import { maskPhone, maskName } from '../_shared/maskPII.ts';
+import { maskName } from '../_shared/maskPII.ts';
 import { withRequest, type Logger } from '../_shared/logger.ts';
 
 // deploy: vendas ETAPA A (consultar_estoque cruza visitas) + fixes agendamento (8380dc1)
@@ -256,11 +256,13 @@ const TOOLS = [
   {
     name: 'enviar_midia_carro',
     description:
-      'Envia a foto de especificações + o vídeo do veículo (foto, depois vídeo). Use quando o cliente pedir foto/vídeo, pedir pra ver, ou demonstrar interesse claro num carro. car_id = EXATAMENTE o "id" do consultar_estoque (nunca invente nem use ID parcial; na dúvida, consulte de novo). Retorna { success } — o tratamento de cada retorno está na lista de ferramentas.',
+      'Envia a foto de especificações + o vídeo do veículo (foto, depois vídeo). Use quando o cliente pedir foto/vídeo, pedir pra ver, ou demonstrar interesse claro num carro. SEQUÊNCIA OBRIGATÓRIA: chame consultar_estoque ANTES, nesta mesma resposta, e use o id retornado AGORA — ids de turnos anteriores NÃO existem mais no seu contexto; usar id "de memória" é inventar. Envie SEMPRE marca e modelo junto (plano B se o id falhar). Se não estiver claro de QUAL carro o cliente quer a foto, pergunte antes de enviar. Retorna { success } — o tratamento de cada retorno está na lista de ferramentas.',
     input_schema: {
       type: 'object',
       properties: {
-        car_id: { type: 'string', description: 'ID exato do carro retornado pelo consultar_estoque' },
+        car_id: { type: 'string', description: 'ID exato do carro retornado pelo consultar_estoque DESTA resposta' },
+        marca:  { type: 'string', description: 'Marca do carro (ex.: Toyota) — usada como fallback se o car_id falhar' },
+        modelo: { type: 'string', description: 'Modelo do carro (ex.: Corolla) — usado como fallback se o car_id falhar' },
       },
       required: ['car_id'],
     },
@@ -872,23 +874,59 @@ async function executeTool(
   }
 
   if (name === 'enviar_midia_carro') {
-    const carId = String(input.car_id ?? '');
-    log.info('enviando mídia', { action: 'enviar_midia_carro', carId });
+    const carId  = String(input.car_id ?? '');
+    const marca  = String(input.marca ?? '').trim();
+    const modelo = String(input.modelo ?? '').trim();
+    log.info('enviando mídia', { action: 'enviar_midia_carro', carId, marca, modelo });
 
-    if (!carId) return { success: false, error: 'ID do carro não fornecido' };
+    if (!carId && !modelo && !marca) return { success: false, error: 'ID do carro não fornecido' };
 
-    // 1. Busca o carro (só do dono do bot)
-    const { data: car, error: carErr } = await supabase
-      .from('cars')
-      .select('id, brand, model, specs_image_url, video_url, user_id')
-      .eq('id', carId)
-      .eq('user_id', userId)
-      .single();
+    const CAR_COLS = 'id, brand, model, specs_image_url, video_url, user_id';
+    type CarRow = { id: string; brand: string | null; model: string | null; specs_image_url: string | null; video_url: string | null };
+    let car: CarRow | null = null;
 
-    if (carErr || !car) {
-      log.warn('veículo não encontrado (car_id inválido/alucinado?)', { action: 'enviar_midia_carro', carId, error: carErr?.message });
-      return { success: false, error: 'Veículo não encontrado' };
+    // 1. Busca pelo id (só do dono do bot)
+    if (carId) {
+      const { data, error: carErr } = await supabase
+        .from('cars')
+        .select(CAR_COLS)
+        .eq('id', carId)
+        .eq('user_id', userId)
+        .single();
+      if (data) {
+        car = data as CarRow;
+      } else {
+        log.warn('car_id fantasma — tentando recuperar por marca/modelo', { action: 'enviar_midia_carro', carId, marca, modelo, error: carErr?.message });
+      }
     }
+
+    // 1b. Plano B: id falhou (alucinado ou de turno antigo) — recupera por marca/modelo
+    //     entre os carros ativos do tenant (mesma ordenação do consultar_estoque).
+    if (!car && (modelo || marca)) {
+      let fq = supabase
+        .from('cars')
+        .select(CAR_COLS)
+        .eq('user_id', userId)
+        .in('status', ['available', 'reserved'])
+        .order('price', { ascending: true })
+        .limit(2);
+      if (marca)  fq = fq.ilike('brand', `%${marca}%`);
+      if (modelo) fq = fq.ilike('model', `%${modelo}%`);
+      const { data: matches } = await fq;
+      if (matches?.length) {
+        car = matches[0] as CarRow;
+        log.warn('car_id fantasma recuperado por marca/modelo', {
+          action: 'enviar_midia_carro', carId, marca, modelo,
+          recoveredCarId: car.id, matches: matches.length,
+        });
+      }
+    }
+
+    if (!car) {
+      log.warn('veículo não encontrado (car_id inválido/alucinado?)', { action: 'enviar_midia_carro', carId, marca, modelo });
+      return { success: false, error: 'Veículo não encontrado. Chame consultar_estoque, pegue o id correto e tente de novo com marca e modelo.' };
+    }
+    const resolvedCarId = String(car.id);
     log.debug('carro carregado', { action: 'enviar_midia_carro', car });
 
     const carName = [car.brand, car.model].filter(Boolean).join(' ') || 'veículo';
@@ -900,7 +938,7 @@ async function executeTool(
       const { data: firstImage } = await supabase
         .from('car_images')
         .select('image_url')
-        .eq('car_id', carId)
+        .eq('car_id', resolvedCarId)
         .eq('user_id', userId)
         .order('sort_order', { ascending: true })
         .limit(1)
@@ -910,7 +948,7 @@ async function executeTool(
 
     // 3. Sem nada cadastrado — NÃO é erro técnico, é só ausência de mídia.
     if (!specsImageUrl && !videoUrl) {
-      log.info('veículo sem mídia cadastrada', { action: 'enviar_midia_carro', carId });
+      log.info('veículo sem mídia cadastrada', { action: 'enviar_midia_carro', carId: resolvedCarId });
       return { success: false, sem_midia: true, message: 'Este veículo não tem foto nem vídeo cadastrados (ausência de mídia, não é falha técnica).' };
     }
 
@@ -930,7 +968,7 @@ async function executeTool(
           await new Promise((r) => setTimeout(r, 1500));
         }
       } catch (e) {
-        log.error('erro ao enviar foto', { action: 'enviar_midia_carro', carId, error: e });
+        log.error('erro ao enviar foto', { action: 'enviar_midia_carro', carId: resolvedCarId, error: e });
       }
     }
 
@@ -945,7 +983,7 @@ async function executeTool(
           });
         }
       } catch (e) {
-        log.error('erro ao enviar vídeo', { action: 'enviar_midia_carro', carId, error: e });
+        log.error('erro ao enviar vídeo', { action: 'enviar_midia_carro', carId: resolvedCarId, error: e });
       }
     }
 
@@ -953,7 +991,7 @@ async function executeTool(
       return { success: false, error: 'Falha ao enviar as mídias' };
     }
 
-    log.info('mídia enviada', { action: 'enviar_midia_carro', carId, sent: sentItems });
+    log.info('mídia enviada', { action: 'enviar_midia_carro', carId: resolvedCarId, sent: sentItems });
     return {
       success: true,
       sent: sentItems,
@@ -1057,7 +1095,7 @@ async function executeTool(
         .from('leads').select('id').eq('user_id', userId).eq('phone', customerPhone).maybeSingle();
 
       if (readErr) {
-        console.error(`[qualificacao] FALHA leitura | conversa=${conversationId} phone=${maskPhone(customerPhone)} | erro=${JSON.stringify(readErr)}`);
+        log.error('falha ao ler lead (qualificação)', { action: 'save_lead_qualification', error: readErr });
         return { sucesso: false, error: 'Não consegui acessar o cadastro do cliente.' };
       }
 
@@ -1069,11 +1107,11 @@ async function executeTool(
           .select('id');
 
         const rows = updated?.length ?? 0;
-        console.log(`[qualificacao] UPDATE | lead=${existing.id} conversa=${conversationId} phone=${maskPhone(customerPhone)} | linhas=${rows} campos=${Object.keys(map).join(',')} | erro=${updErr ? JSON.stringify(updErr) : 'nenhum'}`);
-
         if (updErr || rows === 0) {
+          log.error('falha no update da qualificação', { action: 'save_lead_qualification', leadId: existing.id, linhas: rows, campos: Object.keys(map), error: updErr });
           return { sucesso: false, error: 'Não consegui salvar a qualificação do cliente.' };
         }
+        log.info('qualificação salva', { action: 'save_lead_qualification', leadId: existing.id, campos: Object.keys(map) });
         return { sucesso: true, campos: Object.keys(map), continuar: 'Dado salvo internamente. NÃO encerre o turno — comente brevemente e faça a PRÓXIMA pergunta (FORD/troca) ou siga o fluxo.' };
       }
 
@@ -1082,14 +1120,14 @@ async function executeTool(
         .insert({ user_id: userId, name: customerName ?? 'Cliente WhatsApp', phone: customerPhone, status: 'novo', ...map })
         .select('id').single();
 
-      console.log(`[qualificacao] INSERT | lead=${created?.id ?? 'null'} conversa=${conversationId} phone=${maskPhone(customerPhone)} | campos=${Object.keys(map).join(',')} | erro=${insErr ? JSON.stringify(insErr) : 'nenhum'}`);
-
       if (insErr || !created) {
+        log.error('falha no insert da qualificação', { action: 'save_lead_qualification', campos: Object.keys(map), error: insErr });
         return { sucesso: false, error: 'Não consegui salvar a qualificação do cliente.' };
       }
+      log.info('qualificação salva (lead criado)', { action: 'save_lead_qualification', leadId: created.id, campos: Object.keys(map) });
       return { sucesso: true, campos: Object.keys(map), lead_id: created.id, continuar: 'Dado salvo internamente. NÃO encerre o turno — comente brevemente e faça a PRÓXIMA pergunta (FORD/troca) ou siga o fluxo.' };
     } catch (e) {
-      console.error(`[qualificacao] EXCEÇÃO | conversa=${conversationId} phone=${maskPhone(customerPhone)} |`, e instanceof Error ? e.message : String(e));
+      log.error('exceção ao salvar qualificação', { action: 'save_lead_qualification', error: e });
       return { sucesso: false, error: 'Erro ao salvar a qualificação do cliente.' };
     }
   }
@@ -1112,7 +1150,7 @@ async function executeTool(
         .from('leads').select('id, trade_in_extra_info').eq('user_id', userId).eq('phone', customerPhone).maybeSingle();
 
       if (readErr) {
-        console.error(`[avaliacao_troca] FALHA leitura | conversa=${conversationId} phone=${maskPhone(customerPhone)} | erro=${JSON.stringify(readErr)}`);
+        log.error('falha ao ler lead (troca)', { action: 'save_trade_in_evaluation', error: readErr });
         return { sucesso: false, error: 'Não consegui acessar o cadastro do cliente.' };
       }
 
@@ -1130,12 +1168,12 @@ async function executeTool(
           .select('id');
 
         const rows = updated?.length ?? 0;
-        console.log(`[avaliacao_troca] UPDATE | lead=${existing.id} conversa=${conversationId} phone=${maskPhone(customerPhone)} | linhas=${rows} campos=${Object.keys(map).join(',')} | erro=${updErr ? JSON.stringify(updErr) : 'nenhum'}`);
-
         if (updErr || rows === 0) {
           // erro OU 0 linhas afetadas (RLS, id errado, coluna inexistente) = falha
+          log.error('falha no update da avaliação de troca', { action: 'save_trade_in_evaluation', leadId: existing.id, linhas: rows, campos: Object.keys(map), error: updErr });
           return { sucesso: false, error: 'Não consegui salvar os dados do carro de troca.' };
         }
+        log.info('avaliação de troca salva', { action: 'save_trade_in_evaluation', leadId: existing.id, campos: Object.keys(map) });
         return { sucesso: true, campos: Object.keys(map), continuar: 'Dado salvo internamente. NÃO encerre o turno — comente brevemente e faça a PRÓXIMA pergunta (FORD/troca) ou siga o fluxo.' };
       }
 
@@ -1145,14 +1183,14 @@ async function executeTool(
         .insert({ user_id: userId, name: customerName ?? 'Cliente WhatsApp', phone: customerPhone, status: 'novo', ...map })
         .select('id').single();
 
-      console.log(`[avaliacao_troca] INSERT | lead=${created?.id ?? 'null'} conversa=${conversationId} phone=${maskPhone(customerPhone)} | campos=${Object.keys(map).join(',')} | erro=${insErr ? JSON.stringify(insErr) : 'nenhum'}`);
-
       if (insErr || !created) {
+        log.error('falha no insert da avaliação de troca', { action: 'save_trade_in_evaluation', campos: Object.keys(map), error: insErr });
         return { sucesso: false, error: 'Não consegui salvar os dados do carro de troca.' };
       }
+      log.info('avaliação de troca salva (lead criado)', { action: 'save_trade_in_evaluation', leadId: created.id, campos: Object.keys(map) });
       return { sucesso: true, campos: Object.keys(map), lead_id: created.id, continuar: 'Dado salvo internamente. NÃO encerre o turno — comente brevemente e faça a PRÓXIMA pergunta (FORD/troca) ou siga o fluxo.' };
     } catch (e) {
-      console.error(`[avaliacao_troca] EXCEÇÃO | conversa=${conversationId} phone=${maskPhone(customerPhone)} |`, e instanceof Error ? e.message : String(e));
+      log.error('exceção ao salvar avaliação de troca', { action: 'save_trade_in_evaluation', error: e });
       return { sucesso: false, error: 'Erro ao salvar os dados do carro de troca.' };
     }
   }
@@ -1164,7 +1202,7 @@ async function executeTool(
 
 interface Faq { question: string; answer: string }
 
-function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null): string {
+function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger): string {
   const company = String(settings.company_name        ?? 'nossa concessionária');
   const address = String(settings.address             ?? 'não informado');
   const phone   = String(settings.phone_number        ?? 'não informado');
@@ -1197,7 +1235,7 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
     ? (settings.payment_methods as unknown[]).map((m) => String(m).trim()).filter(Boolean)
     : [];
   // Diagnóstico BUG 2: registra nos logs o que foi lido do banco e o que entrou no prompt.
-  console.log('[payment] payment_methods lido do banco:', JSON.stringify(settings.payment_methods ?? null), '→ usados no prompt:', JSON.stringify(paymentMethods));
+  log.debug('payment_methods do banco → prompt', { action: 'build_prompt', lido: settings.payment_methods ?? null, usados: paymentMethods });
   const paymentBlock = paymentMethods.length > 0
     ? `\n\n## Formas de pagamento aceitas pela loja\n\nFormas de pagamento aceitas pela loja: ${paymentMethods.join(', ')}.\n\nREGRA RÍGIDA sobre pagamento — siga ao pé da letra:\n- Responda SOMENTE com base na lista acima. Considere essa lista completa e exata.\n- NUNCA invente formas de pagamento, prazos (ex.: "18x", "48x", "em até 60x"), descontos, taxas ou condições especiais que não estejam EXPLICITAMENTE escritos na lista.\n- Se a lista NÃO tem "cartão de crédito" ou "cartão de débito", você NÃO pode mencionar cartão. Se não tem "consórcio", não cite consórcio. O mesmo vale para qualquer forma fora da lista.\n- Se um item está na lista sem prazo (ex.: "Financiamento bancário"), você NÃO pode dizer "em 48x" nem inventar número de parcelas — diga apenas que a loja trabalha com essa forma e que prazos/condições são confirmados pela equipe.\n- Se o cliente perguntar por algo que não está na lista, não afirme que a loja aceita — diga que vai confirmar com o gerente.`
     : '';
@@ -1343,7 +1381,7 @@ Seu objetivo é entender o que o cliente procura, mostrar as opções que a conc
 ## Ferramentas que você pode usar
 
 - **consultar_estoque** — quando o cliente perguntar sobre veículos (carros ou motos). O estoque pode conter carros e motos — diferencie corretamente ao apresentar cada veículo. Sempre baseie suas respostas no que essa ferramenta retornar.
-- **enviar_midia_carro** — envia a foto + o vídeo do veículo. **Antes de OFERECER foto/vídeo, confira no consultar_estoque se o carro tem fotos (campo \`fotos\` > 0); só prometa mídia se houver — nunca diga "já te mando a foto" se não tiver.** Use o id EXATO do carro (nunca invente, nunca ID parcial). Retornos:
+- **enviar_midia_carro** — envia a foto + o vídeo do veículo. **Antes de OFERECER foto/vídeo, confira no consultar_estoque se o carro tem fotos (campo \`fotos\` > 0); só prometa mídia se houver — nunca diga "já te mando a foto" se não tiver.** **SEQUÊNCIA OBRIGATÓRIA: consultar_estoque primeiro, NESTA resposta, e use o id retornado agora — você NÃO tem mais os ids de mensagens antigas.** Envie sempre marca e modelo junto do car_id. Se o cliente pedir foto sem estar claro de qual carro, pergunte qual carro antes. Retornos:
   - \`success: true\` → mídia enviada (diga que mandou).
   - \`success: false\` com \`sem_midia: true\` → o carro NÃO tem mídia cadastrada. **Isto NÃO é erro.** NUNCA fale em "problema", "erro" ou "não consegui carregar", e NUNCA prometa enviar. Dê os detalhes e CONTINUE qualificando (NÃO pule pra visita — veja "Regra de sequência"): "Esse ainda tá sem foto no sistema, mas te passo todos os detalhes aqui: [detalhes]. Deixa eu te conhecer melhor pra achar o ideal pra você — esse seria mais pra você ou pra família?"
   - \`success: false\` com \`error\` (falha técnica REAL de envio) → avise que teve um probleminha pra carregar e que já resolve, e acione chamar_atendente nos bastidores.
@@ -1390,7 +1428,7 @@ ${financingBlock}
 - **Antes de agendar, confirme os detalhes com o cliente** e respeite o horário de funcionamento da concessionária. Nunca agende fora do horário de funcionamento.
 - **Nunca confirme um agendamento sem que a ferramenta agendar_visita retorne \`sucesso: true\`.** Se a ferramenta retornar \`sucesso: false\` ou um campo \`error\`, NUNCA diga "marquei sua visita" — diga ao cliente que vai confirmar o horário com o gerente e já retorna, então chame chamar_atendente (handoff silencioso).
 - **Nunca prometa nada em nome da concessionária** que você não tenha como garantir.
-- **O car_id do enviar_midia_carro DEVE ser exatamente um id do consultar_estoque — nunca invente nem use ID parcial.**
+- **O car_id do enviar_midia_carro DEVE ser exatamente um id retornado por um consultar_estoque chamado NESTA resposta — nunca invente, nunca use ID parcial, nunca reaproveite id "de memória" de turnos antigos (eles não existem mais no seu contexto).** Cliente pediu foto e você não tem id fresco? consultar_estoque primeiro (filtre pela marca/modelo do carro em questão). Não sabe de qual carro é a foto? Pergunte.
 
 ## Quando acionar a equipe nos bastidores (chamar_atendente)
 
@@ -1426,6 +1464,30 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
 
 // ─── chamada à API do Claude ──────────────────────────────────────────────────
 
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
+
+// Breakpoint de cache no fim do histórico: o prefixo da conversa é reaproveitado
+// entre turnos e entre iterações do loop de tools (leitura ≈10% do preço; escrita 1,25×).
+// Não muta o array original — retries e o loop reusam `messages` sem marcadores acumulados.
+// Conversas curtas (< mínimo cacheável do modelo) simplesmente não cacheiam, sem erro.
+function withHistoryCacheBreakpoint(
+  messages: Array<{ role: 'user' | 'assistant'; content: string | unknown[] }>,
+): Array<{ role: 'user' | 'assistant'; content: string | unknown[] }> {
+  if (!messages.length) return messages;
+  return messages.map((m, i) => {
+    if (i !== messages.length - 1) return m;
+    if (typeof m.content === 'string') {
+      if (!m.content) return m; // bloco de texto vazio é rejeitado pela API
+      return { role: m.role, content: [{ type: 'text', text: m.content, cache_control: { type: 'ephemeral' } }] };
+    }
+    if (!m.content.length) return m;
+    const blocks = m.content.map((b, j, arr) =>
+      j === arr.length - 1 ? { ...(b as Record<string, unknown>), cache_control: { type: 'ephemeral' } } : b
+    );
+    return { role: m.role, content: blocks };
+  });
+}
+
 async function callClaude(
   systemPrompt: string,
   messages: Array<{ role: 'user' | 'assistant'; content: string | unknown[] }>,
@@ -1454,12 +1516,12 @@ async function callClaude(
         'anthropic-beta': 'prompt-caching-2024-07-31',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: CLAUDE_MODEL,
         max_tokens: 1024,
         system: [
           { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
         ],
-        messages,
+        messages: withHistoryCacheBreakpoint(messages),
         tools: TOOLS.map((t, i) =>
           i === TOOLS.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t
         ),
@@ -1524,7 +1586,7 @@ async function callClaude(
 
 // ─── serve ────────────────────────────────────────────────────────────────────
 
-serve((req) => withRequest(req, 'process-conversation', async (base) => {
+serve((req) => withRequest(req, 'process-conversation', async (base, requestId) => {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 });
   }
@@ -1705,6 +1767,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
     (settings ?? {}) as Record<string, unknown>,
     faqRows ?? [],
     customerName,
+    log,
   );
 
   // ── 6. Monta histórico para o Claude ──────────────────────────────────────
@@ -1740,6 +1803,25 @@ serve((req) => withRequest(req, 'process-conversation', async (base) => {
         contentTypes: response.content.map((c) => c.type),
       });
       log.debug('preview da resposta', { action: 'claude_loop', iteration, preview: response.content.slice(0, 2) });
+
+      // Telemetria persistida: 1 linha por chamada ao Claude (custo por conversa/conta).
+      // Falha aqui NUNCA bloqueia o fluxo (a tabela pode nem existir — migração 030).
+      try {
+        const u = response.usage ?? {};
+        const { error: usageErr } = await supabase.from('llm_usage').insert({
+          user_id: userId,
+          conversation_id: conversationId,
+          request_id: requestId,
+          model: CLAUDE_MODEL,
+          input_tokens: u.input_tokens ?? 0,
+          output_tokens: u.output_tokens ?? 0,
+          cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
+          cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
+        });
+        if (usageErr) log.warn('falha ao gravar llm_usage', { action: 'llm_usage', error: usageErr.message });
+      } catch (e) {
+        log.warn('falha ao gravar llm_usage', { action: 'llm_usage', error: e });
+      }
 
       if (response.stop_reason === 'max_tokens') {
         log.warn('resposta truncada (max_tokens)', { action: 'claude_loop', iteration });
