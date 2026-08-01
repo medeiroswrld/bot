@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
     X, Gauge, Tag, CheckCircle2, ShoppingCart, Package, Camera,

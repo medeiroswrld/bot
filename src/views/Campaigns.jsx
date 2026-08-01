@@ -29,7 +29,7 @@ const StatusBadge = ({ status }) => {
 // ─── Wizard ───────────────────────────────────────────────────────────────────
 const CampaignWizard = ({ onClose }) => {
     const navigate = useNavigate();
-    const { messageTemplates, leads, vehicleInterests, createCampaign, sendCampaign, addToast } = useAppContext();
+    const { messageTemplates, leads, vehicleInterests, createCampaign, sendCampaign } = useAppContext();
     const approvedTemplates = useMemo(() => (messageTemplates || []).filter(t => t.status === 'approved'), [messageTemplates]);
 
     const [step, setStep] = useState(1);

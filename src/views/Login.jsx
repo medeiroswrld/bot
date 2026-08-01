@@ -53,7 +53,7 @@ const Login = () => {
         setIsLoading(false);
       }
       // Se sucesso, o onAuthStateChange no context redireciona automaticamente
-    } catch (err) {
+    } catch {
       setError('Ocorreu um erro inesperado. Tente novamente.');
       setIsLoading(false);
     }

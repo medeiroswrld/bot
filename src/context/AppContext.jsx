@@ -516,7 +516,7 @@ export const AppProvider = ({ children }) => {
 
   // ========== Auth Actions (Supabase) ==========
   const login = async (email, password) => {
-    const { data: authData, error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
@@ -1456,7 +1456,7 @@ export const AppProvider = ({ children }) => {
 
     const channel = supabase
       .channel(`realtime-crm-${userId}-${Math.random().toString(36).slice(2)}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leads', filter: `user_id=eq.${userId}` }, (payload) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'leads', filter: `user_id=eq.${userId}` }, () => {
         // Re-busca para obter o join com cars
         fetchLeads(userId);
       })
