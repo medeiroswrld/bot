@@ -359,7 +359,7 @@ export default function Conversations() {
     // Limit agressivo: apenas as colunas necessárias e no máximo 3× o nº de conversas
     const { data } = await supabaseTyped
       .from('messages')
-      .select('id, conversation_id, role, content, wa_message_id, created_at')
+      .select('id, conversation_id, role, content, wa_message_id, transcribed_from_audio, created_at')
       .in('conversation_id', convIds)
       .order('created_at', { ascending: false })
       .limit(Math.max(convIds.length * 3, 60));
@@ -626,6 +626,7 @@ export default function Conversations() {
       role: 'agent',
       content: text,
       wa_message_id: null,
+      transcribed_from_audio: false,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticMsg]);

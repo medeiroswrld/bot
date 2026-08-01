@@ -618,6 +618,7 @@ export interface Database {
           role: 'customer' | 'bot' | 'agent'
           content: string
           wa_message_id: string | null
+          transcribed_from_audio: boolean | null
           created_at: string
         }
         Insert: {
@@ -626,6 +627,7 @@ export interface Database {
           role: 'customer' | 'bot' | 'agent'
           content: string
           wa_message_id?: string | null
+          transcribed_from_audio?: boolean | null
           created_at?: string
         }
         Update: {
