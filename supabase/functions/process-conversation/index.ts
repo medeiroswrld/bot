@@ -1466,6 +1466,12 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
 
 const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
+// Provedor de LLM: coluna do tenant (company_settings.llm_provider) > env var >
+// 'anthropic'. O caminho do Claude é o default e permanece inalterado — a flag
+// é um SWITCH de teste, não uma migração.
+const LLM_PROVIDER_DEFAULT = (Deno.env.get('LLM_PROVIDER') ?? 'anthropic').toLowerCase();
+const OPENAI_MODEL = 'gpt-4o-mini';
+
 // Breakpoint de cache no fim do histórico: o prefixo da conversa é reaproveitado
 // entre turnos e entre iterações do loop de tools (leitura ≈10% do preço; escrita 1,25×).
 // Não muta o array original — retries e o loop reusam `messages` sem marcadores acumulados.
@@ -1582,6 +1588,178 @@ async function callClaude(
     outputTokens: u.output_tokens ?? 0,
   });
   return data;
+}
+
+// ─── OpenAI (teste A/B por tenant) ────────────────────────────────────────────
+// O formato interno do bot é SEMPRE o da Anthropic (blocos de conteúdo). As
+// funções abaixo traduzem só na hora do request/response — o loop, a execução
+// de tools e o acúmulo de mensagens não sabem que existe outro provedor.
+
+// Tools: {name, description, input_schema} → {type:"function", function:{...parameters}}
+function toolsToOpenAI() {
+  return TOOLS.map((t) => ({
+    type: 'function',
+    function: { name: t.name, description: t.description, parameters: t.input_schema },
+  }));
+}
+
+function messagesToOpenAI(
+  systemPrompt: string,
+  messages: Array<{ role: 'user' | 'assistant'; content: string | unknown[] }>,
+) {
+  const out: Record<string, unknown>[] = [{ role: 'system', content: systemPrompt }];
+  for (const m of messages) {
+    if (typeof m.content === 'string') {
+      out.push({ role: m.role, content: m.content });
+      continue;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const blocks = (m.content ?? []) as Record<string, any>[];
+
+    if (m.role === 'assistant') {
+      const text = blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n');
+      const uses = blocks.filter((b) => b.type === 'tool_use');
+      const msg: Record<string, unknown> = { role: 'assistant', content: text || null };
+      if (uses.length) {
+        msg.tool_calls = uses.map((b) => ({
+          id: b.id,
+          type: 'function',
+          // arguments é STRING JSON no OpenAI (na Anthropic é objeto)
+          function: { name: b.name, arguments: JSON.stringify(b.input ?? {}) },
+        }));
+      }
+      out.push(msg);
+    } else {
+      // A Anthropic manda TODOS os tool_results num lote dentro de um role:"user";
+      // o OpenAI exige UMA mensagem role:"tool" por resultado. Desmembra aqui.
+      for (const b of blocks) {
+        if (b.type === 'tool_result') {
+          out.push({ role: 'tool', tool_call_id: b.tool_use_id, content: String(b.content ?? '') });
+        } else if (b.type === 'text') {
+          out.push({ role: 'user', content: b.text ?? '' });
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// Resposta do OpenAI → shape ClaudeResponse (o loop não muda)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function openAIToClaudeResponse(data: Record<string, any>): ClaudeResponse {
+  const choice = data.choices?.[0] ?? {};
+  const msg = choice.message ?? {};
+  const content: ClaudeContentBlock[] = [];
+  if (msg.content) content.push({ type: 'text', text: String(msg.content) });
+  for (const tc of (msg.tool_calls ?? [])) {
+    let input: Record<string, unknown> = {};
+    try { input = JSON.parse(tc.function?.arguments || '{}'); } catch { /* input fica {} */ }
+    content.push({ type: 'tool_use', id: tc.id, name: tc.function?.name, input });
+  }
+  const STOP: Record<string, string> = {
+    stop: 'end_turn', tool_calls: 'tool_use', length: 'max_tokens', content_filter: 'refusal',
+  };
+  const u = data.usage ?? {};
+  return {
+    id: String(data.id ?? ''),
+    type: 'message',
+    stop_reason: STOP[String(choice.finish_reason)] ?? 'end_turn',
+    content,
+    usage: {                                  // normalizado: llm_usage não muda
+      input_tokens: u.prompt_tokens ?? 0,
+      output_tokens: u.completion_tokens ?? 0,
+      cache_creation_input_tokens: 0,         // OpenAI não cobra escrita de cache
+      cache_read_input_tokens: u.prompt_tokens_details?.cached_tokens ?? 0,
+    },
+  };
+}
+
+async function callOpenAI(
+  systemPrompt: string,
+  messages: Array<{ role: 'user' | 'assistant'; content: string | unknown[] }>,
+  log: Logger,
+  attempt = 0,
+): Promise<ClaudeResponse> {
+  const apiKey = Deno.env.get('OPENAI_API_KEY') ?? '';
+  const BACKOFF_MS = [2000, 5000, 10000];
+  const MAX_RETRIES = BACKOFF_MS.length;
+  const TIMEOUT_MS = 30000;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        max_tokens: 1024,
+        messages: messagesToOpenAI(systemPrompt, messages),
+        tools: toolsToOpenAI(),
+        tool_choice: 'auto',
+        // Sem cache_control: o OpenAI cacheia automaticamente (prompts > 1024 tokens).
+      }),
+      signal: controller.signal,
+    });
+  } catch (netErr) {
+    if (attempt < MAX_RETRIES) {
+      const delay = BACKOFF_MS[attempt];
+      const isTimeout = (netErr as Error)?.name === 'AbortError';
+      log.warn('retry da chamada ao OpenAI', {
+        action: 'openai_call',
+        reason: isTimeout ? `timeout ${TIMEOUT_MS}ms` : 'erro de rede',
+        attempt: attempt + 1, maxRetries: MAX_RETRIES, delayMs: delay,
+      });
+      await new Promise((r) => setTimeout(r, delay));
+      return callOpenAI(systemPrompt, messages, log, attempt + 1);
+    }
+    throw netErr;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  if (!res.ok) {
+    const body = await res.text();
+    const retriable = [408, 409, 429, 500, 502, 503, 504].includes(res.status);
+    if (retriable && attempt < MAX_RETRIES) {
+      const delay = BACKOFF_MS[attempt];
+      log.warn('retry da chamada ao OpenAI', {
+        action: 'openai_call', status: res.status,
+        attempt: attempt + 1, maxRetries: MAX_RETRIES, delayMs: delay,
+      });
+      await new Promise((r) => setTimeout(r, delay));
+      return callOpenAI(systemPrompt, messages, log, attempt + 1);
+    }
+    log.error('OpenAI API falhou após retries', {
+      action: 'openai_call', status: res.status, retries: attempt, body: body.slice(0, 300),
+    });
+    throw new Error(`OpenAI API error ${res.status}: ${body}`);
+  }
+
+  const raw = await res.json();
+  const data = openAIToClaudeResponse(raw);
+  const u = data.usage ?? {};
+  log.info('cache/usage da chamada', {
+    action: 'openai_call',
+    cacheCreated: 0,
+    cacheRead: u.cache_read_input_tokens ?? 0,
+    inputTokens: u.input_tokens ?? 0,
+    outputTokens: u.output_tokens ?? 0,
+  });
+  return data;
+}
+
+// Despachante: única porta de entrada do loop.
+function callLLM(
+  provider: string,
+  systemPrompt: string,
+  messages: Array<{ role: 'user' | 'assistant'; content: string | unknown[] }>,
+  log: Logger,
+): Promise<ClaudeResponse> {
+  return provider === 'openai'
+    ? callOpenAI(systemPrompt, messages, log)
+    : callClaude(systemPrompt, messages, log);   // ← caminho atual, intocado
 }
 
 // ─── serve ────────────────────────────────────────────────────────────────────
@@ -1789,6 +1967,12 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
 
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
   const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
+  // Provedor deste tenant: coluna (migration 032) > env var > anthropic.
+  // O select acima é '*', então llm_provider vem junto assim que a coluna existir;
+  // enquanto não existir, o ?? cai no default e nada muda.
+  const provider  = String(settings?.llm_provider ?? LLM_PROVIDER_DEFAULT).toLowerCase();
+  const modelName = provider === 'openai' ? OPENAI_MODEL : CLAUDE_MODEL;
+  log.info('provedor de LLM', { action: 'llm_provider', provider, model: modelName });
   const waToken = await resolveWhatsAppToken(supabase, userId);
   const ctx = { userId, conversationId, customerPhone, customerName, phoneNumberId, token: waToken, log };
   let finalText = '';
@@ -1799,7 +1983,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
 
   try {
     for (let iteration = 0; iteration < 10; iteration++) {
-      const response = await callClaude(systemPrompt, claudeMessages, log);
+      const response = await callLLM(provider, systemPrompt, claudeMessages, log);
 
       log.info('resposta do Claude', {
         action: 'claude_loop',
@@ -1817,7 +2001,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
           user_id: userId,
           conversation_id: conversationId,
           request_id: requestId,
-          model: CLAUDE_MODEL,
+          model: modelName,
           input_tokens: u.input_tokens ?? 0,
           output_tokens: u.output_tokens ?? 0,
           cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
