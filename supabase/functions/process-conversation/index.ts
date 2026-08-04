@@ -1739,13 +1739,18 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     return new Response('OK', { status: 200 });
   }
 
-  // ── 4. Carrega as 40 mensagens mais recentes em ordem cronológica ──────────
+  // ── 4. Carrega as N mensagens mais recentes em ordem cronológica ───────────
+  //    Janela de CONTEXTO enviada ao modelo — não afeta o histórico salvo:
+  //    todas as mensagens continuam no banco (tabela messages) e na tela do CRM.
+  //    20 = ~10 trocas. Trade-off: menos tokens por chamada, porém conversas
+  //    longas perdem o começo (nome, FORD, carro discutido no início).
+  const HISTORY_LIMIT = 20;
   const { data: rawMessages } = await supabase
     .from('messages')
     .select('role, content')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })
-    .limit(40);
+    .limit(HISTORY_LIMIT);
 
   const orderedMessages = (rawMessages ?? []).reverse();
 
