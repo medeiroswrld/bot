@@ -116,7 +116,7 @@ const TOOLS = [
   {
     name: 'consultar_estoque',
     description:
-      'Busca veículos disponíveis no estoque da concessionária — carros e motos. Use sempre que o cliente perguntar sobre veículos, preços, disponibilidade ou características. Aceita múltiplos filtros opcionais combinados — use para buscar SIMILARES quando o modelo exato não existir (ex.: mesma marca, faixa de preço e ano próximos). Sem nenhum filtro, retorna todo o estoque disponível. O campo "observacoes" traz o que a LOJA escreveu sobre aquele veículo específico (opcionais, estado, único dono, detalhes de negociação). Quando vier preenchido, é a informação mais valiosa que você tem sobre o carro: use ao apresentá-lo e ao responder perguntas sobre ele. Nunca ignore.',
+      'Busca veículos disponíveis no estoque da concessionária — carros e motos. Use sempre que o cliente perguntar sobre veículos, preços, disponibilidade ou características. Aceita múltiplos filtros opcionais combinados — use para buscar SIMILARES quando o modelo exato não existir (ex.: mesma marca, faixa de preço e ano próximos). Sem nenhum filtro, retorna todo o estoque disponível. O campo "observacoes" traz o que a LOJA escreveu sobre aquele veículo específico (opcionais, estado, único dono, detalhes de negociação). Quando vier preenchido, é a informação mais valiosa que você tem sobre o carro: use ao apresentá-lo e ao responder perguntas sobre ele. Nunca ignore. ATENÇÃO ao conflito: se as observações contradisserem um campo estruturado (ex.: campo diz câmbio automático e as observações dizem manual), NÃO afirme nenhum dos dois nem os apresente juntos — cite o resto normalmente e diga que confirma esse detalhe específico com a loja.',
     input_schema: {
       type: 'object',
       properties: {
@@ -2071,10 +2071,13 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     + (coletados.length ? coletados.map(([k, v]) => `- ${k}: ${v}`).join('\n') : '- (nada coletado ainda)')
     + `\n\nAinda falta descobrir: ${faltantes.length ? faltantes.join(', ') : 'nada'}.`
     + (dadosTroca ? `\nTroca: ${dadosTroca} de 3 dados básicos já registrados.` : '')
-    + '\n\nREGRA: enquanto faltarem 2 ou mais itens acima, não OFEREÇA visita por '
-    + 'iniciativa própria — continue qualificando, uma pergunta por vez. Mas se o '
-    + 'CLIENTE pedir pra visitar, atenda na hora e com cortesia: ofereça horário real '
-    + '(ver_horarios_disponiveis) e agende. Nunca faça o cliente esperar pra qualificar.';
+    + '\n\nREGRA: enquanto faltarem 2 ou mais itens acima, não puxe VOCÊ o assunto '
+    + 'pagamento/financiamento nem ofereça visita por iniciativa própria — continue '
+    + 'descobrindo o perfil, uma pergunta por vez. A ocupação é a que mais fica '
+    + 'esquecida: pergunte com jeito, encaixada no papo. Mas se o CLIENTE puxar '
+    + 'pagamento ou pedir pra visitar, atenda na hora e com cortesia (visita: ofereça '
+    + 'horário real do ver_horarios_disponiveis e agende). Nunca faça o cliente '
+    + 'esperar pra você qualificar.';
 
   log.info('estado da qualificação', { action: 'build_prompt', coletados: coletados.length, faltantes, dadosTroca });
 
@@ -2238,13 +2241,17 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   //    cliente espera por um humano que nunca soube dele. Aqui o handoff é forçado.
   //    NÃO dispara quando request_schedule_check foi usado: aquele fluxo também diz
   //    "verificar com meu superior", mas quem responde é o cron, não um humano.
-  //    Qualquer "com (o/meu) gerente|superior|gerência|responsável" conta: o prompt
-  //    só manda citar essas palavras em situação de handoff real ("alinhar com meu
-  //    gerente", "fechar o melhor que conseguir com o gerente"). Falso positivo custa
-  //    uma conversa em pending que o atendente devolve ao bot; falso negativo custa
-  //    um cliente esperando pra sempre.
+  //    Dois padrões, ambos validados contra frases reais do bot:
+  //    (a) "com (o/meu) gerente|superior|gerência|responsável" — o prompt só manda
+  //        citar essas palavras em handoff real.
+  //    (b) "<alguém|equipe|especialista|...> ... entra em contato" — foi o que
+  //        escapou em 05/08: o Claude respondeu "em breve alguém da equipe entra em
+  //        contato" sem chamar a tool, e a conversa ficou em 'bot'. O sujeito humano
+  //        antes de "em contato" evita pegar "sou parte da equipe da loja".
+  //    Falso positivo custa uma conversa em pending que o atendente devolve ao bot;
+  //    falso negativo custa um cliente esperando pra sempre.
   const PROMESSA_HUMANO =
-    /\bcom\s+(o\s+|a\s+|meu\s+|minha\s+)?(gerente|superior|ger[êe]ncia|respons[áa]vel)\b/i;
+    /\bcom\s+(o\s+|a\s+|meu\s+|minha\s+)?(gerente|superior|ger[êe]ncia|respons[áa]vel)\b|(algu[ée]m|equipe|time|especialista|consultor|vendedor|atendente)[^.!?\n]{0,40}entra(r|rá|rão)?\s+em\s+contato/i;
   if (
     !toolsUsadas.has('chamar_atendente') &&
     !toolsUsadas.has('request_schedule_check') &&
