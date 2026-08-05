@@ -1542,6 +1542,19 @@ abaixo conflitar com elas, siga o que está aqui.
 7. Na pré-avaliação da troca, uma informação por vez: pergunte o modelo, espere a
    resposta, depois o ano, e assim por diante. Nunca junte km + tempo de uso + nota
    na mesma mensagem.
+8. VISITA É O ÚLTIMO PASSO. Antes de mencionar visita/agendamento você PRECISA ter:
+   (a) pelo menos 3 respostas do cliente sobre o perfil dele (para quem é o carro,
+   como usa, com o que trabalha) e (b) sondado a forma de pagamento.
+   Proibido escrever "podemos agendar uma visita", "que tal conhecer pessoalmente",
+   "quer marcar" antes disso. Consulte "Perfil já coletado" no fim deste prompt:
+   se faltarem 2 ou mais itens, NÃO fale em visita.
+9. Depois de mostrar um carro ou enviar foto, termine SEMPRE com uma pergunta de
+   qualificação — nunca com convite para visita.
+   ERRADO: "Se estiver interessado, podemos agendar uma visita. Que tal?"
+   CERTO:  "Esse seria mais pra você no dia a dia ou pra família?"
+10. Proibido "temos apenas", "só temos", "infelizmente", "estoque enxuto". Se o
+    consultar_estoque voltou 1 carro porque você filtrou por modelo, chame de novo
+    SEM filtro antes de responder — a loja quase sempre tem mais opções.
 
 `;
 
@@ -2025,13 +2038,43 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   const modelName = provider === 'openai' ? OPENAI_MODEL : CLAUDE_MODEL;
   log.info('provedor de LLM', { action: 'llm_provider', provider, model: modelName });
 
+  // Estado da qualificação lido do LEAD (não do histórico). Duas funções:
+  //   1. o bot para de reperguntar o que já foi respondido (a janela de contexto
+  //      é de 20 mensagens e o começo da conversa sai dela);
+  //   2. o modelo passa a ver, explicitamente, o que ainda falta antes da visita —
+  //      muito mais eficaz que a regra em prosa, principalmente no gpt-4o-mini.
+  const { data: leadRow } = await supabase
+    .from('leads')
+    .select('family_info, occupation, recreation_info, financial_info, trade_in_model, trade_in_year, trade_in_km')
+    .eq('user_id', userId)
+    .eq('phone', customerPhone)
+    .maybeSingle();
+
+  const perfil: Array<[string, unknown]> = [
+    ['família',   leadRow?.family_info],
+    ['ocupação',  leadRow?.occupation],
+    ['uso/lazer', leadRow?.recreation_info],
+    ['pagamento', leadRow?.financial_info],
+  ];
+  const coletados = perfil.filter(([, v]) => v);
+  const faltantes = perfil.filter(([, v]) => !v).map(([k]) => k);
+  const dadosTroca = [leadRow?.trade_in_model, leadRow?.trade_in_year, leadRow?.trade_in_km].filter(Boolean).length;
+
+  const leadBlock = '\n\n## Perfil já coletado deste cliente (NÃO pergunte de novo)\n\n'
+    + (coletados.length ? coletados.map(([k, v]) => `- ${k}: ${v}`).join('\n') : '- (nada coletado ainda)')
+    + `\n\nAinda falta descobrir: ${faltantes.length ? faltantes.join(', ') : 'nada'}.`
+    + (dadosTroca ? `\nTroca: ${dadosTroca} de 3 dados básicos já registrados.` : '')
+    + '\n\nREGRA: enquanto faltarem 2 ou mais itens acima, NÃO ofereça nem mencione agendar visita — continue qualificando, uma pergunta por vez.';
+
+  log.info('estado da qualificação', { action: 'build_prompt', coletados: coletados.length, faltantes, dadosTroca });
+
   // Prompt base (idêntico pros dois provedores) + prefixo de regras só no OpenAI.
   const systemPrompt = (provider === 'openai' ? OPENAI_RULES_PREFIX : '') + buildSystemPrompt(
     (settings ?? {}) as Record<string, unknown>,
     faqRows ?? [],
     customerName,
     log,
-  );
+  ) + leadBlock;
 
   // ── 6. Monta histórico para o modelo ──────────────────────────────────────
   //    stripMediaUrls: tira a URL da mídia (o número do arquivo virava "car_id"
