@@ -62,7 +62,19 @@
 .sidebar-nav {
   flex: 1;
   padding: 0 8px;
-  overflow: hidden;
+  /* 'overflow: hidden' aqui CORTAVA os últimos itens quando a lista passava da
+     altura da tela (era o que comia o "Configurações"). Com auto + min-height:0
+     a lista rola em vez de sumir, em qualquer altura de janela. O overflow-x
+     segue escondido pra não vazar durante a expansão da barra no hover. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  scrollbar-width: thin;
+}
+.sidebar-nav::-webkit-scrollbar { width: 4px; }
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: var(--sidebar-hover-bg);
+  border-radius: 2px;
 }
 .sidebar-nav ul {
   display: flex;
@@ -254,6 +266,40 @@
 /* ══════════════════════════════════════════
    VIEW CONTENT
 ══════════════════════════════════════════ */
+/* ══════════════════════════════════════════
+   ABAS DE GRUPO (Veículos, Clientes, Marketing)
+   Alinhadas com o padding lateral do .view-content pra ficarem
+   na mesma coluna do título da página.
+══════════════════════════════════════════ */
+.page-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 32px;
+  margin-top: 18px;
+  margin-bottom: -10px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.page-tabs::-webkit-scrollbar { display: none; }
+.page-tab {
+  padding: 9px 16px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.page-tab:hover { color: var(--text-primary); }
+.page-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
 .view-content {
   padding: 28px 32px;
   max-width: 1400px;

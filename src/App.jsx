@@ -2,8 +2,8 @@ import { useState, lazy, Suspense } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, CarFront, Users, Calendar, Settings,
-  Bell, LogOut, ShoppingCart, Loader2, MessageCircle, Bot,
-  Sun, Moon, Bookmark, FileText, Megaphone,
+  Bell, LogOut, Loader2, MessageCircle, Bot,
+  Sun, Moon, Megaphone,
 } from 'lucide-react';
 import './App.css';
 
@@ -25,19 +25,40 @@ const CampaignDetails = lazy(() => import('./views/CampaignDetails.jsx'));
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
+// Telas do mesmo assunto viram ABAS dentro de um item só da barra lateral.
+// `path` é pra onde o item leva; `tabs` (quando existe) é o que aparece no topo
+// da página. De 11 itens pra 8 — e a barra deixa de estourar a altura da tela.
 const NAV_ITEMS = [
-  { name: 'Início',        icon: <LayoutDashboard size={18} />, path: '/' },
-  { name: 'Estoque',       icon: <CarFront size={18} />,        path: '/estoque' },
-  { name: 'Vendidos',      icon: <ShoppingCart size={18} />,    path: '/vendidos' },
-  { name: 'Leads',         icon: <Users size={18} />,           path: '/leads' },
-  { name: 'Agenda',        icon: <Calendar size={18} />,        path: '/agenda' },
-  { name: 'Conversas',     icon: <MessageCircle size={18} />,   path: '/conversas' },
-  { name: 'Lista de Espera', icon: <Bookmark size={18} />,      path: '/lista-de-espera' },
-  { name: 'Templates',     icon: <FileText size={18} />,        path: '/templates' },
-  { name: 'Campanhas',     icon: <Megaphone size={18} />,       path: '/campanhas' },
-  { name: 'Assistente',    icon: <Bot size={18} />,             path: '/assistente' },
-  { name: 'Configurações', icon: <Settings size={18} />,        path: '/configuracoes' },
+  { name: 'Início',    icon: <LayoutDashboard size={18} />, path: '/' },
+  {
+    name: 'Veículos',  icon: <CarFront size={18} />,        path: '/estoque',
+    tabs: [
+      { name: 'Estoque',  path: '/estoque' },
+      { name: 'Vendidos', path: '/vendidos' },
+    ],
+  },
+  {
+    name: 'Clientes',  icon: <Users size={18} />,           path: '/leads',
+    tabs: [
+      { name: 'Leads',           path: '/leads' },
+      { name: 'Lista de Espera', path: '/lista-de-espera' },
+    ],
+  },
+  { name: 'Agenda',    icon: <Calendar size={18} />,        path: '/agenda' },
+  { name: 'Conversas', icon: <MessageCircle size={18} />,   path: '/conversas' },
+  {
+    name: 'Marketing', icon: <Megaphone size={18} />,       path: '/campanhas',
+    tabs: [
+      { name: 'Campanhas', path: '/campanhas' },
+      { name: 'Templates', path: '/templates' },
+    ],
+  },
+  { name: 'Assistente',    icon: <Bot size={18} />,      path: '/assistente' },
+  { name: 'Configurações', icon: <Settings size={18} />, path: '/configuracoes' },
 ];
+
+// Todos os caminhos que um item cobre (o próprio + os das abas).
+const itemPaths = (item) => (item.tabs ? item.tabs.map((t) => t.path) : [item.path]);
 
 const Sidebar = () => {
   const location = useLocation();
@@ -54,8 +75,11 @@ const Sidebar = () => {
     localStorage.setItem('amply-theme', next ? 'dark' : 'light');
   };
 
-  const isActive = (path) =>
-    path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
+  // Item de grupo fica aceso quando QUALQUER uma das suas abas está aberta.
+  const isActive = (item) =>
+    itemPaths(item).some((p) =>
+      p === '/' ? location.pathname === '/' : location.pathname.startsWith(p),
+    );
 
   return (
     <aside className="sidebar">
@@ -69,12 +93,13 @@ const Sidebar = () => {
       <nav className="sidebar-nav">
         <ul>
           {NAV_ITEMS.map((item) => {
-            const showBadge = item.path === '/lista-de-espera' && matchedCount > 0;
+            // O aviso da lista de espera agora vive no grupo que a contém.
+            const showBadge = itemPaths(item).includes('/lista-de-espera') && matchedCount > 0;
             return (
               <li key={item.name}>
                 <Link
                   to={item.path}
-                  className={`sidebar-nav-item${isActive(item.path) ? ' active' : ''}`}
+                  className={`sidebar-nav-item${isActive(item) ? ' active' : ''}`}
                   data-tooltip={item.name}
                 >
                   <span className="sidebar-nav-icon" style={{ position: 'relative' }}>
@@ -167,6 +192,29 @@ const PageLoader = () => (
   </div>
 );
 
+// Abas do grupo atual. Fica fora do <Routes> de propósito: assim as telas
+// agrupadas não precisam saber que viraram abas — nenhuma view foi alterada.
+const PageTabs = () => {
+  const location = useLocation();
+  const grupo = NAV_ITEMS.find(
+    (i) => i.tabs && i.tabs.some((t) => location.pathname.startsWith(t.path)),
+  );
+  if (!grupo) return null;
+  return (
+    <div className="page-tabs">
+      {grupo.tabs.map((t) => (
+        <Link
+          key={t.path}
+          to={t.path}
+          className={`page-tab${location.pathname.startsWith(t.path) ? ' active' : ''}`}
+        >
+          {t.name}
+        </Link>
+      ))}
+    </div>
+  );
+};
+
 const AuthenticatedApp = () => {
   const location = useLocation();
   return (
@@ -174,6 +222,7 @@ const AuthenticatedApp = () => {
       <Sidebar />
       <main className="main-content">
         <Header />
+        <PageTabs />
         <Suspense fallback={<PageLoader />}>
           <div key={location.pathname} className="page-transition">
             <Routes location={location}>
