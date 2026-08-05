@@ -116,7 +116,7 @@ const TOOLS = [
   {
     name: 'consultar_estoque',
     description:
-      'Busca veículos disponíveis no estoque da concessionária — carros e motos. Use sempre que o cliente perguntar sobre veículos, preços, disponibilidade ou características. Aceita múltiplos filtros opcionais combinados — use para buscar SIMILARES quando o modelo exato não existir (ex.: mesma marca, faixa de preço e ano próximos). Sem nenhum filtro, retorna todo o estoque disponível.',
+      'Busca veículos disponíveis no estoque da concessionária — carros e motos. Use sempre que o cliente perguntar sobre veículos, preços, disponibilidade ou características. Aceita múltiplos filtros opcionais combinados — use para buscar SIMILARES quando o modelo exato não existir (ex.: mesma marca, faixa de preço e ano próximos). Sem nenhum filtro, retorna todo o estoque disponível. O campo "observacoes" traz o que a LOJA escreveu sobre aquele veículo específico (opcionais, estado, único dono, detalhes de negociação). Quando vier preenchido, é a informação mais valiosa que você tem sobre o carro: use ao apresentá-lo e ao responder perguntas sobre ele. Nunca ignore.',
     input_schema: {
       type: 'object',
       properties: {
@@ -455,7 +455,7 @@ async function executeTool(
   if (name === 'consultar_estoque') {
     let query = supabase
       .from('cars')
-      .select('id, brand, model, version, year, price, mileage, transmission, fuel, color, vehicle_type, status, car_images(id)')
+      .select('id, brand, model, version, year, price, mileage, transmission, fuel, color, vehicle_type, status, description, car_images(id)')
       .eq('user_id', userId)
       .in('status', ['available', 'reserved'])
       .order('price', { ascending: true })
@@ -520,6 +520,9 @@ async function executeTool(
           km: c.mileage,
           cambio: c.transmission,
           combustivel: c.fuel,
+          // Observações que a loja escreveu sobre ESTE veículo (opcionais, estado,
+          // detalhes de negociação). É informação que só existe aqui — use.
+          observacoes: c.description || null,
           cor: c.color,
           tipo: (c.vehicle_type as string) === 'moto' ? 'moto' : 'carro',
           status: c.status === 'available' ? 'disponível' : 'reservado',

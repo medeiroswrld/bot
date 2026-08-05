@@ -586,7 +586,13 @@ input, select, textarea { font: inherit; color: inherit; }
   flex: 1;
   display: flex;
   flex-direction: column;
-  animation: pageFadeIn 0.22s ease-out forwards;
+  /* SEM 'forwards' de propósito: com ele, o transform do último keyframe fica
+     aplicado pra sempre, e um ancestral com transform vira o containing block
+     dos filhos 'position: fixed'. Era isso que fazia o modal de veículo abrir
+     lá embaixo (ancorado nesta div, que cresce com o estoque) em vez de
+     centralizado na tela. O estado final da animação é igual ao estilo base,
+     então nada muda visualmente. NÃO reintroduzir 'forwards' aqui. */
+  animation: pageFadeIn 0.22s ease-out;
 }
 
 /* ══════════════════════════════════════════
