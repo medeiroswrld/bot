@@ -453,13 +453,21 @@ async function executeTool(
   const { userId, conversationId, customerPhone, customerName, phoneNumberId, token, log } = ctx;
 
   if (name === 'consultar_estoque') {
+    // Teto de veículos por consulta. Existe pra não estourar o contexto numa loja
+    // com estoque grande — mas o TOTAL REAL vai junto na resposta (count exact),
+    // senão o bot anuncia o teto como se fosse o estoque inteiro ("temos 10
+    // veículos" numa loja com 16, que foi o que aconteceu em 05/08).
+    const LIMITE_ESTOQUE = 20;
     let query = supabase
       .from('cars')
-      .select('id, brand, model, version, year, price, mileage, transmission, fuel, color, vehicle_type, status, description, car_images(id)')
+      .select(
+        'id, brand, model, version, year, price, mileage, transmission, fuel, color, vehicle_type, status, description, car_images(id)',
+        { count: 'exact' },
+      )
       .eq('user_id', userId)
       .in('status', ['available', 'reserved'])
       .order('price', { ascending: true })
-      .limit(10);
+      .limit(LIMITE_ESTOQUE);
 
     if (input.marca)       query = query.ilike('brand', `%${input.marca}%`);
     if (input.modelo)      query = query.ilike('model', `%${input.modelo}%`);
@@ -473,12 +481,16 @@ async function executeTool(
     // 'categoria' (sedan/hatch/SUV/picape) não tem coluna no schema — aceito como intenção,
     // o filtro real é por marca/preço/ano. Ignorado na query para não quebrar.
 
-    const { data, error } = await query;
+    const { data, error, count } = await query;
     if (error) {
       log.error('falha ao buscar estoque', { action: 'consultar_estoque', error });
       return { erro: 'Falha ao buscar estoque' };
     }
-    log.info('estoque consultado', { action: 'consultar_estoque', filtros: input, total: data?.length ?? 0 });
+    const totalReal = count ?? data?.length ?? 0;
+    log.info('estoque consultado', {
+      action: 'consultar_estoque', filtros: input,
+      totalReal, exibindo: data?.length ?? 0,
+    });
     if (!data?.length) return { mensagem: 'Nenhum veículo encontrado com esses critérios.' };
 
     // Cruza agendamentos FUTUROS por carro → urgência real ("já tem gente vindo ver").
@@ -507,7 +519,12 @@ async function executeTool(
     }
 
     return {
-      total: data.length,
+      // total = o que a loja REALMENTE tem nesse filtro; exibindo = o que veio aqui.
+      total: totalReal,
+      exibindo: data.length,
+      ...(totalReal > data.length
+        ? { aviso: `A loja tem ${totalReal} veículos nesse critério; estes são os ${data.length} mais baratos. Ao falar o número, use ${totalReal} — e ofereça filtrar (marca, faixa de preço, ano) pra mostrar os outros.` }
+        : {}),
       veiculos: data.map((c) => {
         const v = visitasPorCarro.get(String(c.id));
         return {
