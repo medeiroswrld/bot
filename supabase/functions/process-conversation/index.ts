@@ -1516,7 +1516,18 @@ const CLAUDE_MODEL = 'claude-sonnet-4-6';
 // 'anthropic'. O caminho do Claude é o default e permanece inalterado — a flag
 // é um SWITCH de teste, não uma migração.
 const LLM_PROVIDER_DEFAULT = (Deno.env.get('LLM_PROVIDER') ?? 'anthropic').toLowerCase();
-const OPENAI_MODEL = 'gpt-4o-mini';
+const OPENAI_MODEL = 'gpt-5-mini';
+
+// A família gpt-5 e a série "o" não aceitam max_tokens — usam max_completion_tokens.
+// Mandar o parâmetro errado dá 400 e o turno inteiro cai no fallback.
+// Nesses modelos o limite também cobre os tokens de raciocínio interno, que não
+// aparecem pro cliente: com 1024 o texto podia acabar truncado ou vazio, por isso
+// a folga. O gpt-4o-mini segue com max_tokens, então voltar atrás é só trocar a
+// constante acima.
+const OPENAI_USA_MAX_COMPLETION = /^(gpt-5|o[134])/.test(OPENAI_MODEL);
+const OPENAI_LIMITE_SAIDA: Record<string, number> = OPENAI_USA_MAX_COMPLETION
+  ? { max_completion_tokens: 4096 }
+  : { max_tokens: 1024 };
 
 // Prefixo aplicado SÓ quando o provedor é OpenAI. O prompt principal foi escrito
 // para o Claude (prosa longa, regras espalhadas) — os modelos da OpenAI, e o mini
@@ -1794,7 +1805,7 @@ async function callOpenAI(
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: OPENAI_MODEL,
-        max_tokens: 1024,
+        ...OPENAI_LIMITE_SAIDA,
         messages: messagesToOpenAI(systemPrompt, messages),
         tools: toolsToOpenAI(),
         tool_choice: 'auto',
