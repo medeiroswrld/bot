@@ -1470,7 +1470,7 @@ const CLAUDE_MODEL = 'claude-sonnet-4-6';
 // 'anthropic'. O caminho do Claude é o default e permanece inalterado — a flag
 // é um SWITCH de teste, não uma migração.
 const LLM_PROVIDER_DEFAULT = (Deno.env.get('LLM_PROVIDER') ?? 'anthropic').toLowerCase();
-const OPENAI_MODEL = 'gpt-4o-mini';
+const OPENAI_MODEL = 'gpt-4o';
 
 // Breakpoint de cache no fim do histórico: o prefixo da conversa é reaproveitado
 // entre turnos e entre iterações do loop de tools (leitura ≈10% do preço; escrita 1,25×).
