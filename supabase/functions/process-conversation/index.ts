@@ -324,6 +324,26 @@ const TOOLS = [
   },
 ]
 
+// ─── guardas contra id inventado ──────────────────────────────────────────────
+// Em 04/08 o modelo mandou o TIMESTAMP do nome do arquivo da foto como car_id
+// ("1785792383826", tirado da URL que estava no histórico) e o INSERT do
+// agendamento quebrou inteiro com 22P02. Aqui o id inválido é descartado em vez
+// de derrubar a operação — a visita é agendada, só sem vínculo com o carro.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function asUuidOrNull(v: unknown): string | null {
+  const s = String(v ?? '').trim();
+  return UUID_RE.test(s) ? s : null;
+}
+
+// O histórico guarda "[foto] https://.../1785792383826-8j1bx.jpg". Esse número
+// vira candidato a id na cabeça do modelo. O banco mantém a URL (auditoria);
+// o modelo recebe só o marcador.
+function stripMediaUrls(text: string): string {
+  return text
+    .replace(/^\[foto\]\s*https?:\/\/\S+/i, '[foto enviada ao cliente]')
+    .replace(/^\[v[íi]deo\]\s*https?:\/\/\S+/i, '[vídeo enviado ao cliente]');
+}
+
 // ─── execução das ferramentas ─────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -526,7 +546,12 @@ async function executeTool(
     const dateStr     = String(input.data    ?? '');
     const horario     = String(input.horario ?? '');
     const nomeCliente = String(input.nome_cliente ?? customerName ?? 'Cliente');
-    const carId       = input.car_id ? String(input.car_id) : null;
+    const carId       = asUuidOrNull(input.car_id);
+    if (input.car_id && !carId) {
+      log.warn('car_id inválido descartado (agendamento segue sem vínculo)', {
+        action: 'agendar_visita', carIdRecebido: String(input.car_id).slice(0, 40),
+      });
+    }
 
     log.info('params', { action: 'agendar_visita', data: dateStr, horario, nome: maskName(nomeCliente), carId });
 
@@ -679,7 +704,7 @@ async function executeTool(
 
   if (name === 'registrar_interesse') {
     const nome       = input.nome ? String(input.nome) : (customerName ?? 'Cliente WhatsApp');
-    const carId      = input.car_id ? String(input.car_id) : null;
+    const carId      = asUuidOrNull(input.car_id);
     const observacao = String(input.observacao ?? '');
 
     const { data: existing } = await supabase
@@ -738,7 +763,7 @@ async function executeTool(
   // Item 3: coleta dados de financiamento e marca lead como Proposta
   if (name === 'coletar_dados_financiamento') {
     const nomeCompleto = String(input.nome_completo ?? customerName ?? 'Cliente');
-    const veiculoId    = input.veiculo_id ? String(input.veiculo_id) : null;
+    const veiculoId    = asUuidOrNull(input.veiculo_id);
     const valorEntrada = Number(input.valor_entrada ?? 0);
     const prazoMeses   = Number(input.prazo_meses ?? 0);
 
@@ -1470,7 +1495,34 @@ const CLAUDE_MODEL = 'claude-sonnet-4-6';
 // 'anthropic'. O caminho do Claude é o default e permanece inalterado — a flag
 // é um SWITCH de teste, não uma migração.
 const LLM_PROVIDER_DEFAULT = (Deno.env.get('LLM_PROVIDER') ?? 'anthropic').toLowerCase();
-const OPENAI_MODEL = 'gpt-4o';
+const OPENAI_MODEL = 'gpt-4o-mini';
+
+// Prefixo aplicado SÓ quando o provedor é OpenAI. O prompt principal foi escrito
+// para o Claude (prosa longa, regras espalhadas) — os modelos da OpenAI, e o mini
+// em especial, obedecem muito melhor a regras curtas e imperativas no TOPO.
+// Cada item aqui corresponde a uma falha observada no teste de 04/08.
+const OPENAI_RULES_PREFIX = `## REGRAS OPERACIONAIS — PRIORIDADE MÁXIMA
+
+Estas regras vêm ANTES de qualquer outra instrução deste prompt. Se algo mais
+abaixo conflitar com elas, siga o que está aqui.
+
+1. FORMATO: proibido usar ** ## ou lista numerada. O negrito do WhatsApp é *assim*.
+   ERRADO: "**Ano:** 2020"  →  CERTO: "Ano 2020"
+2. UMA pergunta por mensagem. Nunca duas. Se precisa de 3 informações, são 3 mensagens.
+3. AGENDA: nunca escreva um dia ou horário que não tenha saído de
+   ver_horarios_disponiveis NESTA resposta. Se o cliente falar em visita ou horário,
+   chame a tool ANTES de responder. Proibido perguntar "hoje ou amanhã?" sem consultar.
+4. Horário que ESTÁ em horarios_livres → chame agendar_visita imediatamente.
+   request_schedule_check é SÓ para horário que NÃO está na lista. Nunca os dois.
+5. MOSTRAR CARROS: no máximo 2 por mensagem, uma linha cada
+   (ex.: "Polo 2020, 56 mil km, R$ 78.000"). Nunca liste o estoque inteiro.
+6. car_id só pode vir do consultar_estoque desta resposta. Número que aparece dentro
+   de link ou nome de arquivo NÃO é car_id.
+7. Na pré-avaliação da troca, uma informação por vez: pergunte o modelo, espere a
+   resposta, depois o ano, e assim por diante. Nunca junte km + tempo de uso + nota
+   na mesma mensagem.
+
+`;
 
 // Breakpoint de cache no fim do histórico: o prefixo da conversa é reaproveitado
 // entre turnos e entre iterações do loop de tools (leitura ≈10% do preço; escrita 1,25×).
@@ -1946,17 +1998,26 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     .eq('enabled', true)
     .order('created_at', { ascending: true });
 
-  const systemPrompt = buildSystemPrompt(
+  // Provedor deste tenant: coluna (migration 032) > env var > anthropic.
+  // Declarado aqui (antes do prompt) porque o prefixo de regras depende dele.
+  const provider  = String(settings?.llm_provider ?? LLM_PROVIDER_DEFAULT).toLowerCase();
+  const modelName = provider === 'openai' ? OPENAI_MODEL : CLAUDE_MODEL;
+  log.info('provedor de LLM', { action: 'llm_provider', provider, model: modelName });
+
+  // Prompt base (idêntico pros dois provedores) + prefixo de regras só no OpenAI.
+  const systemPrompt = (provider === 'openai' ? OPENAI_RULES_PREFIX : '') + buildSystemPrompt(
     (settings ?? {}) as Record<string, unknown>,
     faqRows ?? [],
     customerName,
     log,
   );
 
-  // ── 6. Monta histórico para o Claude ──────────────────────────────────────
+  // ── 6. Monta histórico para o modelo ──────────────────────────────────────
+  //    stripMediaUrls: tira a URL da mídia (o número do arquivo virava "car_id"
+  //    na cabeça do modelo). O banco e o CRM seguem com a URL completa.
   const rawHistory = orderedMessages.map((m) => ({
     role: (m.role === 'customer' ? 'user' : 'assistant') as 'user' | 'assistant',
-    content: String(m.content),
+    content: stripMediaUrls(String(m.content)),
   }));
 
   const history = mergeConsecutiveRoles(rawHistory);
@@ -1967,12 +2028,6 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
 
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
   const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
-  // Provedor deste tenant: coluna (migration 032) > env var > anthropic.
-  // O select acima é '*', então llm_provider vem junto assim que a coluna existir;
-  // enquanto não existir, o ?? cai no default e nada muda.
-  const provider  = String(settings?.llm_provider ?? LLM_PROVIDER_DEFAULT).toLowerCase();
-  const modelName = provider === 'openai' ? OPENAI_MODEL : CLAUDE_MODEL;
-  log.info('provedor de LLM', { action: 'llm_provider', provider, model: modelName });
   const waToken = await resolveWhatsAppToken(supabase, userId);
   const ctx = { userId, conversationId, customerPhone, customerName, phoneNumberId, token: waToken, log };
   let finalText = '';
