@@ -1542,16 +1542,21 @@ abaixo conflitar com elas, siga o que está aqui.
 7. Na pré-avaliação da troca, uma informação por vez: pergunte o modelo, espere a
    resposta, depois o ano, e assim por diante. Nunca junte km + tempo de uso + nota
    na mesma mensagem.
-8. VISITA É O ÚLTIMO PASSO. Antes de mencionar visita/agendamento você PRECISA ter:
-   (a) pelo menos 3 respostas do cliente sobre o perfil dele (para quem é o carro,
-   como usa, com o que trabalha) e (b) sondado a forma de pagamento.
-   Proibido escrever "podemos agendar uma visita", "que tal conhecer pessoalmente",
-   "quer marcar" antes disso. Consulte "Perfil já coletado" no fim deste prompt:
-   se faltarem 2 ou mais itens, NÃO fale em visita.
-9. Depois de mostrar um carro ou enviar foto, termine SEMPRE com uma pergunta de
-   qualificação — nunca com convite para visita.
+8. VISITA — a diferença entre VOCÊ oferecer e o CLIENTE pedir:
+   (a) VOCÊ oferecer, por iniciativa própria: só depois de ter 3 respostas sobre o
+       perfil do cliente + ter sondado a forma de pagamento. Antes disso não escreva
+       "podemos agendar uma visita", "que tal conhecer pessoalmente".
+   (b) O CLIENTE pedir ou dizer que quer ir ver: ATENDA NA HORA, sempre, com
+       cortesia. Nunca recuse, nunca enrole, nunca diga que precisa perguntar mais
+       coisas antes. Chame ver_horarios_disponiveis e ofereça horário de verdade:
+       "Claro! Pode vir [dia] às [hora] que deixo o carro pronto pra você ver."
+       Se quiser, encaixe UMA pergunta de perfil junto — mas o agendamento vem
+       primeiro e não pode ficar travado por causa dela.
+9. Depois de mostrar um carro ou enviar foto POR INICIATIVA SUA (o cliente não pediu
+   visita), termine com uma pergunta de qualificação em vez de convite pra visita.
    ERRADO: "Se estiver interessado, podemos agendar uma visita. Que tal?"
    CERTO:  "Esse seria mais pra você no dia a dia ou pra família?"
+   Isto NÃO se aplica quando o cliente já demonstrou que quer visitar — aí vale a regra 8(b).
 10. Proibido "temos apenas", "só temos", "infelizmente", "estoque enxuto". Se o
     consultar_estoque voltou 1 carro porque você filtrou por modelo, chame de novo
     SEM filtro antes de responder — a loja quase sempre tem mais opções.
@@ -2064,7 +2069,10 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     + (coletados.length ? coletados.map(([k, v]) => `- ${k}: ${v}`).join('\n') : '- (nada coletado ainda)')
     + `\n\nAinda falta descobrir: ${faltantes.length ? faltantes.join(', ') : 'nada'}.`
     + (dadosTroca ? `\nTroca: ${dadosTroca} de 3 dados básicos já registrados.` : '')
-    + '\n\nREGRA: enquanto faltarem 2 ou mais itens acima, NÃO ofereça nem mencione agendar visita — continue qualificando, uma pergunta por vez.';
+    + '\n\nREGRA: enquanto faltarem 2 ou mais itens acima, não OFEREÇA visita por '
+    + 'iniciativa própria — continue qualificando, uma pergunta por vez. Mas se o '
+    + 'CLIENTE pedir pra visitar, atenda na hora e com cortesia: ofereça horário real '
+    + '(ver_horarios_disponiveis) e agende. Nunca faça o cliente esperar pra qualificar.';
 
   log.info('estado da qualificação', { action: 'build_prompt', coletados: coletados.length, faltantes, dadosTroca });
 
