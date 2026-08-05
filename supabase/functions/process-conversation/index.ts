@@ -635,6 +635,27 @@ async function executeTool(
     const customerContext   = String(input.customer_message ?? '').trim();
     if (!requestedDatetime) return { sucesso: false, mensagem: 'Data/hora não informada.' };
 
+    // GUARDA: só escala se o horário estiver REALMENTE cheio segundo a config da
+    // loja. Concessionária com max_appointments_per_slot > 1 atende várias pessoas
+    // no mesmo horário — ter 1 visita marcada NÃO significa ocupado. Sem isto, o
+    // modelo escalava horário livre e o cliente esperava o "superior" à toa.
+    // Mesma fonte de verdade do ver_horarios_disponiveis e do agendar_visita.
+    const [reqDate, reqTimeRaw] = requestedDatetime.split('T');
+    const reqTime = String(reqTimeRaw ?? '').substring(0, 5);
+    if (reqDate && reqTime) {
+      const slotInfo = await computeFreeSlots(supabase, userId, reqDate);
+      if (slotInfo.open && slotInfo.freeSlots.includes(reqTime)) {
+        log.warn('escalonamento barrado — horário livre pela config da loja', {
+          action: 'request_schedule_check', data: reqDate, horario: reqTime,
+        });
+        return {
+          sucesso: false,
+          horario_livre: true,
+          mensagem: `O horário ${reqTime} do dia ${reqDate} ESTÁ LIVRE (esta loja atende mais de um cliente no mesmo horário). NÃO escale e NÃO diga que vai verificar com ninguém: chame agendar_visita AGORA com esse horário.`,
+        };
+      }
+    }
+
     const payload = {
       requested_datetime: requestedDatetime,
       requested_at:       new Date().toISOString(),
