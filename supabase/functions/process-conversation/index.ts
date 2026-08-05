@@ -116,7 +116,7 @@ const TOOLS = [
   {
     name: 'consultar_estoque',
     description:
-      'Busca veículos disponíveis no estoque da concessionária — carros e motos. Use sempre que o cliente perguntar sobre veículos, preços, disponibilidade ou características. Aceita múltiplos filtros opcionais combinados — use para buscar SIMILARES quando o modelo exato não existir (ex.: mesma marca, faixa de preço e ano próximos). Sem nenhum filtro, retorna todo o estoque disponível. O campo "observacoes" traz o que a LOJA escreveu sobre aquele veículo específico (opcionais, estado, único dono, detalhes de negociação). Quando vier preenchido, é a informação mais valiosa que você tem sobre o carro: use ao apresentá-lo e ao responder perguntas sobre ele. Nunca ignore. ATENÇÃO ao conflito: se as observações contradisserem um campo estruturado (ex.: campo diz câmbio automático e as observações dizem manual), NÃO afirme nenhum dos dois nem os apresente juntos — cite o resto normalmente e diga que confirma esse detalhe específico com a loja.',
+      'Busca veículos disponíveis no estoque da concessionária — carros e motos. Use sempre que o cliente perguntar sobre veículos, preços, disponibilidade ou características. Aceita múltiplos filtros opcionais combinados — use para buscar SIMILARES quando o modelo exato não existir (ex.: mesma marca, faixa de preço e ano próximos). Sem nenhum filtro, retorna todo o estoque disponível. DOIS FORMATOS DE RESPOSTA: se vier "modo":"resumo", o estoque é grande demais pra listar — siga o campo "instrucao": diga o total, comente a variedade e faça UMA pergunta pra estreitar (faixa de preço, marca ou tipo), depois consulte de novo com o filtro. Caso contrário vem a lista em "veiculos". O campo "observacoes" traz o que a LOJA escreveu sobre aquele veículo específico (opcionais, estado, único dono, detalhes de negociação). Quando vier preenchido, é a informação mais valiosa que você tem sobre o carro: use ao apresentá-lo e ao responder perguntas sobre ele. Nunca ignore. ATENÇÃO ao conflito: se as observações contradisserem um campo estruturado (ex.: campo diz câmbio automático e as observações dizem manual), NÃO afirme nenhum dos dois nem os apresente juntos — cite o resto normalmente e diga que confirma esse detalhe específico com a loja.',
     input_schema: {
       type: 'object',
       properties: {
@@ -458,30 +458,36 @@ async function executeTool(
     // senão o bot anuncia o teto como se fosse o estoque inteiro ("temos 10
     // veículos" numa loja com 16, que foi o que aconteceu em 05/08).
     const LIMITE_ESTOQUE = 20;
-    let query = supabase
-      .from('cars')
-      .select(
-        'id, brand, model, version, year, price, mileage, transmission, fuel, color, vehicle_type, status, description, car_images(id)',
-        { count: 'exact' },
-      )
-      .eq('user_id', userId)
-      .in('status', ['available', 'reserved'])
-      .order('price', { ascending: true })
-      .limit(LIMITE_ESTOQUE);
 
-    if (input.marca)       query = query.ilike('brand', `%${input.marca}%`);
-    if (input.modelo)      query = query.ilike('model', `%${input.modelo}%`);
-    if (input.preco_min)   query = query.gte('price', Number(input.preco_min));
-    if (input.preco_max)   query = query.lte('price', Number(input.preco_max));
-    if (input.ano_min)     query = query.gte('year',  Number(input.ano_min));
-    if (input.ano_max)     query = query.lte('year',  Number(input.ano_max));
-    if (input.tipo)        query = query.eq('vehicle_type', String(input.tipo));
-    if (input.combustivel) query = query.ilike('fuel', `%${input.combustivel}%`);
-    if (input.cambio)      query = query.ilike('transmission', `%${input.cambio}%`);
-    // 'categoria' (sedan/hatch/SUV/picape) não tem coluna no schema — aceito como intenção,
-    // o filtro real é por marca/preço/ano. Ignorado na query para não quebrar.
+    // Os mesmos filtros valem pra busca dos carros E pro resumo agregado.
+    // 'categoria' (sedan/hatch/SUV/picape) não tem coluna no schema — aceito como
+    // intenção, o filtro real é por marca/preço/ano. Ignorado pra não quebrar.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const comFiltros = (q: any) => {
+      if (input.marca)       q = q.ilike('brand', `%${input.marca}%`);
+      if (input.modelo)      q = q.ilike('model', `%${input.modelo}%`);
+      if (input.preco_min)   q = q.gte('price', Number(input.preco_min));
+      if (input.preco_max)   q = q.lte('price', Number(input.preco_max));
+      if (input.ano_min)     q = q.gte('year',  Number(input.ano_min));
+      if (input.ano_max)     q = q.lte('year',  Number(input.ano_max));
+      if (input.tipo)        q = q.eq('vehicle_type', String(input.tipo));
+      if (input.combustivel) q = q.ilike('fuel', `%${input.combustivel}%`);
+      if (input.cambio)      q = q.ilike('transmission', `%${input.cambio}%`);
+      return q;
+    };
 
-    const { data, error, count } = await query;
+    const { data, error, count } = await comFiltros(
+      supabase
+        .from('cars')
+        .select(
+          'id, brand, model, version, year, price, mileage, transmission, fuel, color, vehicle_type, status, description, car_images(id)',
+          { count: 'exact' },
+        )
+        .eq('user_id', userId)
+        .in('status', ['available', 'reserved'])
+        .order('price', { ascending: true })
+        .limit(LIMITE_ESTOQUE),
+    );
     if (error) {
       log.error('falha ao buscar estoque', { action: 'consultar_estoque', error });
       return { erro: 'Falha ao buscar estoque' };
@@ -492,6 +498,58 @@ async function executeTool(
       totalReal, exibindo: data?.length ?? 0,
     });
     if (!data?.length) return { mensagem: 'Nenhum veículo encontrado com esses critérios.' };
+
+    // ── MODO RESUMO ──────────────────────────────────────────────────────────
+    // Acima do teto, mandar a lista sairia caro (cada veículo ~90 tokens: 40 carros
+    // = 3.600, 200 = 18.000, mais que o prompt inteiro) e ainda mostraria só os mais
+    // baratos — o pior recorte pro lojista. Em vez disso vai o MAPA do estoque, que
+    // custa ~250 tokens e força o bot a fazer o que um vendedor faz: perguntar o que
+    // a pessoa procura antes de mostrar.
+    if (totalReal > LIMITE_ESTOQUE) {
+      const { data: todos } = await comFiltros(
+        supabase.from('cars').select('price, brand, vehicle_type')
+          .eq('user_id', userId).in('status', ['available', 'reserved']),
+      );
+      const linhas = (todos ?? []) as Array<{ price: number | null; brand: string | null; vehicle_type: string | null }>;
+      const precos = linhas.map((l) => Number(l.price)).filter((p) => p > 0);
+
+      const FAIXAS: Array<[string, number, number]> = [
+        ['até R$ 30 mil',      0,     30000],
+        ['R$ 30 a 50 mil',     30000, 50000],
+        ['R$ 50 a 80 mil',     50000, 80000],
+        ['acima de R$ 80 mil', 80000, Infinity],
+      ];
+      const faixas = FAIXAS
+        .map(([faixa, min, max]) => ({
+          faixa,
+          quantidade: precos.filter((p) => p >= min && p < max).length,
+        }))
+        .filter((f) => f.quantidade > 0);
+
+      const contarPor = (campo: 'brand' | 'vehicle_type') => {
+        const mapa = new Map<string, number>();
+        for (const l of linhas) {
+          const v = String(l[campo] ?? '').trim();
+          if (v) mapa.set(v, (mapa.get(v) ?? 0) + 1);
+        }
+        return [...mapa.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 8)
+          .map(([nome, quantidade]) => ({ nome, quantidade }));
+      };
+
+      log.info('estoque em modo resumo', { action: 'consultar_estoque', totalReal, faixas: faixas.length });
+      return {
+        modo: 'resumo',
+        total: totalReal,
+        faixas_de_preco: faixas,
+        marcas: contarPor('brand'),
+        tipos: contarPor('vehicle_type'),
+        preco_min: precos.length ? Math.min(...precos) : null,
+        preco_max: precos.length ? Math.max(...precos) : null,
+        instrucao: `São ${totalReal} veículos nesse critério — NÃO liste nenhum. Diga o total, comente a variedade em uma frase e faça UMA pergunta pra estreitar (faixa de preço, marca ou tipo). Com a resposta, chame consultar_estoque de novo com o filtro e aí sim apresente os carros.`,
+      };
+    }
 
     // Cruza agendamentos FUTUROS por carro → urgência real ("já tem gente vindo ver").
     const carIds = data.map((c) => c.id);
@@ -539,7 +597,11 @@ async function executeTool(
           combustivel: c.fuel,
           // Observações que a loja escreveu sobre ESTE veículo (opcionais, estado,
           // detalhes de negociação). É informação que só existe aqui — use.
-          observacoes: c.description || null,
+          // Em lista longa vai cortada (20 carros × 200 chars ≈ 1.200 tokens só
+          // disso); quando o cliente estreita pra poucos carros, vai inteira.
+          observacoes: c.description
+            ? (data.length > 5 ? `${String(c.description).slice(0, 180)}…` : String(c.description))
+            : null,
           cor: c.color,
           tipo: (c.vehicle_type as string) === 'moto' ? 'moto' : 'carro',
           status: c.status === 'available' ? 'disponível' : 'reservado',
