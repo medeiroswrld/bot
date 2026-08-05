@@ -1560,6 +1560,15 @@ abaixo conflitar com elas, siga o que está aqui.
 10. Proibido "temos apenas", "só temos", "infelizmente", "estoque enxuto". Se o
     consultar_estoque voltou 1 carro porque você filtrou por modelo, chame de novo
     SEM filtro antes de responder — a loja quase sempre tem mais opções.
+11. CHAMAR A TOOL É O QUE VALE — escrever que fez NÃO faz nada acontecer.
+    - Cliente respondeu sobre família, filhos, profissão, uso do carro ou forma de
+      pagamento? Chame save_lead_qualification NESTA MESMA resposta, antes do texto.
+      Ex.: cliente diz "tenho 3 filhos, é pra família" → save_lead_qualification({ family: "casado, 3 filhos, carro pra família" }).
+    - Vai escrever que fala com o gerente/superior? Então chame chamar_atendente
+      NESTA MESMA resposta. Sem a tool, ninguém do outro lado é avisado e o cliente
+      fica esperando pra sempre.
+    - Cliente falou do carro dele (modelo, ano, km, tempo de uso, estado)? Chame
+      save_trade_in_evaluation na hora, a cada dado novo.
 
 `;
 
@@ -2103,6 +2112,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   const waToken = await resolveWhatsAppToken(supabase, userId);
   const ctx = { userId, conversationId, customerPhone, customerName, phoneNumberId, token: waToken, log };
   let finalText = '';
+  const toolsUsadas = new Set<string>();  // o que o modelo REALMENTE chamou neste turno
   let lastWasTool = false;   // a iteração anterior executou uma tool?
   let retriedEmpty = false;  // já re-chamamos uma vez por resposta vazia pós-tool?
 
@@ -2176,6 +2186,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
 
       const toolResults: unknown[] = [];
       for (const block of toolUseBlocks) {
+        toolsUsadas.add(block.name ?? '');
         const result = await executeTool(
           block.name ?? '',
           (block.input ?? {}) as Record<string, unknown>,
@@ -2226,6 +2237,31 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
       log.error('erro ao enviar ponte de resposta vazia', { action: 'fallback', error: e });
     }
     return new Response('OK', { status: 200 });
+  }
+
+  // ── 7.5. GUARDA: prometeu humano mas não chamou a tool ────────────────────
+  //    O modelo às vezes ESCREVE "vou verificar com meu gerente" e não chama o
+  //    chamar_atendente — a conversa fica com status 'bot', ninguém é avisado e o
+  //    cliente espera por um humano que nunca soube dele. Aqui o handoff é forçado.
+  //    NÃO dispara quando request_schedule_check foi usado: aquele fluxo também diz
+  //    "verificar com meu superior", mas quem responde é o cron, não um humano.
+  //    Qualquer "com (o/meu) gerente|superior|gerência|responsável" conta: o prompt
+  //    só manda citar essas palavras em situação de handoff real ("alinhar com meu
+  //    gerente", "fechar o melhor que conseguir com o gerente"). Falso positivo custa
+  //    uma conversa em pending que o atendente devolve ao bot; falso negativo custa
+  //    um cliente esperando pra sempre.
+  const PROMESSA_HUMANO =
+    /\bcom\s+(o\s+|a\s+|meu\s+|minha\s+)?(gerente|superior|ger[êe]ncia|respons[áa]vel)\b/i;
+  if (
+    !toolsUsadas.has('chamar_atendente') &&
+    !toolsUsadas.has('request_schedule_check') &&
+    PROMESSA_HUMANO.test(finalText)
+  ) {
+    const { error: hoErr } = await supabase
+      .from('conversations').update({ status: 'pending' }).eq('id', conversationId);
+    log.warn('handoff forçado — bot prometeu falar com humano sem chamar a tool', {
+      action: 'chamar_atendente', forcado: true, trecho: finalText.slice(0, 120), error: hoErr?.message,
+    });
   }
 
   // ── 8. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────
