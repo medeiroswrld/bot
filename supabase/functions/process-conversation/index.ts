@@ -505,12 +505,23 @@ async function executeTool(
     // baratos — o pior recorte pro lojista. Em vez disso vai o MAPA do estoque, que
     // custa ~250 tokens e força o bot a fazer o que um vendedor faz: perguntar o que
     // a pessoa procura antes de mostrar.
-    if (totalReal > LIMITE_ESTOQUE) {
+    // Pergunta ABERTA ("o que vocês têm?") vira resumo já com poucos carros: mais
+    // de 6 itens no WhatsApp é textão, e qualificar antes é o comportamento certo.
+    // Se o cliente JÁ estreitou ("quero um Gol"), ele fez a lição de casa —
+    // resumir de novo seria empurrar pergunta em quem já respondeu; aí lista até 20.
+    const temFiltro = Boolean(
+      input.marca || input.modelo || input.preco_min || input.preco_max ||
+      input.ano_min || input.ano_max || input.tipo || input.combustivel || input.cambio,
+    );
+    const LIMITE_LISTA = temFiltro ? LIMITE_ESTOQUE : 6;
+
+    if (totalReal > LIMITE_LISTA) {
       const { data: todos } = await comFiltros(
-        supabase.from('cars').select('price, brand, vehicle_type')
-          .eq('user_id', userId).in('status', ['available', 'reserved']),
+        supabase.from('cars').select('price, brand, model, year, vehicle_type')
+          .eq('user_id', userId).in('status', ['available', 'reserved'])
+          .order('price', { ascending: true }),
       );
-      const linhas = (todos ?? []) as Array<{ price: number | null; brand: string | null; vehicle_type: string | null }>;
+      const linhas = (todos ?? []) as Array<{ price: number | null; brand: string | null; model: string | null; year: number | null; vehicle_type: string | null }>;
       const precos = linhas.map((l) => Number(l.price)).filter((p) => p > 0);
 
       const FAIXAS: Array<[string, number, number]> = [
@@ -538,7 +549,17 @@ async function executeTool(
           .map(([nome, quantidade]) => ({ nome, quantidade }));
       };
 
-      log.info('estoque em modo resumo', { action: 'consultar_estoque', totalReal, faixas: faixas.length });
+      // 2-3 exemplos que mostram a amplitude (mais barato, meio, mais caro).
+      // Sem isso a resposta vira interrogatório seco; com eles o bot consegue dar
+      // uma amostra concreta ANTES de perguntar, que é como um vendedor fala.
+      const rotulo = (l: typeof linhas[number]) =>
+        `${[l.brand, l.model].filter(Boolean).join(' ').trim()}${l.year ? ` ${l.year}` : ''} — R$ ${Number(l.price).toLocaleString('pt-BR')}`;
+      const idxs = linhas.length >= 3
+        ? [0, Math.floor(linhas.length / 2), linhas.length - 1]
+        : linhas.map((_, i) => i);
+      const exemplos = [...new Set(idxs)].map((i) => rotulo(linhas[i]));
+
+      log.info('estoque em modo resumo', { action: 'consultar_estoque', totalReal, comFiltro: temFiltro, faixas: faixas.length });
       return {
         modo: 'resumo',
         total: totalReal,
@@ -547,7 +568,8 @@ async function executeTool(
         tipos: contarPor('vehicle_type'),
         preco_min: precos.length ? Math.min(...precos) : null,
         preco_max: precos.length ? Math.max(...precos) : null,
-        instrucao: `São ${totalReal} veículos nesse critério — NÃO liste nenhum. Diga o total, comente a variedade em uma frase e faça UMA pergunta pra estreitar (faixa de preço, marca ou tipo). Com a resposta, chame consultar_estoque de novo com o filtro e aí sim apresente os carros.`,
+        exemplos,
+        instrucao: `São ${totalReal} veículos nesse critério — NÃO liste todos. Diga o total, cite 1 ou 2 dos "exemplos" pra mostrar a amplitude do que a loja tem, e faça UMA pergunta pra estreitar (faixa de preço, marca ou tipo). Com a resposta, chame consultar_estoque de novo com o filtro e aí sim apresente os carros.`,
       };
     }
 
