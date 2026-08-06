@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 
 import { buildCors } from '../_shared/cors.ts';
+import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 
 const GRAPH = 'https://graph.facebook.com/v25.0';
 
@@ -136,10 +137,15 @@ serve(async (req) => {
       );
     }
 
-    const waToken = Deno.env.get('WHATSAPP_TOKEN') ?? '';
+    // Token DO TENANT (Vault), com o global só como fallback — igual ao resto das
+    // functions. Esta aqui tinha ficado no WHATSAPP_TOKEN global, que é de outro
+    // negócio: ele até criava a sessão de upload (isso é no app, não na conta),
+    // mas não enxergava nem a WABA nem o phone_number_id da loja, e a Meta
+    // devolvia "does not exist" como se o ID estivesse errado.
+    const waToken = await resolveWhatsAppToken(supabase, user.id);
     if (!waToken) {
       return new Response(
-        JSON.stringify({ error: 'WHATSAPP_TOKEN não configurado nos Secrets.' }),
+        JSON.stringify({ error: 'Nenhum token do WhatsApp disponível: nem o desta conta (Configurações) nem o secret WHATSAPP_TOKEN.' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
       );
     }
