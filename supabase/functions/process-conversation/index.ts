@@ -256,7 +256,7 @@ const TOOLS = [
   {
     name: 'enviar_midia_carro',
     description:
-      'Envia a foto de especificações + o vídeo do veículo (foto, depois vídeo). Use quando o cliente pedir foto/vídeo, pedir pra ver, ou demonstrar interesse claro num carro. SEQUÊNCIA OBRIGATÓRIA: chame consultar_estoque ANTES, nesta mesma resposta, e use o id retornado AGORA — ids de turnos anteriores NÃO existem mais no seu contexto; usar id "de memória" é inventar. Envie SEMPRE marca e modelo junto (plano B se o id falhar). Se não estiver claro de QUAL carro o cliente quer a foto, pergunte antes de enviar. Antes de OFERECER mídia, confira no consultar_estoque se o campo "fotos" é maior que 0 — nunca prometa foto que não existe. RETORNOS: success true = enviada, diga que mandou. success false com sem_midia true = o carro não tem mídia cadastrada e isso NÃO é erro: nunca fale em "problema" nem prometa enviar depois, passe os detalhes por texto e siga qualificando. success false com error = falha técnica real: avise que teve um probleminha e acione chamar_atendente nos bastidores.',
+      'Envia as FOTOS do veículo (até 5, de uma vez) e depois o vídeo. Uma única chamada já manda tudo que existe cadastrado — NÃO chame de novo pedindo "mais fotos", porque vai reenviar exatamente as mesmas. Se o cliente pedir mais ângulos depois disso, diga que essas são as que você tem e convide pra ver o carro na loja. Use quando o cliente pedir foto/vídeo, pedir pra ver, ou demonstrar interesse claro num carro. SEQUÊNCIA OBRIGATÓRIA: chame consultar_estoque ANTES, nesta mesma resposta, e use o id retornado AGORA — ids de turnos anteriores NÃO existem mais no seu contexto; usar id "de memória" é inventar. Envie SEMPRE marca e modelo junto (plano B se o id falhar). Se não estiver claro de QUAL carro o cliente quer a foto, pergunte antes de enviar. Antes de OFERECER mídia, confira no consultar_estoque se o campo "fotos" é maior que 0 — nunca prometa foto que não existe. RETORNOS: success true = enviada, diga que mandou. success false com sem_midia true = o carro não tem mídia cadastrada e isso NÃO é erro: nunca fale em "problema" nem prometa enviar depois, passe os detalhes por texto e siga qualificando. success false com error = falha técnica real: avise que teve um probleminha e acione chamar_atendente nos bastidores.',
     input_schema: {
       type: 'object',
       properties: {
@@ -573,8 +573,18 @@ async function executeTool(
       };
     }
 
+    // O builder do comFiltros é `any`, então as linhas voltam sem tipo — nomeia aqui
+    // pra não perder a checagem nos dois map() abaixo.
+    type CarListRow = {
+      id: string; brand: string | null; model: string | null; version: string | null;
+      year: number | null; price: number | null; mileage: number | null;
+      transmission: string | null; fuel: string | null; color: string | null;
+      vehicle_type: string | null; status: string | null; description: string | null;
+      car_images: unknown[] | null;
+    };
+
     // Cruza agendamentos FUTUROS por carro → urgência real ("já tem gente vindo ver").
-    const carIds = data.map((c) => c.id);
+    const carIds = (data as CarListRow[]).map((c) => c.id);
     const { iso: hojeIso } = getBrazilDateInfo();
     const visitasPorCarro = new Map<string, { quantas: number; proxima: string }>();
     if (carIds.length) {
@@ -605,7 +615,7 @@ async function executeTool(
       ...(totalReal > data.length
         ? { aviso: `A loja tem ${totalReal} veículos nesse critério; estes são os ${data.length} mais baratos. Ao falar o número, use ${totalReal} — e ofereça filtrar (marca, faixa de preço, ano) pra mostrar os outros.` }
         : {}),
-      veiculos: data.map((c) => {
+      veiculos: (data as CarListRow[]).map((c) => {
         const v = visitasPorCarro.get(String(c.id));
         return {
           id: c.id,
@@ -1080,46 +1090,61 @@ async function executeTool(
     log.debug('carro carregado', { action: 'enviar_midia_carro', car });
 
     const carName = [car.brand, car.model].filter(Boolean).join(' ') || 'veículo';
-    let specsImageUrl: string | null = car.specs_image_url;
     const videoUrl: string | null = car.video_url;
 
-    // 2. Fallback: sem specs_image_url, usa a primeira foto de car_images
-    if (!specsImageUrl) {
-      const { data: firstImage } = await supabase
-        .from('car_images')
-        .select('image_url')
-        .eq('car_id', resolvedCarId)
-        .eq('user_id', userId)
-        .order('sort_order', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-      if (firstImage?.image_url) specsImageUrl = String(firstImage.image_url);
+    // 2. Monta a GALERIA: a imagem de especificações primeiro (quando existe) e
+    //    depois as fotos cadastradas, na ordem definida pela loja.
+    //    Antes daqui só saía UMA foto (a de specs OU a primeira da galeria) — o
+    //    cliente pedia "não tem mais foto?" e recebia a mesma de novo.
+    //    Teto igual ao máximo que o painel deixa cadastrar (8): assim a contagem
+    //    que o consultar_estoque informa ao bot ("fotos: 4") sempre bate com o
+    //    que realmente sai — o bot não anuncia foto que não vai mandar.
+    const MAX_FOTOS = 8;
+    const fotos: string[] = [];
+    if (car.specs_image_url) fotos.push(String(car.specs_image_url));
+
+    const { data: galeria } = await supabase
+      .from('car_images')
+      .select('image_url')
+      .eq('car_id', resolvedCarId)
+      .eq('user_id', userId)
+      .order('sort_order', { ascending: true })
+      .limit(MAX_FOTOS);
+    for (const img of (galeria ?? [])) {
+      const u = String(img.image_url ?? '').trim();
+      if (u && !fotos.includes(u)) fotos.push(u);   // dedupe: specs pode repetir a 1ª
     }
+    const paraEnviar = fotos.slice(0, MAX_FOTOS);
 
     // 3. Sem nada cadastrado — NÃO é erro técnico, é só ausência de mídia.
-    if (!specsImageUrl && !videoUrl) {
+    if (!paraEnviar.length && !videoUrl) {
       log.info('veículo sem mídia cadastrada', { action: 'enviar_midia_carro', carId: resolvedCarId });
       return { success: false, sem_midia: true, message: 'Este veículo não tem foto nem vídeo cadastrados (ausência de mídia, não é falha técnica).' };
     }
 
     const sentItems: string[] = [];
     const pid = phoneNumberId || undefined;
+    let fotosEnviadas = 0;
 
-    // 4. Foto primeiro
-    if (specsImageUrl) {
+    // 4. Fotos, uma a uma e em ordem
+    for (const url of paraEnviar) {
       try {
-        const ok = await sendImage(customerPhone, specsImageUrl, pid, token, log);
+        const ok = await sendImage(customerPhone, url, pid, token, log);
         if (ok) {
-          sentItems.push('foto');
+          fotosEnviadas++;
           await supabase.from('messages').insert({
-            conversation_id: conversationId, role: 'bot', content: `[foto] ${specsImageUrl}`,
+            conversation_id: conversationId, role: 'bot', content: `[foto] ${url}`,
           });
-          // Delay entre foto e vídeo para chegarem em ordem
-          await new Promise((r) => setTimeout(r, 1500));
+          // Pausa curta pra chegarem na ordem certa no aparelho do cliente.
+          await new Promise((r) => setTimeout(r, 700));
         }
       } catch (e) {
-        log.error('erro ao enviar foto', { action: 'enviar_midia_carro', carId: resolvedCarId, error: e });
+        log.error('erro ao enviar foto', { action: 'enviar_midia_carro', carId: resolvedCarId, url, error: e });
       }
+    }
+    if (fotosEnviadas > 0) {
+      sentItems.push(fotosEnviadas === 1 ? '1 foto' : `${fotosEnviadas} fotos`);
+      if (videoUrl) await new Promise((r) => setTimeout(r, 800)); // separa das fotos
     }
 
     // 5. Vídeo depois
@@ -1141,11 +1166,17 @@ async function executeTool(
       return { success: false, error: 'Falha ao enviar as mídias' };
     }
 
-    log.info('mídia enviada', { action: 'enviar_midia_carro', carId: resolvedCarId, sent: sentItems });
+    log.info('mídia enviada', {
+      action: 'enviar_midia_carro', carId: resolvedCarId,
+      sent: sentItems, fotosEnviadas, fotosDisponiveis: paraEnviar.length,
+    });
     return {
       success: true,
       sent: sentItems,
-      message: `Enviei ${sentItems.join(' e ')} do ${carName}.`,
+      fotos_enviadas: fotosEnviadas,
+      // O bot já prometeu "são 4 fotos" tendo mandado 1. Esta linha é a verdade
+      // do que saiu — não invente quantidade nem prometa mandar mais depois.
+      message: `Enviei ${sentItems.join(' e ')} do ${carName}. Essas são TODAS as fotos que tenho pra mandar deste veículo — não prometa outras. Se o cliente quiser ver mais ângulos, convide pra ver o carro pessoalmente na loja.`,
     };
   }
 
