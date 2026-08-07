@@ -1122,12 +1122,40 @@ async function executeTool(
       return { success: false, sem_midia: true, message: 'Este veículo não tem foto nem vídeo cadastrados (ausência de mídia, não é falha técnica).' };
     }
 
+    // 3b. Nada de reenviar o que o cliente já recebeu. O modelo chama esta tool
+    //     por conta própria em mensagem que não pede foto ("não ficou, gostei")
+    //     e o cliente leva a galeria inteira duas vezes. Pedir isso na descrição
+    //     da tool não segurou — a trava tem que ser aqui.
+    //     Filtro é por URL, não por carro: foto que a loja cadastrar depois é
+    //     URL nova e continua saindo normalmente.
+    const chaves = paraEnviar.map((u) => `[foto] ${u}`);
+    if (videoUrl) chaves.push(`[vídeo] ${videoUrl}`);
+    const { data: jaMandadas } = await supabase
+      .from('messages')
+      .select('content')
+      .eq('conversation_id', conversationId)
+      .in('content', chaves);
+    const jaEnviado  = new Set((jaMandadas ?? []).map((m: { content: string }) => String(m.content)));
+    const fotosNovas = paraEnviar.filter((u) => !jaEnviado.has(`[foto] ${u}`));
+    const mandarVideo = Boolean(videoUrl) && !jaEnviado.has(`[vídeo] ${videoUrl}`);
+
+    if (!fotosNovas.length && !mandarVideo) {
+      log.info('mídia já enviada nesta conversa — reenvio bloqueado', {
+        action: 'enviar_midia_carro', carId: resolvedCarId, fotos: paraEnviar.length,
+      });
+      return {
+        success: true,
+        ja_enviadas: true,
+        message: `A mídia do ${carName} JÁ foi enviada nesta conversa e não foi mandada de novo — o cliente só precisa rolar a conversa pra cima. NÃO diga que está enviando. Siga o papo normalmente a partir do que ele acabou de falar.`,
+      };
+    }
+
     const sentItems: string[] = [];
     const pid = phoneNumberId || undefined;
     let fotosEnviadas = 0;
 
     // 4. Fotos, uma a uma e em ordem
-    for (const url of paraEnviar) {
+    for (const url of fotosNovas) {
       try {
         const ok = await sendImage(customerPhone, url, pid, token, log);
         if (ok) {
@@ -1144,11 +1172,11 @@ async function executeTool(
     }
     if (fotosEnviadas > 0) {
       sentItems.push(fotosEnviadas === 1 ? '1 foto' : `${fotosEnviadas} fotos`);
-      if (videoUrl) await new Promise((r) => setTimeout(r, 800)); // separa das fotos
+      if (mandarVideo) await new Promise((r) => setTimeout(r, 800)); // separa das fotos
     }
 
     // 5. Vídeo depois
-    if (videoUrl) {
+    if (mandarVideo && videoUrl) {
       try {
         const ok = await sendVideo(customerPhone, videoUrl, pid, undefined, token, log);
         if (ok) {

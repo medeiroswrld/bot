@@ -113,6 +113,16 @@ serve(async (req) => {
         await supabase.from('campaign_sends')
           .update({ status: 'sent', whatsapp_message_id: result.messageId, sent_at: new Date().toISOString() })
           .eq('id', send.id);
+
+        // Registra o disparo na conversa. Sem isso a campanha some do CRM (o
+        // lojista não vê o que foi enviado) e, pior, quando o cliente responde
+        // o bot começa o papo sem saber o que foi prometido a ele.
+        await registrarDisparoNaConversa(supabase, {
+          userId: campaign.user_id,
+          phone: send.customer_phone,
+          name: send.customer_name,
+          texto: renderizarCorpo(campaign.template?.body_text, bodyParameters),
+        });
         sentCount++;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -179,8 +189,42 @@ async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]>
   }
 }
 
-function buildTemplateParameters(templateVars: DB, recipient: DB): { type: string; text: string }[] {
-  const params: { type: string; text: string }[] = [];
+// Reconstrói o texto que o cliente REALMENTE recebeu, trocando {{1}}, {{2}}…
+// pelos valores enviados à Meta — é isso que vai pro histórico da conversa.
+function renderizarCorpo(bodyText: string | null | undefined, params: { text: string }[]): string {
+  const base = String(bodyText ?? '').trim();
+  if (!base) return '[campanha enviada]';
+  return base.replace(/\{\{(\d+)\}\}/g, (_m, n) => params[Number(n) - 1]?.text ?? '');
+}
+
+async function registrarDisparoNaConversa(
+  supabase: DB,
+  { userId, phone, name, texto }: { userId: string; phone: string; name?: string | null; texto: string },
+) {
+  try {
+    // Mesmo onConflict do webhook: se a pessoa já tem conversa, reaproveita.
+    const { data: conv } = await supabase
+      .from('conversations')
+      .upsert(
+        { user_id: userId, customer_phone: phone, customer_name: name || null, last_message_at: new Date().toISOString() },
+        { onConflict: 'user_id,customer_phone' },
+      )
+      .select('id')
+      .single();
+
+    if (conv?.id) {
+      await supabase.from('messages').insert({
+        conversation_id: conv.id, role: 'bot', content: texto,
+      });
+    }
+  } catch (e) {
+    // Registro é acessório: se falhar, o disparo já saiu e não deve ser desfeito.
+    console.error('[send-campaign] falha ao registrar disparo na conversa:', e);
+  }
+}
+
+function buildTemplateParameters(templateVars: DB, recipient: DB): { type: 'text'; text: string }[] {
+  const params: { type: 'text'; text: string }[] = [];
   if (!templateVars) return params;
   const keys = Object.keys(templateVars).sort((a, b) => parseInt(a) - parseInt(b));
   for (const key of keys) {

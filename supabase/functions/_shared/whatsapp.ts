@@ -58,6 +58,26 @@ function parseCloud(payload: unknown): InboundMessage | null {
       return { ...base, text: '', type: 'audio', mediaId };
     }
 
+    // Resposta em BOTÃO — de template (quick reply) ou de menu interativo.
+    // Chega com type próprio e sem `text`, então caía no return null abaixo: o
+    // webhook descartava, não gravava mensagem e não acordava o bot. Efeito
+    // prático: quem respondia o disparo tocando no botão ficava sem resposta.
+    // Vira 'text' de propósito — o resto do fluxo segue igual.
+    if (msg.type === 'button') {
+      const texto = String((msg.button as Record<string, string>)?.text ?? '').trim();
+      if (!texto) return null;
+      return { ...base, text: texto, type: 'text' };
+    }
+
+    if (msg.type === 'interactive') {
+      const inter = msg.interactive as Record<string, Record<string, string>>;
+      const texto = String(
+        inter?.button_reply?.title ?? inter?.list_reply?.title ?? '',
+      ).trim();
+      if (!texto) return null;
+      return { ...base, text: texto, type: 'text' };
+    }
+
     return null; // imagem, vídeo, documento, etc. — não suportados
   } catch {
     return null;
