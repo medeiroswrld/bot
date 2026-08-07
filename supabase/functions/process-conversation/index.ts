@@ -344,6 +344,22 @@ function stripMediaUrls(text: string): string {
     .replace(/^\[v[íi]deo\]\s*https?:\/\/\S+/i, '[vídeo enviado ao cliente]');
 }
 
+/**
+ * Variantes de pontuação de um nome de modelo, pra busca tolerante.
+ *
+ * O cliente escreve "t-cross", a loja cadastrou "T Cross", e o ilike literal
+ * não casa — o bot então afirma que a loja não tem o carro. Acontece com
+ * qualquer nome composto: T-Cross, HR-V, CR-V, Corolla Cross.
+ * Vírgula e parênteses saem porque quebrariam a sintaxe do .or() do PostgREST.
+ */
+function variantesDeModelo(termo: string): string[] {
+  const limpo   = termo.replace(/[,()]/g, ' ').trim();
+  const espacos = limpo.replace(/[-_.]/g, ' ').replace(/\s+/g, ' ').trim();
+  const colado  = espacos.replace(/\s+/g, '');
+  const hifen   = espacos.replace(/\s+/g, '-');
+  return [...new Set([limpo, espacos, colado, hifen])].filter(Boolean);
+}
+
 // ─── execução das ferramentas ─────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -465,7 +481,13 @@ async function executeTool(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const comFiltros = (q: any) => {
       if (input.marca)       q = q.ilike('brand', `%${input.marca}%`);
-      if (input.modelo)      q = q.ilike('model', `%${input.modelo}%`);
+      if (input.modelo) {
+        // "T-Cross", "T Cross" e "TCross" são o mesmo carro pro cliente, mas o
+        // ilike é literal: bastava a loja ter cadastrado com espaço em vez de
+        // hífen pro bot dizer que não tinha. Casa com qualquer variante.
+        const vs = variantesDeModelo(String(input.modelo));
+        q = q.or(vs.map((v) => `model.ilike.%${v}%`).join(','));
+      }
       if (input.preco_min)   q = q.gte('price', Number(input.preco_min));
       if (input.preco_max)   q = q.lte('price', Number(input.preco_max));
       if (input.ano_min)     q = q.gte('year',  Number(input.ano_min));
@@ -497,7 +519,35 @@ async function executeTool(
       action: 'consultar_estoque', filtros: input,
       totalReal, exibindo: data?.length ?? 0,
     });
-    if (!data?.length) return { mensagem: 'Nenhum veículo encontrado com esses critérios.' };
+    // Zero resultado num filtro NÃO prova que a loja não tem o carro: o nome
+    // pode estar cadastrado de outro jeito, ou o cliente escreveu errado
+    // ("t-croos"). Antes daqui isso virava "não temos em estoque" e a venda
+    // morria — aconteceu com uma T-Cross que ESTAVA no pátio. Em vez de negar,
+    // devolve o catálogo pro modelo conferir e perguntar.
+    if (!data?.length) {
+      const { data: emEstoque } = await supabase
+        .from('cars')
+        .select('brand, model')
+        .eq('user_id', userId)
+        .in('status', ['available', 'reserved'])
+        .order('brand', { ascending: true });
+
+      const catalogo = [...new Set(
+        (emEstoque ?? []).map((c: { brand: string | null; model: string | null }) =>
+          [c.brand, c.model].filter(Boolean).join(' ').trim(),
+        ).filter(Boolean),
+      )];
+
+      log.warn('filtro sem correspondência — devolvendo catálogo', {
+        action: 'consultar_estoque', filtros: input, modelosEmEstoque: catalogo.length,
+      });
+
+      return {
+        modo: 'sem_correspondencia',
+        veiculos_em_estoque: catalogo,
+        mensagem: 'Nenhum veículo bateu com esse filtro EXATO — mas isso NÃO significa que a loja não tem. O nome pode estar cadastrado de outra forma ("T Cross" em vez de "T-Cross") ou o cliente pode ter escrito com erro. NUNCA diga que não temos sem antes conferir a lista "veiculos_em_estoque" acima. Se achar algo parecido com o que ele pediu, confirme ("você quis dizer X?") e chame consultar_estoque de novo usando o nome exatamente como está na lista. Só diga que não temos se realmente não houver nada parecido — e aí sim registre o interesse.',
+      };
+    }
 
     // ── MODO RESUMO ──────────────────────────────────────────────────────────
     // Acima do teto, mandar a lista sairia caro (cada veículo ~90 tokens: 40 carros
