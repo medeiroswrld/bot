@@ -360,6 +360,63 @@ function variantesDeModelo(termo: string): string[] {
   return [...new Set([limpo, espacos, colado, hifen])].filter(Boolean);
 }
 
+/** Normaliza pra comparar sentido, não forma: sem acento, emoji ou pontuação. */
+function textoCru(s: string): string {
+  return s
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Frases "de conteúdo" de uma mensagem, normalizadas. Curtas ficam de fora. */
+function frasesDe(texto: string): string[] {
+  return texto
+    .split(/[.!?\n]+/)
+    .map(textoCru)
+    .filter((f) => f.length >= 35);
+}
+
+/**
+ * O bot já disse isso nesta conversa?
+ *
+ * O modelo repete quando o cliente responde algo que ele não sabe encaixar —
+ * o Uanderson disse "só preciso confirmar o horário" e recebeu de novo "Fica
+ * melhor de manhã às 9h ou de tarde às 14h?". Pedir no prompt pra não repetir
+ * não segura isso.
+ *
+ * Compara FRASE a frase, e não a mensagem inteira: ele varia a abertura ("Tá
+ * bem aberto amanhã" → "Tá cheio de horário disponível") e repete a pergunta.
+ * Medindo a mensagem toda, esse caso real dá 0,62 de similaridade e escapa.
+ *
+ * Frase curta fica de fora: repetir "Perfeito!" ou "Qualquer coisa me chama" é
+ * conversa normal. E falso positivo custa barato — só uma re-chamada ao modelo
+ * pedindo pra reescrever, não uma mensagem bloqueada.
+ */
+function ehRepeticao(texto: string, anteriores: string[]): boolean {
+  const novas = frasesDe(texto);
+  if (!novas.length) return false;
+
+  const ditas = new Set(anteriores.flatMap(frasesDe));
+  if (novas.some((f) => ditas.has(f))) return true;
+
+  // Rede secundária: mensagem inteira quase igual, sem frase idêntica.
+  const alvo = textoCru(texto);
+  if (alvo.length < 40) return false;
+  const palavras = new Set(alvo.split(' '));
+  for (const anterior of anteriores) {
+    const outro = textoCru(anterior);
+    if (outro.length < 40) continue;
+    const set = new Set(outro.split(' '));
+    let comuns = 0;
+    for (const p of palavras) if (set.has(p)) comuns++;
+    const uniao = new Set([...palavras, ...set]).size;
+    if (uniao > 0 && comuns / uniao >= 0.8) return true;
+  }
+  return false;
+}
+
 // ─── execução das ferramentas ─────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1595,6 +1652,15 @@ NUNCA ofereça agendar visita antes de ter: (a) qualificado com o FORD (pelo men
 - **Carro SEM FOTO** → dê os detalhes e CONTINUE qualificando. NÃO use a falta de foto como atalho pra empurrar visita. O "melhor ver pessoalmente" só DEPOIS de qualificar + sondar pagamento, na hora de fechar.
 - **Pagamento PROATIVO:** você sonda sozinho, sem esperar — depois do FORD: "E sobre o pagamento, você pensa em financiar, pagar à vista, ou tem um carro pra dar na troca?".
 
+## Quem manda no ritmo é o CLIENTE
+
+Oferecer horário é certo. Insistir depois que ele respondeu, não.
+
+- **Ele pediu tempo** ("só preciso confirmar o horário", "vou ver e te falo", "depois te aviso", "deixa eu ver com minha esposa") → ACEITE na hora e PARE de perguntar. "Tranquilo, fico no aguardo! Quando confirmar é só me chamar." Não repita as opções, não ofereça outro horário, não force. Ele volta.
+- **Ele sugeriu outro dia ou horário** → vá pelo dele. Confira em ver_horarios_disponiveis e, se estiver livre, agende NO HORÁRIO QUE ELE PEDIU. Só ofereça alternativa se o dele estiver mesmo indisponível.
+- **NUNCA mande a mesma pergunta duas vezes.** Se ele não respondeu o que você esperava, é porque respondeu outra coisa — leia de novo o que ele disse e trate aquilo. Repetir a frase soa que você não escutou.
+- **Toda pergunta dele merece resposta.** Se ele perguntar de um modelo no meio de outro assunto ("Fiorino não tem?"), responda ANTES de seguir seu roteiro. Pergunta ignorada é cliente perdido.
+
 ## Limites (vendedor bom, não chato)
 
 - Nada de pressão desonesta, falsa urgência, mentira sobre o carro ou esconder defeito.
@@ -2321,6 +2387,12 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   const toolsUsadas = new Set<string>();  // o que o modelo REALMENTE chamou neste turno
   let lastWasTool = false;   // a iteração anterior executou uma tool?
   let retriedEmpty = false;  // já re-chamamos uma vez por resposta vazia pós-tool?
+  let reformulou   = false;  // já pedimos uma reformulação por repetição?
+  // O que o bot já disse nesta conversa — base da checagem de repetição.
+  const botAnteriores = history
+    .filter((m) => m.role === 'assistant')
+    .slice(-3)
+    .map((m) => m.content);
 
   const claudeMessages: Array<{ role: 'user' | 'assistant'; content: string | unknown[] }> = [...history];
 
@@ -2364,6 +2436,24 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
 
       if (!toolUseBlocks.length) {
         finalText = textBlocks.map((b) => b.text ?? '').join('\n').trim();
+
+        // Repetiu o que já mandou? Devolve pro modelo UMA vez, dizendo o que
+        // fazer — o cliente já leu essa mensagem e não respondeu o que ele
+        // esperava, então insistir na mesma frase é o pior caminho.
+        if (finalText && !reformulou && ehRepeticao(finalText, botAnteriores)) {
+          log.warn('resposta repetida — pedindo reformulação', {
+            action: 'claude_loop', iteration, trecho: finalText.slice(0, 120),
+          });
+          claudeMessages.push({ role: 'assistant', content: finalText });
+          claudeMessages.push({
+            role: 'user',
+            content: 'Você acabou de repetir uma mensagem que já mandou nesta conversa. O cliente leu e respondeu outra coisa — insistir na mesma pergunta soa que você não escutou. Releia a ÚLTIMA mensagem dele e responda ao que ele realmente disse. Se ele pediu tempo pra confirmar, avisou que depois retorna, ou sugeriu outro horário, ACEITE: confirme que está tudo bem, diga que fica no aguardo e NÃO repita a pergunta.',
+          });
+          reformulou = true;
+          finalText = '';
+          continue;
+        }
+
         if (finalText) break; // resposta pronta pro cliente
 
         // finalText VAZIO. Se foi logo após uma tool (save silencioso), o Claude
