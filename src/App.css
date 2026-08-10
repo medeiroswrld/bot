@@ -580,16 +580,22 @@
 
 .lead-kanban-board {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* São 6 status; com repeat(5) o último caía numa segunda linha sozinho. */
+  grid-template-columns: repeat(6, 1fr);
   gap: 14px;
-  align-items: flex-start;
+  align-items: stretch;
 }
 .lead-kanban-column {
   background: var(--input-bg);
   border-radius: var(--r-xl);
   padding: 12px;
-  min-height: 400px;
   border: 1px solid var(--border);
+  /* Sem teto, uma coluna com 500 leads esticava a página inteira e as outras
+     cinco ficavam ilegíveis lá em cima. Cada coluna rola por conta agora. */
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 250px);
+  min-height: 320px;
 }
 .lead-kanban-col-header {
   display: flex; align-items: center; gap: 8px;
@@ -602,7 +608,26 @@
   background: var(--border); padding: 1px 7px;
   border-radius: 99px; color: var(--text-secondary);
 }
-.lead-kanban-col-body { display: flex; flex-direction: column; gap: 8px; }
+.lead-kanban-col-body {
+  display: flex; flex-direction: column; gap: 8px;
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  /* Não deixa o scroll da coluna "vazar" e rolar a página junto no fim. */
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+.lead-kanban-col-body::-webkit-scrollbar { width: 6px; }
+.lead-kanban-col-body::-webkit-scrollbar-thumb {
+  background: var(--border); border-radius: 3px;
+}
+.lead-kanban-col-body::-webkit-scrollbar-track { background: transparent; }
+.kanban-ver-mais {
+  margin-top: 4px; padding: 7px; width: 100%;
+  border: 1px dashed var(--border); border-radius: var(--r-md);
+  background: transparent; color: var(--text-secondary);
+  font-size: 0.76rem; font-weight: 600; cursor: pointer;
+}
+.kanban-ver-mais:hover { border-color: var(--accent); color: var(--accent); }
 .lead-kanban-card {
   padding: 12px; cursor: grab;
   border: 1.5px solid transparent;
@@ -883,4 +908,7 @@
 }
 @media (max-width: 1400px) {
   .lead-kanban-board { grid-template-columns: repeat(3, 1fr); }
+  /* Em telas menores as colunas empilham em 2 linhas, então o teto por coluna
+     precisa ser menor pra caber as duas. */
+  .lead-kanban-column { max-height: 60vh; }
 }

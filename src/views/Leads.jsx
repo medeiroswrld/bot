@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     Search, List, LayoutGrid, X, Phone, MessageSquare, Users, Trash2, Upload, Archive
 } from 'lucide-react';
@@ -19,6 +19,9 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
         </div>
     </div>
 );
+
+// Cards renderizados por coluna antes do "ver mais".
+const CARDS_POR_COLUNA = 25;
 
 const STATUS_MAP = {
     novo: { label: 'Novo', bg: '#eff6ff', color: '#3b82f6', dot: '#3b82f6' },
@@ -203,6 +206,15 @@ const Leads = () => {
     const [mostrarImportados, setMostrarImportados] = useState(false);
     const [importando, setImportando] = useState(false);
     const [filtroIdade, setFiltroIdade] = useState('todos');
+    // Quantos cards cada coluna mostra. Renderizar 500 de uma vez trava a tela,
+    // e ninguém arrasta o card nº 300 — quem procura alguém específico usa a
+    // busca ou a visão de tabela.
+    const [limites, setLimites] = useState({});
+
+    // Mudou o filtro, o recorte é outro: volta as colunas ao tamanho inicial.
+    useEffect(() => {
+        setLimites({});
+    }, [search, filterStatus, filtroIdade, mostrarImportados]);
 
     const handleDeleteLead = (id) => { setConfirmDeleteId(id); };
     const confirmDelete = () => {
@@ -354,6 +366,9 @@ const Leads = () => {
                     {statusOrder.map(statusKey => {
                         const info = STATUS_MAP[statusKey];
                         const items = filtered.filter(l => l.status === statusKey);
+                        const limite = limites[statusKey] ?? CARDS_POR_COLUNA;
+                        const visiveis = items.slice(0, limite);
+                        const restantes = items.length - visiveis.length;
                         return (
                             <div key={statusKey} className="lead-kanban-column"
                                 onDragOver={handleDragOver}
@@ -364,7 +379,7 @@ const Leads = () => {
                                     <span className="column-count">{items.length}</span>
                                 </div>
                                 <div className="lead-kanban-col-body">
-                                    {items.map(lead => (
+                                    {visiveis.map(lead => (
                                         <div key={lead.id} className="lead-kanban-card card"
                                             draggable
                                             onDragStart={e => handleDragStart(e, lead.id)}
@@ -385,6 +400,15 @@ const Leads = () => {
                                             </div>
                                         </div>
                                     ))}
+                                    {restantes > 0 && (
+                                        <button
+                                            type="button"
+                                            className="kanban-ver-mais"
+                                            onClick={() => setLimites(p => ({ ...p, [statusKey]: limite + CARDS_POR_COLUNA }))}
+                                        >
+                                            Ver mais {Math.min(restantes, CARDS_POR_COLUNA)} de {restantes}
+                                        </button>
+                                    )}
                                     {items.length === 0 && (
                                         <div className="empty-column">Arraste leads para cá</div>
                                     )}
