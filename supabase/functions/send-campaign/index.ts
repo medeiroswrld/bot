@@ -101,7 +101,10 @@ serve(async (req) => {
     const sendsRows = recipients.map((r) => ({
       campaign_id, customer_phone: r.phone, customer_name: r.name ?? null, lead_id: r.lead_id ?? null, status: 'pending',
     }));
-    const { data: sends } = await supabase.from('campaign_sends').insert(sendsRows).select('id, customer_phone');
+    // customer_name entra no select porque o registro da conversa usa ele — sem
+    // isso a conversa nascia como "Sem nome" mesmo com o lead nomeado.
+    const { data: sends } = await supabase.from('campaign_sends')
+      .insert(sendsRows).select('id, customer_phone, customer_name');
 
     let sentCount = 0;
     let failedCount = 0;
@@ -132,6 +135,7 @@ serve(async (req) => {
           phone: send.customer_phone,
           name: send.customer_name,
           texto: renderizarCorpo(campaign.template?.body_text, bodyParameters),
+          campaignId: campaign_id,
         });
         sentCount++;
       } catch (e) {
@@ -289,7 +293,9 @@ function renderizarCorpo(bodyText: string | null | undefined, params: { text: st
 
 async function registrarDisparoNaConversa(
   supabase: DB,
-  { userId, phone, name, texto }: { userId: string; phone: string; name?: string | null; texto: string },
+  { userId, phone, name, texto, campaignId }: {
+    userId: string; phone: string; name?: string | null; texto: string; campaignId: string;
+  },
 ) {
   try {
     // Mesmo onConflict do webhook: se a pessoa já tem conversa, reaproveita.
@@ -304,7 +310,7 @@ async function registrarDisparoNaConversa(
 
     if (conv?.id) {
       await supabase.from('messages').insert({
-        conversation_id: conv.id, role: 'bot', content: texto,
+        conversation_id: conv.id, role: 'bot', content: texto, campaign_id: campaignId,
       });
     }
   } catch (e) {

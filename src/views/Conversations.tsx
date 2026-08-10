@@ -124,7 +124,23 @@ const ConvItem = React.memo(function ConvItem({
 
 // ─── Bubble ───────────────────────────────────────────────────────────────────
 
-const Bubble = React.memo(function Bubble({ msg }: { msg: Message }) {
+// Cor por TIPO de disparo, derivada do slug do template (que é estável) e não
+// do nome da campanha (que o lojista escreve à mão e muda toda vez).
+// Sem isso, "Oi Jose, faz um tempo que a gente não se fala" fica idêntico a uma
+// mensagem escrita pela IA — e o vendedor não sabe se o cliente respondeu a um
+// atendimento ou a um disparo em massa.
+const CAMPANHA_CORES: Record<string, { bg: string; cor: string }> = {
+  reativacao_cliente:  { bg: '#ede9fe', cor: '#6d28d9' },
+  aniversario_cliente: { bg: '#fce7f3', cor: '#be185d' },
+  feirao_de_carros:    { bg: '#ffedd5', cor: '#c2410c' },
+  veiculo_disponivel:  { bg: '#dbeafe', cor: '#1d4ed8' },
+  lembrete_visita:     { bg: '#ccfbf1', cor: '#0f766e' },
+};
+const CAMPANHA_PADRAO = { bg: '#e2e8f0', cor: '#475569' };
+
+export type CampanhaInfo = { nome: string; template: string };
+
+const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; campanha?: CampanhaInfo }) {
   const isCustomer = msg.role === 'customer';
   const isBot      = msg.role === 'bot';
   const time = new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -142,8 +158,22 @@ const Bubble = React.memo(function Bubble({ msg }: { msg: Message }) {
     <div style={{ display: 'flex', justifyContent: align, marginBottom: 8 }}>
       <div style={{ maxWidth: '75%', background: bgColor, borderRadius: 12, padding: '8px 12px', boxShadow: '0 1px 2px rgba(0,0,0,0.06)' }}>
         {!isCustomer && (
-          <div style={{ fontSize: '0.65rem', fontWeight: 700, color: labelColor, marginBottom: 2 }}>
-            {isBot ? 'Bot' : 'Atendente'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.65rem', fontWeight: 700, color: labelColor }}>
+              {campanha ? 'Campanha' : isBot ? 'Bot' : 'Atendente'}
+            </span>
+            {campanha && (
+              <span
+                title={campanha.nome}
+                style={{
+                  fontSize: '0.62rem', fontWeight: 700, padding: '1px 7px', borderRadius: 999,
+                  background: (CAMPANHA_CORES[campanha.template] ?? CAMPANHA_PADRAO).bg,
+                  color: (CAMPANHA_CORES[campanha.template] ?? CAMPANHA_PADRAO).cor,
+                }}
+              >
+                {campanha.nome}
+              </span>
+            )}
           </div>
         )}
         <p style={{ margin: 0, fontSize: '0.875rem', lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: textColor }}>
@@ -191,6 +221,8 @@ export default function Conversations() {
   const [lastMessages, setLastMessages]   = useState<Record<string, Message>>({});
   const [selectedId, setSelectedId]       = useState<string | null>(null);
   const [messages, setMessages]           = useState<Message[]>([]);
+  // id da campanha → nome + slug do template, pra etiquetar a bolha.
+  const [campanhas, setCampanhas]         = useState<Record<string, CampanhaInfo>>({});
   const [loading, setLoading]             = useState(true);
   const [msgLoading, setMsgLoading]       = useState(false);
   const [sending, setSending]             = useState(false);
@@ -297,6 +329,27 @@ export default function Conversations() {
   // Mantém ref sincronizada para detectar transições no realtime
   useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
 
+  // Campanhas do tenant, uma vez. São poucas (dezenas) e mudam raro, então não
+  // vale buscar por conversa aberta — carrega tudo e resolve em memória.
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelado = false;
+    (async () => {
+      const { data } = await supabaseTyped
+        .from('campaigns')
+        .select('id, name, template:template_id(meta_template_name)')
+        .eq('user_id', user.id);
+      if (cancelado) return;
+      const mapa: Record<string, CampanhaInfo> = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const c of ((data ?? []) as any[])) {
+        mapa[c.id] = { nome: c.name, template: c.template?.meta_template_name ?? '' };
+      }
+      setCampanhas(mapa);
+    })();
+    return () => { cancelado = true; };
+  }, [user?.id]);
+
   const deleteConversation = async () => {
     const id = confirmDeleteId;
     if (!id) return;
@@ -359,7 +412,7 @@ export default function Conversations() {
     // Limit agressivo: apenas as colunas necessárias e no máximo 3× o nº de conversas
     const { data } = await supabaseTyped
       .from('messages')
-      .select('id, conversation_id, role, content, wa_message_id, transcribed_from_audio, created_at')
+      .select('id, conversation_id, role, content, wa_message_id, transcribed_from_audio, campaign_id, created_at')
       .in('conversation_id', convIds)
       .order('created_at', { ascending: false })
       .limit(Math.max(convIds.length * 3, 60));
@@ -627,6 +680,7 @@ export default function Conversations() {
       content: text,
       wa_message_id: null,
       transcribed_from_audio: false,
+      campaign_id: null,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticMsg]);
@@ -801,7 +855,13 @@ export default function Conversations() {
               ? <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 40 }}><Loader2 size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--primary)' }} /></div>
               : messages.length === 0
                 ? <div style={{ textAlign: 'center', color: 'var(--text-secondary)', paddingTop: 40, fontSize: '0.85rem' }}>Nenhuma mensagem ainda.</div>
-                : messages.map((msg) => <Bubble key={msg.id} msg={msg} />)}
+                : messages.map((msg) => (
+                    <Bubble
+                      key={msg.id}
+                      msg={msg}
+                      campanha={msg.campaign_id ? campanhas[msg.campaign_id] : undefined}
+                    />
+                  ))}
             <div ref={messagesEndRef} />
           </div>
 
