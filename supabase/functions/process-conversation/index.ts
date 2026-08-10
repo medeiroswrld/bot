@@ -2474,6 +2474,58 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     });
   }
 
+  // ── 7c. Travas de RESGATE ──────────────────────────────────────────────────
+  //    Três situações em que insistir é pior do que passar pra um humano. Todas
+  //    saíram da conversa da Luciane (10/08): ela perguntou de um Prisma que a
+  //    loja tinha postado no Instagram e não estava cadastrado. O bot repetiu
+  //    "não está cadastrado" quatro vezes, ignorou o link do reel que ela mandou
+  //    como prova, mandou ela procurar a loja PELO INSTAGRAM — o canal de onde
+  //    ela veio — e continuou repetindo depois de "péssimo atendimento".
+  //    Nenhum humano foi chamado em nenhum momento.
+  const ultimaDoCliente = [...history].reverse().find((m) => m.role === 'user')?.content ?? '';
+
+  // (a) O cliente reclamou do atendimento. Continuar respondendo só piora.
+  const INSATISFACAO =
+    /p[ée]ssimo|horr[íi]vel|rid[íi]culo|absurdo|vergonha|n[ãa]o gostei|decepcion|vou reclamar|despreparad|mal atendid|atendimento ruim|in[uú]til/i;
+
+  // (b) O bot empurrando o cliente pra outro canal. Ele É a loja: mandar
+  //     "falar com a loja" em outro lugar quebra a persona (veio o "vc não é da
+  //     loja?") e joga fora um atendimento que já estava na mão.
+  const MANDOU_PRA_OUTRO_CANAL =
+    /(instagram|direct|face(book)?|insta)\b[^.!?\n]{0,60}(pergunt|confirm|fala|manda|chama|contato)|(pergunt|confirm|fala|manda|chama|entrar? em contato)[^.!?\n]{0,60}\b(instagram|direct|face(book)?)\b|contato\s+(direto\s+)?com\s+a\s+loja/i;
+
+  // (c) Segunda negativa de estoque na mesma conversa. Dizer "não temos" uma vez
+  //     é legítimo; se o cliente insiste, quem resolve é gente — o carro pode
+  //     existir de verdade e só não estar cadastrado ainda.
+  const NEGATIVA_ESTOQUE =
+    /n[ãa]o\s+(\w+\s+){0,2}(temos|tem|est[áa]|aparece|consta|encontr\w*|localizei|achei|cadastrad\w*)/i;
+  const negativasAnteriores = history.filter(
+    (m) => m.role === 'assistant' && NEGATIVA_ESTOQUE.test(m.content),
+  ).length;
+
+  let motivoResgate: string | null = null;
+  if (INSATISFACAO.test(ultimaDoCliente)) {
+    motivoResgate = 'cliente reclamou do atendimento';
+  } else if (MANDOU_PRA_OUTRO_CANAL.test(finalText)) {
+    motivoResgate = 'bot mandou o cliente pra outro canal';
+  } else if (negativasAnteriores >= 1 && NEGATIVA_ESTOQUE.test(finalText)) {
+    motivoResgate = 'segunda negativa de estoque na mesma conversa';
+  }
+
+  if (motivoResgate && !toolsUsadas.has('chamar_atendente')) {
+    await supabase.from('conversations').update({ status: 'pending' }).eq('id', conversationId);
+    const nome = customerName ? `${String(customerName).split(' ')[0]}, ` : '';
+    // Substitui o texto: nesses casos a mensagem que o modelo escreveu é o
+    // próprio problema (repetição ou "vá pro Instagram"), não dá pra só marcar
+    // pending e mandar assim mesmo.
+    finalText = motivoResgate === 'cliente reclamou do atendimento'
+      ? `${nome}me desculpa por isso. Vou chamar agora uma pessoa da equipe pra te atender — só um instante que já te respondem por aqui. 🙏`
+      : `${nome}deixa eu confirmar isso certinho com a equipe pra não te passar informação errada. Já te respondem por aqui, é rapidinho. 😊`;
+    log.warn('handoff de resgate', {
+      action: 'chamar_atendente', forcado: true, motivo: motivoResgate, negativasAnteriores,
+    });
+  }
+
   // ── 8. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────
   const sent = await sendMessage(customerPhone, finalText, phoneNumberId || undefined, waToken, log);
   if (sent) {
