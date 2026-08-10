@@ -8,8 +8,15 @@
 // precisa conferir por conta própria, não confiar no que o front mandar).
 export const DIAS_CLIENTE_NOVO = 30;
 
-/** 'novo' se cadastrado nos últimos 30 dias, senão 'antigo'. */
+/**
+ * 'novo' se cadastrado nos últimos 30 dias, senão 'antigo'.
+ *
+ * `client_type` sobrepõe quando o lojista classificou na mão — é o caso da
+ * importação, em que a data de cadastro é hoje mas o cliente é de anos atrás.
+ */
 export function classificarIdade(lead) {
+  if (lead?.client_type === 'novo' || lead?.client_type === 'antigo') return lead.client_type;
+
   const bruto = lead?.date ?? lead?.created_at;
   if (!bruto) return 'antigo';
   const t = new Date(bruto).getTime();

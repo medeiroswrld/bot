@@ -11,7 +11,10 @@ const DELAY_BETWEEN_SENDS_MS = 1100;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = any;
-interface Recipient { phone: string; name?: string | null; lead_id?: string | null; created_at?: string | null; }
+interface Recipient {
+  phone: string; name?: string | null; lead_id?: string | null;
+  created_at?: string | null; client_type?: string | null;
+}
 
 serve(async (req) => {
   const corsHeaders = buildCors(req);
@@ -186,6 +189,10 @@ async function refinarPublico(
     const corte = Date.now() - DIAS_CLIENTE_NOVO * 86400000;
     const antes = lista.length;
     lista = lista.filter((r) => {
+      // Classificação manual (vem da importação) manda sobre a data.
+      if (r.client_type === 'novo' || r.client_type === 'antigo') {
+        return idade === 'novos' ? r.client_type === 'novo' : r.client_type === 'antigo';
+      }
       if (!r.created_at) return true;
       const nasceu = new Date(r.created_at).getTime();
       return idade === 'novos' ? nasceu >= corte : nasceu < corte;
@@ -228,23 +235,24 @@ async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]>
   const filter = campaign.audience_filter ?? {};
   const uid = campaign.user_id;
   const mapLeads = (data: DB[]) => (data ?? []).map((l) => ({
-    phone: l.phone, name: l.name, lead_id: l.id, created_at: l.created_at,
+    phone: l.phone, name: l.name, lead_id: l.id,
+    created_at: l.created_at, client_type: l.client_type,
   }));
 
   switch (campaign.audience_type) {
     case 'all_leads': {
-      const { data } = await supabase.from('leads').select('id, name, phone, created_at').eq('user_id', uid).not('phone', 'is', null);
+      const { data } = await supabase.from('leads').select('id, name, phone, created_at, client_type').eq('user_id', uid).not('phone', 'is', null);
       return mapLeads(data);
     }
     case 'leads_by_status': {
       const statuses = filter.statuses ?? [];
-      const { data } = await supabase.from('leads').select('id, name, phone, created_at').eq('user_id', uid).in('status', statuses).not('phone', 'is', null);
+      const { data } = await supabase.from('leads').select('id, name, phone, created_at, client_type').eq('user_id', uid).in('status', statuses).not('phone', 'is', null);
       return mapLeads(data);
     }
     case 'leads_inactive': {
       const days = filter.days_inactive ?? 30;
       const cutoff = new Date(Date.now() - days * 86400000).toISOString();
-      const { data } = await supabase.from('leads').select('id, name, phone, created_at').eq('user_id', uid).lt('updated_at', cutoff).not('phone', 'is', null);
+      const { data } = await supabase.from('leads').select('id, name, phone, created_at, client_type').eq('user_id', uid).lt('updated_at', cutoff).not('phone', 'is', null);
       return mapLeads(data);
     }
     case 'leads_by_interest_vehicle': {
@@ -262,7 +270,7 @@ async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]>
     // gerou pra dar pra disparar só pra ela — que é o motivo da importação.
     case 'leads_by_source': {
       const sources = filter.sources ?? ['importacao'];
-      const { data } = await supabase.from('leads').select('id, name, phone, created_at')
+      const { data } = await supabase.from('leads').select('id, name, phone, created_at, client_type')
         .eq('user_id', uid).in('source', sources).not('phone', 'is', null);
       return mapLeads(data);
     }

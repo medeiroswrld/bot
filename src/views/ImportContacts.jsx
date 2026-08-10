@@ -21,6 +21,11 @@ const ImportContacts = ({ onClose }) => {
   const [etapa, setEtapa] = useState('colar');   // colar | conferir | pronto
   const [salvando, setSalvando] = useState(false);
   const [resultado, setResultado] = useState(null);
+  // Classificação em massa + exceções por linha. Padrão 'antigo': quem importa
+  // planilha está trazendo carteira velha, e sem isso o contato entraria como
+  // "novo" por 30 dias só porque o cadastro no sistema é de hoje.
+  const [tipoPadrao, setTipoPadrao] = useState('antigo');
+  const [tipoPorLinha, setTipoPorLinha] = useState({});
 
   // Telefones que já existem, na forma canônica (ignora o nono dígito).
   const jaExistem = useMemo(() => {
@@ -59,6 +64,7 @@ const ImportContacts = ({ onClose }) => {
           // útil que "Cliente" — dá pra identificar na lista.
           name: n.nome || formatarTelefone(n.e164),
           phone: n.e164,
+          client_type: tipoPorLinha[n.e164] ?? tipoPadrao,
         })),
       );
       setResultado(res);
@@ -124,6 +130,23 @@ const ImportContacts = ({ onClose }) => {
               ))}
             </div>
 
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: '0.85rem', paddingBottom: '0.85rem', borderBottom: '1px solid var(--border)' }}>
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Classificar todos como:</span>
+              {['antigo', 'novo'].map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  className={`inv-filter-btn ${tipoPadrao === t ? 'active' : ''}`}
+                  onClick={() => { setTipoPadrao(t); setTipoPorLinha({}); }}
+                >
+                  {t === 'antigo' ? 'Clientes antigos' : 'Clientes novos'}
+                </button>
+              ))}
+              <span style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                (dá pra mudar um a um na lista)
+              </span>
+            </div>
+
             <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                 <tbody>
@@ -133,8 +156,29 @@ const ImportContacts = ({ onClose }) => {
                       <td style={{ padding: '0.5rem 0.75rem', fontFamily: 'monospace' }}>
                         {a.e164 ? formatarTelefone(a.e164) : a.telefone}
                       </td>
-                      <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', color: CORES[a.situacao].cor, whiteSpace: 'nowrap' }}>
-                        {a.detalhe ?? CORES[a.situacao].rotulo}
+                      <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        {a.situacao === 'novo' ? (
+                          // Só o que vai entrar pode ser reclassificado — mudar
+                          // o tipo de uma linha ignorada não faria nada.
+                          <button
+                            type="button"
+                            onClick={() => setTipoPorLinha((p) => ({
+                              ...p,
+                              [a.e164]: (p[a.e164] ?? tipoPadrao) === 'antigo' ? 'novo' : 'antigo',
+                            }))}
+                            title="Clique pra alternar entre antigo e novo"
+                            style={{
+                              border: '1px solid var(--border)', borderRadius: 999,
+                              padding: '2px 10px', fontSize: '0.75rem', fontWeight: 600,
+                              cursor: 'pointer', background: 'transparent',
+                              color: (tipoPorLinha[a.e164] ?? tipoPadrao) === 'novo' ? '#059669' : '#475569',
+                            }}
+                          >
+                            {(tipoPorLinha[a.e164] ?? tipoPadrao) === 'novo' ? 'novo' : 'antigo'}
+                          </button>
+                        ) : (
+                          <span style={{ color: CORES[a.situacao].cor }}>{a.detalhe ?? CORES[a.situacao].rotulo}</span>
+                        )}
                       </td>
                     </tr>
                   ))}

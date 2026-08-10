@@ -266,6 +266,7 @@ export const AppProvider = ({ children }) => {
         car: l.cars ? `${l.cars.brand} ${l.cars.model} ${l.cars.version}` : 'Busca genérica',
         status: l.status,
         source: l.source || 'manual',
+        client_type: l.client_type || null,
         notes: l.notes || '',
         date: l.created_at,
         birth_date: l.birth_date || '',
@@ -1155,6 +1156,8 @@ export const AppProvider = ({ children }) => {
         email: '',
         status: 'novo',
         source: 'importacao',
+        // Sobrepõe a régua de 30 dias: o cadastro é de hoje, mas o cliente não.
+        client_type: c.client_type ?? 'antigo',
         notes: 'Importado da base de clientes antigos',
       }));
 
@@ -1172,6 +1175,7 @@ export const AppProvider = ({ children }) => {
         car: 'Busca genérica',
         status: l.status,
         source: l.source,
+        client_type: l.client_type,
         notes: l.notes || '',
         date: l.created_at,
         city: 'Não informada',

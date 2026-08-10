@@ -74,13 +74,23 @@ export function formatarTelefone(e164) {
     : `(${ddd}) ${n.slice(0, 4)}-${n.slice(4)}`;
 }
 
+// Um trecho que parece telefone: começa em dígito (ou parêntese), tem só
+// dígito/espaço/pontuação de telefone, e no mínimo 8 caracteres.
+const CORRIDA_TELEFONE = String.raw`\+?\s*\(?\d[\d\s().+-]{6,}\d`;
+const TEL_NO_FIM     = new RegExp(`(${CORRIDA_TELEFONE})\\s*$`);
+const TEL_NO_COMECO  = new RegExp(`^(${CORRIDA_TELEFONE})`);
+
 /**
  * Lê o texto colado. Cada linha vira um contato.
  *
- * Colar duas colunas do Excel produz "nome<TAB>telefone", então o TAB é o
- * separador principal; ponto-e-vírgula e vírgula cobrem CSV colado. Quando há
- * dois campos, o que tiver mais dígitos é o telefone — assim funciona mesmo se
- * a planilha estiver com as colunas invertidas.
+ * Em vez de procurar separador, ACHA O TELEFONE dentro da linha e trata o resto
+ * como nome. A primeira versão só quebrava em TAB/;/, e perdia o nome quando a
+ * lista vinha separada por espaços — que é o que sai ao copiar de PDF, de tabela
+ * formatada ou de mensagem de WhatsApp. Pior: parecia funcionar, porque nome não
+ * tem dígito e o telefone saía certo mesmo assim.
+ *
+ * Também cobre linha sem espaço nenhum ("Jaqueline Teles(15) 99665-0535") e
+ * coluna invertida (telefone antes do nome).
  */
 export function parsearContatos(texto) {
   return String(texto ?? '')
@@ -88,14 +98,18 @@ export function parsearContatos(texto) {
     .map((l) => l.trim())
     .filter(Boolean)
     .map((linha) => {
-      const partes = linha.split(/\t|;|,/).map((p) => p.trim()).filter(Boolean);
+      const limpo = linha.replace(/[\t;|]+/g, ' ');
+      const m = limpo.match(TEL_NO_FIM) ?? limpo.match(TEL_NO_COMECO);
 
-      if (partes.length === 1) return { nome: '', telefone: partes[0], linha };
+      if (!m) return { nome: limpo.replace(/\s+/g, ' ').trim(), telefone: '', linha };
 
-      const digitos = (s) => (s.match(/\d/g) ?? []).length;
-      const [a, b] = partes;
-      return digitos(b) >= digitos(a)
-        ? { nome: a, telefone: b, linha }
-        : { nome: b, telefone: a, linha };
+      const telefone = m[1].trim();
+      const nome = limpo
+        .replace(m[1], ' ')
+        .replace(/^[\s,;-]+|[\s,;-]+$/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      return { nome, telefone, linha };
     });
 }
