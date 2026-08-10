@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import {
-    Search, List, LayoutGrid, X, Phone, MessageSquare, Users, Trash2
+    Search, List, LayoutGrid, X, Phone, MessageSquare, Users, Trash2, Upload, Archive
 } from 'lucide-react';
 import { useAppContext, formatDateStr } from '../context/AppContext.jsx';
+import ImportContacts from './ImportContacts.jsx';
 
 const ConfirmModal = ({ message, onConfirm, onCancel }) => (
     <div className="modal-overlay" onClick={onCancel}>
@@ -198,6 +199,8 @@ const Leads = () => {
     const [selectedLead, setSelectedLead] = useState(null);
     const [draggedId, setDraggedId] = useState(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+    const [mostrarImportados, setMostrarImportados] = useState(false);
+    const [importando, setImportando] = useState(false);
 
     const handleDeleteLead = (id) => { setConfirmDeleteId(id); };
     const confirmDelete = () => {
@@ -207,10 +210,16 @@ const Leads = () => {
         addToast('Lead excluído.', 'success');
     };
 
+    // A base importada fica ESCONDIDA por padrão. São milhares de contatos que
+    // nunca falaram com a loja: se caírem no kanban junto com os leads do bot,
+    // a coluna "Novo" vira um paredão e o vendedor perde a tela de trabalho.
+    const importados = leads.filter(l => l.source === 'importacao').length;
+
     const filtered = leads.filter(l => {
         const matchSearch = `${l.name} ${l.car} ${l.phone} ${l.city}`.toLowerCase().includes(search.toLowerCase());
         const matchStatus = filterStatus === 'todos' || l.status === filterStatus;
-        return matchSearch && matchStatus;
+        const matchOrigem = mostrarImportados || l.source !== 'importacao';
+        return matchSearch && matchStatus && matchOrigem;
     });
 
     const handleStatusChange = (id, newStatus) => {
@@ -246,6 +255,18 @@ const Leads = () => {
                             <option key={key} value={key}>{val.label}</option>
                         ))}
                     </select>
+                    {importados > 0 && (
+                        <button
+                            className={mostrarImportados ? 'btn-primary' : 'btn-secondary'}
+                            onClick={() => setMostrarImportados(v => !v)}
+                            title="A base importada fica fora do funil do dia a dia"
+                        >
+                            <Archive size={15} /> Base importada ({importados})
+                        </button>
+                    )}
+                    <button className="btn-secondary" onClick={() => setImportando(true)}>
+                        <Upload size={15} /> Importar
+                    </button>
                     <div className="view-toggle">
                         <button className={`toggle-btn ${view === 'table' ? 'active' : ''}`} onClick={() => setView('table')} title="Tabela"><List size={18} /></button>
                         <button className={`toggle-btn ${view === 'kanban' ? 'active' : ''}`} onClick={() => setView('kanban')} title="Kanban"><LayoutGrid size={18} /></button>
@@ -361,6 +382,7 @@ const Leads = () => {
                     onCancel={() => setConfirmDeleteId(null)}
                 />
             )}
+            {importando && <ImportContacts onClose={() => setImportando(false)} />}
         </div>
     );
 };

@@ -265,6 +265,7 @@ export const AppProvider = ({ children }) => {
         email: l.email || '',
         car: l.cars ? `${l.cars.brand} ${l.cars.model} ${l.cars.version}` : 'Busca genérica',
         status: l.status,
+        source: l.source || 'manual',
         notes: l.notes || '',
         date: l.created_at,
         birth_date: l.birth_date || '',
@@ -1137,6 +1138,52 @@ export const AppProvider = ({ children }) => {
     }
   };
 
+  // Importação da base antiga. Vem em lote e pode ser grande (milhares), então
+  // insere em blocos — um INSERT único com 2.000 linhas estoura limite de
+  // payload e, se falhar, perde tudo. Em blocos, o que passou fica.
+  const importLeads = async (contatos) => {
+    if (!user?.id || !contatos?.length) return { inseridos: 0 };
+
+    const BLOCO = 500;
+    const inseridos = [];
+
+    for (let i = 0; i < contatos.length; i += BLOCO) {
+      const linhas = contatos.slice(i, i + BLOCO).map((c) => ({
+        user_id: user.id,
+        name: c.name,
+        phone: c.phone,
+        email: '',
+        status: 'novo',
+        source: 'importacao',
+        notes: 'Importado da base de clientes antigos',
+      }));
+
+      const { data, error } = await supabase.from('leads').insert(linhas).select('*');
+      if (error) throw error;
+      inseridos.push(...(data ?? []));
+    }
+
+    setLeads((prev) => [
+      ...inseridos.map((l) => ({
+        id: l.id,
+        name: l.name,
+        phone: l.phone || '',
+        email: l.email || '',
+        car: 'Busca genérica',
+        status: l.status,
+        source: l.source,
+        notes: l.notes || '',
+        date: l.created_at,
+        city: 'Não informada',
+        avatar: (l.name || '?').charAt(0).toUpperCase(),
+      })),
+      ...prev,
+    ]);
+
+    addToast(`${inseridos.length} contatos importados.`, 'success');
+    return { inseridos: inseridos.length };
+  };
+
   const updateLeadStatus = async (id, newStatus) => {
     if (!user?.id) return;
     try {
@@ -1575,6 +1622,7 @@ export const AppProvider = ({ children }) => {
 
     // Leads
     addLead,
+    importLeads,
     updateLeadStatus,
     updateLead,
     deleteLead,

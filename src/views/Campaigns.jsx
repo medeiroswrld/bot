@@ -50,6 +50,7 @@ const CampaignWizard = ({ onClose }) => {
             case 'leads_by_status': return { statuses };
             case 'leads_inactive': return { days_inactive: Number(daysInactive) || 30 };
             case 'leads_by_interest_vehicle': return { model: interestModel };
+            case 'leads_by_source': return { sources: ['importacao'] };
             case 'custom_phones': return { phones: customPhones.split('\n').map(p => p.replace(/\D/g, '')).filter(Boolean) };
             default: return {};
         }
@@ -68,6 +69,7 @@ const CampaignWizard = ({ onClose }) => {
             case 'leads_by_interest_vehicle':
                 return (vehicleInterests || []).filter(v => v.status === 'active' && (v.model || '').toLowerCase().includes(interestModel.toLowerCase())).length;
             case 'custom_phones': return audienceFilter.phones.length;
+            case 'leads_by_source': return withPhone.filter(l => l.source === 'importacao').length;
             default: return 0;
         }
     }, [audienceType, leads, vehicleInterests, statuses, daysInactive, interestModel, audienceFilter]);
@@ -180,6 +182,7 @@ const CampaignWizard = ({ onClose }) => {
                     <div className="settings-form">
                         {[
                             ['all_leads', 'Todos os leads'],
+                            ['leads_by_source', 'Base importada (clientes antigos)'],
                             ['leads_by_status', 'Leads em determinados status'],
                             ['leads_inactive', 'Leads inativos há X dias'],
                             ['leads_by_interest_vehicle', 'Lista de espera por modelo'],

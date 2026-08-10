@@ -184,6 +184,14 @@ async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]>
       const phones = filter.phones ?? [];
       return phones.map((p: string) => ({ phone: String(p).replace(/\D/g, '') })).filter((r: Recipient) => r.phone);
     }
+    // Base antiga importada pelo lojista. Fica separada dos leads que o bot
+    // gerou pra dar pra disparar só pra ela — que é o motivo da importação.
+    case 'leads_by_source': {
+      const sources = filter.sources ?? ['importacao'];
+      const { data } = await supabase.from('leads').select('id, name, phone')
+        .eq('user_id', uid).in('source', sources).not('phone', 'is', null);
+      return mapLeads(data);
+    }
     default:
       return [];
   }
