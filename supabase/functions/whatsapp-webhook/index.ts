@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { timingSafeEqual } from 'https://deno.land/std@0.224.0/crypto/timing_safe_equal.ts';
-import { parseInboundMessage, sendMessage, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
+import { parseInboundMessage, sendMessage, resolveWhatsAppToken, variantesTelefoneBR } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -102,6 +102,75 @@ async function processStatuses(payload: any): Promise<void> {
   }
 }
 
+type ConvRow = {
+  id: string;
+  status: string;
+  customer_phone: string;
+  customer_name: string | null;
+};
+
+/**
+ * Acha a conversa do cliente, tolerando o nono dígito, ou cria uma nova.
+ *
+ * A campanha grava o número como está no cadastro (5515996311510) e a Meta
+ * responde no formato dela, que para celular antigo costuma vir sem o 9
+ * (551596311510). Casando telefone literal, a resposta do cliente abriria uma
+ * conversa NOVA, separada do disparo que a gerou — o lojista veria duas linhas
+ * pra mesma pessoa e o bot atenderia sem saber o que foi prometido.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function acharOuCriarConversa(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any, userId: string, from: string, senderName: string, now: string,
+): Promise<ConvRow | null> {
+  const variantes = variantesTelefoneBR(from);
+
+  // Só vale a busca extra quando o número TEM outra forma possível.
+  if (variantes.length > 1) {
+    const { data: existente } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('user_id', userId)
+      .in('customer_phone', variantes)
+      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existente) {
+      if (String(existente.customer_phone) !== from) {
+        console.log(`[WH] conversa reaproveitada por variante do 9: ${maskPhone(String(existente.customer_phone))} ← ${maskPhone(from)}`);
+      }
+      const { data: atualizada } = await supabase
+        .from('conversations')
+        .update({
+          last_message_at: now,
+          // O nome do perfil só preenche vazio: o que já está lá pode ter vindo
+          // do cadastro da loja, que costuma ser mais completo.
+          customer_name: existente.customer_name || senderName || null,
+        })
+        .eq('id', existente.id)
+        .select()
+        .single();
+      return (atualizada ?? existente) as ConvRow;
+    }
+  }
+
+  const { data: nova, error } = await supabase
+    .from('conversations')
+    .upsert(
+      { user_id: userId, customer_phone: from, customer_name: senderName || null, last_message_at: now },
+      { onConflict: 'user_id,customer_phone' },
+    )
+    .select()
+    .single();
+
+  if (error || !nova) {
+    console.error('[WH] Erro ao upsert conversa:', error);
+    return null;
+  }
+  return nova as ConvRow;
+}
+
 // ─── main ─────────────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -197,25 +266,12 @@ serve(async (req) => {
 
   const userId = settings.user_id;
 
-  // 6. Acha ou cria a conversa para (user_id, customer_phone)
+  // 6. Acha ou cria a conversa
   const now = new Date().toISOString();
+  const upsertedConv = await acharOuCriarConversa(supabase, userId, from, senderName, now);
 
-  const { data: upsertedConv, error: convErr } = await supabase
-    .from('conversations')
-    .upsert(
-      {
-        user_id: userId,
-        customer_phone: from,
-        customer_name: senderName || null,
-        last_message_at: now,
-      },
-      { onConflict: 'user_id,customer_phone' },
-    )
-    .select()
-    .single();
-
-  if (convErr || !upsertedConv) {
-    console.error('[WH] Erro ao upsert conversa:', convErr);
+  if (!upsertedConv) {
+    console.error('[WH] Erro ao upsert conversa');
     return ok();
   }
 

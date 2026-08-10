@@ -16,6 +16,30 @@ export interface InboundMessage {
 
 // ─── parseInboundMessage ───────────────────────────────────────────────────────
 
+/**
+ * As duas formas do mesmo celular brasileiro: com e sem o nono dígito.
+ *
+ * A Meta devolve celular antigo como 551596311510 enquanto a planilha do
+ * lojista (e o nosso cadastro) tem 5515996311510. É a MESMA pessoa. Casando
+ * telefone literal, a resposta do cliente cairia numa conversa nova, separada
+ * do disparo que a gerou — e o bot atenderia sem saber o que foi prometido.
+ *
+ * Só mexe em número BR (55 + DDD): qualquer outro volta como está.
+ */
+export function variantesTelefoneBR(phone: string): string[] {
+  const d = String(phone ?? '').replace(/\D/g, '');
+  if (!d.startsWith('55') || d.length < 12 || d.length > 13) return [d].filter(Boolean);
+
+  const ddd = d.slice(2, 4);
+  const num = d.slice(4);
+  const set = new Set<string>([d]);
+
+  if (num.length === 9 && num.startsWith('9')) set.add(`55${ddd}${num.slice(1)}`);
+  if (num.length === 8) set.add(`55${ddd}9${num}`);
+
+  return [...set];
+}
+
 export function parseInboundMessage(payload: unknown): InboundMessage | null {
   const provider = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
   return provider === 'evolution' ? parseEvolution(payload) : parseCloud(payload);

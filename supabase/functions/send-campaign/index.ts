@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendWhatsAppTemplate } from '../_shared/sendTemplate.ts';
-import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
+import { resolveWhatsAppToken, variantesTelefoneBR } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
 import { buildCors } from '../_shared/cors.ts';
@@ -298,15 +298,41 @@ async function registrarDisparoNaConversa(
   },
 ) {
   try {
-    // Mesmo onConflict do webhook: se a pessoa já tem conversa, reaproveita.
-    const { data: conv } = await supabase
-      .from('conversations')
-      .upsert(
-        { user_id: userId, customer_phone: phone, customer_name: name || null, last_message_at: new Date().toISOString() },
-        { onConflict: 'user_id,customer_phone' },
-      )
-      .select('id')
-      .single();
+    const agora = new Date().toISOString();
+
+    // Procura primeiro pelas duas formas do número (com e sem o nono dígito):
+    // a pessoa pode já ter conversado pelo WhatsApp, e aí a Meta gravou no
+    // formato dela. Sem isso o disparo abriria uma segunda conversa pra quem
+    // já é cliente conhecido.
+    const variantes = variantesTelefoneBR(phone);
+    let convId: string | null = null;
+
+    if (variantes.length > 1) {
+      const { data: existente } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('user_id', userId)
+        .in('customer_phone', variantes)
+        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+      if (existente?.id) {
+        convId = existente.id;
+        await supabase.from('conversations')
+          .update({ last_message_at: agora }).eq('id', existente.id);
+      }
+    }
+
+    const { data: conv } = convId
+      ? { data: { id: convId } }
+      : await supabase
+        .from('conversations')
+        .upsert(
+          { user_id: userId, customer_phone: phone, customer_name: name || null, last_message_at: agora },
+          { onConflict: 'user_id,customer_phone' },
+        )
+        .select('id')
+        .single();
 
     if (conv?.id) {
       await supabase.from('messages').insert({
