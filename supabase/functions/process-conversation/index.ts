@@ -2503,24 +2503,43 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     (m) => m.role === 'assistant' && NEGATIVA_ESTOQUE.test(m.content),
   ).length;
 
+  // (d) O cliente afirma que VIU o carro anunciado. Aqui ele sabe algo que o
+  //     sistema não sabe — a loja posta antes de cadastrar. Discutir com quem
+  //     tem o link na mão é o pior caminho possível: escala já na PRIMEIRA
+  //     negativa, sem esperar a segunda.
+  const VIU_ANUNCIADO =
+    /\b(vi|vimos|vc|vcs|voc[êe]s?)\b[^.!?\n]{0,30}\b(postaram|postou|anunciaram|anunciou|publicaram|publicou)\b|\bvi\s+(no|na|pelo|pela)\s+(instagram|insta|face|facebook|site|story|stories|status)\b|\b(no|na)\s+(an[úu]ncio|post|reel|story)\b|instagram\.com|facebook\.com/i;
+
   let motivoResgate: string | null = null;
   if (INSATISFACAO.test(ultimaDoCliente)) {
     motivoResgate = 'cliente reclamou do atendimento';
   } else if (MANDOU_PRA_OUTRO_CANAL.test(finalText)) {
     motivoResgate = 'bot mandou o cliente pra outro canal';
-  } else if (negativasAnteriores >= 1 && NEGATIVA_ESTOQUE.test(finalText)) {
-    motivoResgate = 'segunda negativa de estoque na mesma conversa';
+  } else if (
+    (negativasAnteriores >= 1 || VIU_ANUNCIADO.test(ultimaDoCliente)) &&
+    NEGATIVA_ESTOQUE.test(finalText)
+  ) {
+    motivoResgate = VIU_ANUNCIADO.test(ultimaDoCliente)
+      ? 'cliente diz que viu o carro anunciado'
+      : 'segunda negativa de estoque na mesma conversa';
   }
 
   if (motivoResgate && !toolsUsadas.has('chamar_atendente')) {
     await supabase.from('conversations').update({ status: 'pending' }).eq('id', conversationId);
     const nome = customerName ? `${String(customerName).split(' ')[0]}, ` : '';
-    // Substitui o texto: nesses casos a mensagem que o modelo escreveu é o
-    // próprio problema (repetição ou "vá pro Instagram"), não dá pra só marcar
-    // pending e mandar assim mesmo.
-    finalText = motivoResgate === 'cliente reclamou do atendimento'
-      ? `${nome}me desculpa por isso. Vou chamar agora uma pessoa da equipe pra te atender — só um instante que já te respondem por aqui. 🙏`
-      : `${nome}deixa eu confirmar isso certinho com a equipe pra não te passar informação errada. Já te respondem por aqui, é rapidinho. 😊`;
+
+    if (motivoResgate === 'cliente reclamou do atendimento') {
+      // Substitui: o que o modelo ia mandar é mais do mesmo que gerou a queixa.
+      finalText = `${nome}me desculpa por isso. Vou chamar agora uma pessoa da equipe pra te atender — só um instante que já te respondem por aqui. 🙏`;
+    } else if (motivoResgate === 'bot mandou o cliente pra outro canal') {
+      // Substitui: o texto é ativamente nocivo (manda o cliente embora).
+      finalText = `${nome}deixa eu confirmar isso certinho com a equipe pra não te passar informação errada. Já te respondem por aqui, é rapidinho. 😊`;
+    } else {
+      // ACRESCENTA: aqui o modelo costuma ter oferecido uma alternativa boa
+      // (o Onix Plus no lugar do Prisma). Chamar gente não pode custar a
+      // oferta — o cliente recebe as duas coisas.
+      finalText = `${finalText.trim()}\n\nE já pedi pra uma pessoa da equipe confirmar isso direitinho pra você — em instantes te respondem por aqui. 😊`;
+    }
     log.warn('handoff de resgate', {
       action: 'chamar_atendente', forcado: true, motivo: motivoResgate, negativasAnteriores,
     });
