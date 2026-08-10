@@ -1,10 +1,12 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Megaphone, Plus, X, Trash2, Send, ChevronRight, ChevronLeft,
     Users, CheckCircle2, AlertCircle, Loader2, FileText
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
+import { supabase } from '../lib/supabase.js';
+import { classificarIdade, DIAS_CLIENTE_NOVO } from '../lib/leads.js';
 
 const CAMP_STATUS = {
     draft:     { label: 'Rascunho',   color: '#64748b', bg: '#f1f5f9' },
@@ -42,37 +44,86 @@ const CampaignWizard = ({ onClose }) => {
     const [interestModel, setInterestModel] = useState('');
     const [customPhones, setCustomPhones] = useState('');
     const [sending, setSending] = useState(false);
+    // Refinamentos: combinam com QUALQUER público acima, em vez de virarem
+    // opções novas na lista (senão "base importada" × "antigos" × "não recebeu"
+    // viraria uma dezena de radios).
+    const [idade, setIdade] = useState('todos');            // todos | novos | antigos
+    const [excluirJaRecebeu, setExcluirJaRecebeu] = useState('nenhum');
+    const [excluirDias, setExcluirDias] = useState(7);
+    const [jaReceberam, setJaReceberam] = useState(new Set());
 
     const template = approvedTemplates.find(t => t.id === templateId) || null;
 
-    const audienceFilter = useMemo(() => {
-        switch (audienceType) {
-            case 'leads_by_status': return { statuses };
-            case 'leads_inactive': return { days_inactive: Number(daysInactive) || 30 };
-            case 'leads_by_interest_vehicle': return { model: interestModel };
-            case 'leads_by_source': return { sources: ['importacao'] };
-            case 'custom_phones': return { phones: customPhones.split('\n').map(p => p.replace(/\D/g, '')).filter(Boolean) };
-            default: return {};
-        }
-    }, [audienceType, statuses, daysInactive, interestModel, customPhones]);
+    // Telefones que já receberam, pro contador da tela bater com o que o
+    // servidor vai fazer. Mesma regra do refinarPublico no send-campaign.
+    useEffect(() => {
+        if (excluirJaRecebeu === 'nenhum') { setJaReceberam(new Set()); return; }
+        let cancelado = false;
+        (async () => {
+            let cq = supabase.from('campaigns').select('id');
+            if (excluirJaRecebeu === 'este_template' && templateId) cq = cq.eq('template_id', templateId);
+            const { data: camps } = await cq;
+            const ids = (camps || []).map(c => c.id);
+            if (!ids.length) { if (!cancelado) setJaReceberam(new Set()); return; }
 
-    // Contagem estimada do público (client-side, a partir do estado do context)
-    const audienceCount = useMemo(() => {
+            let sq = supabase.from('campaign_sends')
+                .select('customer_phone').in('campaign_id', ids).eq('status', 'sent');
+            if (excluirJaRecebeu === 'qualquer') {
+                sq = sq.gte('sent_at', new Date(Date.now() - (Number(excluirDias) || 7) * 86400000).toISOString());
+            }
+            const { data } = await sq;
+            if (!cancelado) setJaReceberam(new Set((data || []).map(s => String(s.customer_phone))));
+        })();
+        return () => { cancelado = true; };
+    }, [excluirJaRecebeu, excluirDias, templateId]);
+
+    const audienceFilter = useMemo(() => {
+        // Os refinamentos viajam junto com o filtro do público, pra qualquer tipo.
+        const refino = { idade, excluir_ja_recebeu: excluirJaRecebeu, excluir_dias: Number(excluirDias) || 7 };
+        switch (audienceType) {
+            case 'leads_by_status': return { ...refino, statuses };
+            case 'leads_inactive': return { ...refino, days_inactive: Number(daysInactive) || 30 };
+            case 'leads_by_interest_vehicle': return { ...refino, model: interestModel };
+            case 'leads_by_source': return { ...refino, sources: ['importacao'] };
+            case 'custom_phones': return { ...refino, phones: customPhones.split('\n').map(p => p.replace(/\D/g, '')).filter(Boolean) };
+            default: return refino;
+        }
+    }, [audienceType, statuses, daysInactive, interestModel, customPhones, idade, excluirJaRecebeu, excluirDias]);
+
+    // Público base, antes dos refinamentos (client-side, a partir do context).
+    const publicoBase = useMemo(() => {
         const withPhone = (leads || []).filter(l => l.phone);
         switch (audienceType) {
-            case 'all_leads': return withPhone.length;
-            case 'leads_by_status': return withPhone.filter(l => statuses.includes(l.status)).length;
+            case 'all_leads': return withPhone;
+            case 'leads_by_status': return withPhone.filter(l => statuses.includes(l.status));
             case 'leads_inactive': {
                 const cutoff = Date.now() - (Number(daysInactive) || 30) * 86400000;
-                return withPhone.filter(l => new Date(l.date || 0).getTime() < cutoff).length;
+                return withPhone.filter(l => new Date(l.date || 0).getTime() < cutoff);
             }
-            case 'leads_by_interest_vehicle':
-                return (vehicleInterests || []).filter(v => v.status === 'active' && (v.model || '').toLowerCase().includes(interestModel.toLowerCase())).length;
-            case 'custom_phones': return audienceFilter.phones.length;
-            case 'leads_by_source': return withPhone.filter(l => l.source === 'importacao').length;
-            default: return 0;
+            case 'leads_by_source': return withPhone.filter(l => l.source === 'importacao');
+            default: return [];
         }
-    }, [audienceType, leads, vehicleInterests, statuses, daysInactive, interestModel, audienceFilter]);
+    }, [audienceType, leads, statuses, daysInactive]);
+
+    // Mesmas regras do refinarPublico no send-campaign — o contador tem que
+    // bater com o que vai sair de verdade, senão o lojista dispara achando que
+    // são 30 e saem 12.
+    const publicoFinal = useMemo(() => publicoBase.filter(l => {
+        if (idade !== 'todos' && classificarIdade(l) !== idade) return false;
+        if (excluirJaRecebeu !== 'nenhum' && jaReceberam.has(String(l.phone))) return false;
+        return true;
+    }), [publicoBase, idade, excluirJaRecebeu, jaReceberam]);
+
+    const audienceCount = useMemo(() => {
+        // Estes dois não vêm de `leads`, então não passam pelos refinamentos.
+        if (audienceType === 'leads_by_interest_vehicle') {
+            return (vehicleInterests || []).filter(v => v.status === 'active' && (v.model || '').toLowerCase().includes(interestModel.toLowerCase())).length;
+        }
+        if (audienceType === 'custom_phones') return audienceFilter.phones.length;
+        return publicoFinal.length;
+    }, [audienceType, vehicleInterests, interestModel, audienceFilter, publicoFinal]);
+
+    const removidosPeloRefino = publicoBase.length - publicoFinal.length;
 
     const estCost = audienceCount * (COST_PER_CONV[template?.category] ?? 0.15);
 
@@ -223,9 +274,60 @@ const CampaignWizard = ({ onClose }) => {
                             </div>
                         )}
 
+                        {/* Refinamentos — combinam com qualquer público acima */}
+                        {audienceType !== 'custom_phones' && audienceType !== 'leads_by_interest_vehicle' && (
+                            <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                                <p style={{ margin: '0 0 8px', fontWeight: 600, fontSize: '0.85rem' }}>Refinar</p>
+
+                                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 4 }}>
+                                    Tempo de cadastro
+                                </label>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                                    {[
+                                        ['todos', 'Todos'],
+                                        ['novos', `Novos (até ${DIAS_CLIENTE_NOVO} dias)`],
+                                        ['antigos', `Antigos (+${DIAS_CLIENTE_NOVO} dias)`],
+                                    ].map(([val, label]) => (
+                                        <button key={val} type="button" className={`inv-filter-btn ${idade === val ? 'active' : ''}`} onClick={() => setIdade(val)}>
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 4 }}>
+                                    Quem já recebeu
+                                </label>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                                    {[
+                                        ['nenhum', 'Pode repetir'],
+                                        ['este_template', 'Pular quem já recebeu ESTE template'],
+                                        ['qualquer', 'Pular quem recebeu qualquer disparo recente'],
+                                    ].map(([val, label]) => (
+                                        <button key={val} type="button" className={`inv-filter-btn ${excluirJaRecebeu === val ? 'active' : ''}`} onClick={() => setExcluirJaRecebeu(val)}>
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+                                {excluirJaRecebeu === 'qualquer' && (
+                                    <div className="form-group" style={{ marginTop: 8 }}>
+                                        <label>Últimos quantos dias</label>
+                                        <input type="number" value={excluirDias} onChange={e => setExcluirDias(e.target.value)} min={1} style={{ maxWidth: 120 }} />
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         <div style={{ marginTop: 12, padding: 12, borderRadius: 8, background: 'var(--bg-card)', display: 'flex', alignItems: 'center', gap: 8 }}>
                             <Users size={18} style={{ color: 'var(--primary)' }} />
-                            <strong>{audienceCount}</strong> {audienceCount === 1 ? 'pessoa' : 'pessoas'} vão receber
+                            <div>
+                                <div><strong>{audienceCount}</strong> {audienceCount === 1 ? 'pessoa vai' : 'pessoas vão'} receber</div>
+                                {removidosPeloRefino > 0 && (
+                                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                                        {removidosPeloRefino} {removidosPeloRefino === 1 ? 'ficou' : 'ficaram'} de fora pelo refino
+                                        {' '}(de {publicoBase.length} no total)
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}

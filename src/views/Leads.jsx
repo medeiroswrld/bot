@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { useAppContext, formatDateStr } from '../context/AppContext.jsx';
 import ImportContacts from './ImportContacts.jsx';
+import { classificarIdade, IDADE_ROTULO, DIAS_CLIENTE_NOVO } from '../lib/leads.js';
 
 const ConfirmModal = ({ message, onConfirm, onCancel }) => (
     <div className="modal-overlay" onClick={onCancel}>
@@ -201,6 +202,7 @@ const Leads = () => {
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
     const [mostrarImportados, setMostrarImportados] = useState(false);
     const [importando, setImportando] = useState(false);
+    const [filtroIdade, setFiltroIdade] = useState('todos');
 
     const handleDeleteLead = (id) => { setConfirmDeleteId(id); };
     const confirmDelete = () => {
@@ -215,11 +217,20 @@ const Leads = () => {
     // a coluna "Novo" vira um paredão e o vendedor perde a tela de trabalho.
     const importados = leads.filter(l => l.source === 'importacao').length;
 
+    // Métrica de carteira: novo é quem entrou nos últimos 30 dias. Isso é o
+    // TEMPO DE CADASTRO, não o status "Novo" do funil — um cliente pode estar
+    // em Negociação e já ser "antigo" nesta régua.
+    const porIdade = leads.reduce((acc, l) => {
+        acc[classificarIdade(l)]++;
+        return acc;
+    }, { novo: 0, antigo: 0 });
+
     const filtered = leads.filter(l => {
         const matchSearch = `${l.name} ${l.car} ${l.phone} ${l.city}`.toLowerCase().includes(search.toLowerCase());
         const matchStatus = filterStatus === 'todos' || l.status === filterStatus;
         const matchOrigem = mostrarImportados || l.source !== 'importacao';
-        return matchSearch && matchStatus && matchOrigem;
+        const matchIdade = filtroIdade === 'todos' || classificarIdade(l) === filtroIdade;
+        return matchSearch && matchStatus && matchOrigem && matchIdade;
     });
 
     const handleStatusChange = (id, newStatus) => {
@@ -242,7 +253,12 @@ const Leads = () => {
             <header className="view-header-flex">
                 <div className="view-header">
                     <h1>Central de Leads</h1>
-                    <p>{leads.length} contato{leads.length !== 1 ? 's' : ''} capturado{leads.length !== 1 ? 's' : ''} via WhatsApp e n8n.</p>
+                    <p>
+                        {leads.length} contato{leads.length !== 1 ? 's' : ''} ·{' '}
+                        <strong style={{ color: IDADE_ROTULO.novo.cor }}>{porIdade.novo} novo{porIdade.novo !== 1 ? 's' : ''}</strong>
+                        {' '}(até {DIAS_CLIENTE_NOVO} dias) ·{' '}
+                        <strong>{porIdade.antigo} antigo{porIdade.antigo !== 1 ? 's' : ''}</strong>
+                    </p>
                 </div>
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
                     <div className="search-box">
@@ -254,6 +270,11 @@ const Leads = () => {
                         {Object.entries(STATUS_MAP).map(([key, val]) => (
                             <option key={key} value={key}>{val.label}</option>
                         ))}
+                    </select>
+                    <select value={filtroIdade} onChange={e => setFiltroIdade(e.target.value)} style={{ padding: '0.65rem 1rem', borderRadius: 8, border: '1px solid var(--border)', outline: 'none', background: 'var(--card-bg)', color: 'var(--text-primary)' }}>
+                        <option value="todos">Novos e antigos</option>
+                        <option value="novo">Só novos (até {DIAS_CLIENTE_NOVO}d)</option>
+                        <option value="antigo">Só antigos</option>
                     </select>
                     {importados > 0 && (
                         <button

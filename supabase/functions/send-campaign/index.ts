@@ -11,7 +11,7 @@ const DELAY_BETWEEN_SENDS_MS = 1100;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = any;
-interface Recipient { phone: string; name?: string | null; lead_id?: string | null; }
+interface Recipient { phone: string; name?: string | null; lead_id?: string | null; created_at?: string | null; }
 
 serve(async (req) => {
   const corsHeaders = buildCors(req);
@@ -73,7 +73,14 @@ serve(async (req) => {
 
     const token = await resolveWhatsAppToken(supabase, campaign.user_id);
 
-    const recipients = await resolveAudience(supabase, campaign);
+    const publicoBruto = await resolveAudience(supabase, campaign);
+    const { lista: recipients, excluidosIdade, excluidosJaReceberam } =
+      await refinarPublico(supabase, campaign, publicoBruto);
+
+    console.log('[send-campaign] público', {
+      bruto: publicoBruto.length, final: recipients.length,
+      excluidosIdade, excluidosJaReceberam,
+    });
 
     if (recipients.length === 0) {
       await supabase.from('campaigns')
@@ -152,25 +159,92 @@ serve(async (req) => {
   }
 });
 
+// Corte entre cliente NOVO e ANTIGO, em dias desde o cadastro. Existe uma
+// cópia disso em src/lib/leads.js (o front precisa contar antes de disparar).
+// É um número só; duplicar aqui é mais seguro que o front mandar o corte e o
+// servidor obedecer sem conferir.
+const DIAS_CLIENTE_NOVO = 30;
+
+/**
+ * Refina o público já resolvido: idade do cadastro + quem já recebeu.
+ *
+ * Fica DEPOIS do resolveAudience de propósito — assim combina com qualquer
+ * público ("base importada" + "só antigos" + "que ainda não recebeu o feirão")
+ * sem multiplicar as opções da tela.
+ */
+async function refinarPublico(
+  supabase: DB, campaign: DB, recipients: Recipient[],
+): Promise<{ lista: Recipient[]; excluidosIdade: number; excluidosJaReceberam: number }> {
+  const filter = campaign.audience_filter ?? {};
+  let lista = recipients;
+  let excluidosIdade = 0;
+
+  // 1. Idade do cadastro. Só vale pra público vindo de `leads` — lista de
+  //    espera e números avulsos não têm data de cadastro, então passam direto.
+  const idade = filter.idade ?? 'todos';
+  if (idade === 'novos' || idade === 'antigos') {
+    const corte = Date.now() - DIAS_CLIENTE_NOVO * 86400000;
+    const antes = lista.length;
+    lista = lista.filter((r) => {
+      if (!r.created_at) return true;
+      const nasceu = new Date(r.created_at).getTime();
+      return idade === 'novos' ? nasceu >= corte : nasceu < corte;
+    });
+    excluidosIdade = antes - lista.length;
+  }
+
+  // 2. Quem já recebeu. O histórico já existe em campaign_sends; o que faltava
+  //    era usar. "este_template" é o caso do dia a dia (mandei 10 hoje, mando
+  //    os outros 10 amanhã); "qualquer" é trava de fadiga, pra não bombardear
+  //    a mesma pessoa com reativação hoje e feirão depois de amanhã.
+  const excluir = filter.excluir_ja_recebeu ?? 'nenhum';
+  let excluidosJaReceberam = 0;
+
+  if (excluir === 'este_template' || excluir === 'qualquer') {
+    let cq = supabase.from('campaigns').select('id').eq('user_id', campaign.user_id);
+    if (excluir === 'este_template') cq = cq.eq('template_id', campaign.template_id);
+    const { data: camps } = await cq;
+    const ids = (camps ?? []).map((c: DB) => c.id).filter((id: string) => id !== campaign.id);
+
+    if (ids.length) {
+      let sq = supabase.from('campaign_sends')
+        .select('customer_phone').in('campaign_id', ids).eq('status', 'sent');
+      if (excluir === 'qualquer') {
+        const dias = Number(filter.excluir_dias) || 7;
+        sq = sq.gte('sent_at', new Date(Date.now() - dias * 86400000).toISOString());
+      }
+      const { data: enviados } = await sq;
+      const jaReceberam = new Set((enviados ?? []).map((s: DB) => String(s.customer_phone)));
+      const antes = lista.length;
+      lista = lista.filter((r) => !jaReceberam.has(String(r.phone)));
+      excluidosJaReceberam = antes - lista.length;
+    }
+  }
+
+  return { lista, excluidosIdade, excluidosJaReceberam };
+}
+
 async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]> {
   const filter = campaign.audience_filter ?? {};
   const uid = campaign.user_id;
-  const mapLeads = (data: DB[]) => (data ?? []).map((l) => ({ phone: l.phone, name: l.name, lead_id: l.id }));
+  const mapLeads = (data: DB[]) => (data ?? []).map((l) => ({
+    phone: l.phone, name: l.name, lead_id: l.id, created_at: l.created_at,
+  }));
 
   switch (campaign.audience_type) {
     case 'all_leads': {
-      const { data } = await supabase.from('leads').select('id, name, phone').eq('user_id', uid).not('phone', 'is', null);
+      const { data } = await supabase.from('leads').select('id, name, phone, created_at').eq('user_id', uid).not('phone', 'is', null);
       return mapLeads(data);
     }
     case 'leads_by_status': {
       const statuses = filter.statuses ?? [];
-      const { data } = await supabase.from('leads').select('id, name, phone').eq('user_id', uid).in('status', statuses).not('phone', 'is', null);
+      const { data } = await supabase.from('leads').select('id, name, phone, created_at').eq('user_id', uid).in('status', statuses).not('phone', 'is', null);
       return mapLeads(data);
     }
     case 'leads_inactive': {
       const days = filter.days_inactive ?? 30;
       const cutoff = new Date(Date.now() - days * 86400000).toISOString();
-      const { data } = await supabase.from('leads').select('id, name, phone').eq('user_id', uid).lt('updated_at', cutoff).not('phone', 'is', null);
+      const { data } = await supabase.from('leads').select('id, name, phone, created_at').eq('user_id', uid).lt('updated_at', cutoff).not('phone', 'is', null);
       return mapLeads(data);
     }
     case 'leads_by_interest_vehicle': {
@@ -188,7 +262,7 @@ async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]>
     // gerou pra dar pra disparar só pra ela — que é o motivo da importação.
     case 'leads_by_source': {
       const sources = filter.sources ?? ['importacao'];
-      const { data } = await supabase.from('leads').select('id, name, phone')
+      const { data } = await supabase.from('leads').select('id, name, phone, created_at')
         .eq('user_id', uid).in('source', sources).not('phone', 'is', null);
       return mapLeads(data);
     }
