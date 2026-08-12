@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
-import { sendMessage, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
+import { sendMessage, sendMessageComId, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskName } from '../_shared/maskPII.ts';
 import { withRequest, type Logger } from '../_shared/logger.ts';
 
@@ -1660,6 +1660,7 @@ Oferecer horário é certo. Insistir depois que ele respondeu, não.
 - **Ele sugeriu outro dia ou horário** → vá pelo dele. Confira em ver_horarios_disponiveis e, se estiver livre, agende NO HORÁRIO QUE ELE PEDIU. Só ofereça alternativa se o dele estiver mesmo indisponível.
 - **NUNCA mande a mesma pergunta duas vezes.** Se ele não respondeu o que você esperava, é porque respondeu outra coisa — leia de novo o que ele disse e trate aquilo. Repetir a frase soa que você não escutou.
 - **Toda pergunta dele merece resposta.** Se ele perguntar de um modelo no meio de outro assunto ("Fiorino não tem?"), responda ANTES de seguir seu roteiro. Pergunta ignorada é cliente perdido.
+- **"Com quem eu falo?" é apresentação, não desafio.** Responda com naturalidade — seu nome e que é da equipe da loja — e siga. NÃO responda com "pode falar comigo mesmo", "sou eu mesmo" ou qualquer variação que soe defensiva: a pessoa só quer saber com quem está falando. Exemplo: "Sou da equipe da ${company} 😊 E você, como se chama?"
 
 ## Limites (vendedor bom, não chato)
 
@@ -2636,16 +2637,20 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   }
 
   // ── 8. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────
-  const sent = await sendMessage(customerPhone, finalText, phoneNumberId || undefined, waToken, log);
+  const { ok: sent, wamid } = await sendMessageComId(customerPhone, finalText, phoneNumberId || undefined, waToken, log);
   if (sent) {
-    log.info('resposta enviada', { action: 'send_final', chars: finalText.length });
+    log.info('resposta enviada', { action: 'send_final', chars: finalText.length, wamid });
   } else {
     log.error('falha ao enviar WhatsApp — mensagem salva no banco mesmo assim', { action: 'send_final', phone: customerPhone });
   }
 
   // ── 9. Salva resposta do bot e atualiza last_message_at ────────────────────
   const now = new Date().toISOString();
-  await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: finalText });
+  // O wamid é o que liga esta linha aos webhooks de status (entregue/lido).
+  await supabase.from('messages').insert({
+    conversation_id: conversationId, role: 'bot', content: finalText,
+    wa_message_id: wamid, wa_status: sent ? 'sent' : 'failed',
+  });
   await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);
 
   return new Response('OK', { status: 200 });

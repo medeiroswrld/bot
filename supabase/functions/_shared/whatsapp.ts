@@ -256,15 +256,35 @@ export async function sendMessage(
   token?: string,
   log?: Logger,
 ): Promise<boolean> {
+  const { ok } = await sendMessageComId(to, text, phoneNumberId, token, log);
+  return ok;
+}
+
+/**
+ * Igual ao sendMessage, mas devolve o `wamid` que a Meta atribuiu à mensagem.
+ *
+ * É esse id que os webhooks de status (sent/delivered/read) referenciam — sem
+ * guardá-lo não há como saber se o cliente leu. Fica numa função separada pra
+ * não mexer na assinatura do sendMessage, usado em outras dez funções.
+ */
+export async function sendMessageComId(
+  to: string,
+  text: string,
+  phoneNumberId?: string,
+  token?: string,
+  log?: Logger,
+): Promise<{ ok: boolean; wamid: string | null }> {
   const l = log ?? logger;
   const provider = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
   const tk       = (token ?? Deno.env.get('WHATSAPP_TOKEN') ?? '').trim();
 
-  if (!tk) { l.error('token ausente', { action: 'sendMessage' }); return false; }
+  if (!tk) { l.error('token ausente', { action: 'sendMessage' }); return { ok: false, wamid: null }; }
 
-  return provider === 'evolution'
-    ? sendEvolution(to, text, tk, phoneNumberId, l)
-    : sendCloud(to, text, tk, phoneNumberId, l);
+  if (provider === 'evolution') {
+    const ok = await sendEvolution(to, text, tk, phoneNumberId, l);
+    return { ok, wamid: null };   // Evolution não expõe wamid
+  }
+  return sendCloud(to, text, tk, phoneNumberId, l);
 }
 
 async function sendCloud(
@@ -273,10 +293,10 @@ async function sendCloud(
   token: string,
   phoneNumberId?: string,
   log?: Logger,
-): Promise<boolean> {
+): Promise<{ ok: boolean; wamid: string | null }> {
   const l = log ?? logger;
   const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
-  if (!pid) { l.error('phone_number_id ausente', { action: 'sendCloud' }); return false; }
+  if (!pid) { l.error('phone_number_id ausente', { action: 'sendCloud' }); return { ok: false, wamid: null }; }
 
   const res = await fetch(`https://graph.facebook.com/v20.0/${pid}/messages`, {
     method: 'POST',
@@ -296,9 +316,19 @@ async function sendCloud(
   if (!res.ok) {
     const body = await res.text();
     l.error('falha ao enviar', { action: 'sendCloud', to, status: res.status, body });
-    return false;
+    return { ok: false, wamid: null };
   }
-  return true;
+
+  // A resposta traz messages[0].id — o wamid que os webhooks de status usam.
+  let wamid: string | null = null;
+  try {
+    const j = await res.json() as { messages?: Array<{ id?: string }> };
+    wamid = j?.messages?.[0]?.id ?? null;
+  } catch {
+    // Enviou, mas não conseguimos ler o id: segue sem rastreio de leitura.
+    l.warn('resposta do envio sem wamid legível', { action: 'sendCloud', to });
+  }
+  return { ok: true, wamid };
 }
 
 async function sendEvolution(

@@ -620,6 +620,7 @@ export interface Database {
           wa_message_id: string | null
           transcribed_from_audio: boolean | null
           campaign_id: string | null
+          wa_status: 'sent' | 'delivered' | 'read' | 'failed' | null
           created_at: string
         }
         Insert: {
@@ -630,6 +631,7 @@ export interface Database {
           wa_message_id?: string | null
           transcribed_from_audio?: boolean | null
           campaign_id?: string | null
+          wa_status?: 'sent' | 'delivered' | 'read' | 'failed' | null
           created_at?: string
         }
         Update: {

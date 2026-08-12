@@ -140,6 +140,33 @@ const CAMPANHA_PADRAO = { bg: '#e2e8f0', cor: '#475569' };
 
 export type CampanhaInfo = { nome: string; template: string };
 
+/**
+ * Os "vistos" do WhatsApp, na mensagem que a loja mandou.
+ *
+ * Vale mais do que enfeite: distingue "o cliente está ignorando" de "ele nem
+ * viu ainda" — e isso muda o que o vendedor faz a seguir. Sem status (mensagem
+ * antiga, ou envio pelo provider que não devolve id) não mostra nada, em vez de
+ * mostrar um estado falso.
+ */
+const VistoWhats = ({ status }: { status: string | null }) => {
+  if (!status) return null;
+
+  if (status === 'failed') {
+    return <span title="Falha no envio" style={{ marginLeft: 5, color: '#dc2626', fontWeight: 700 }}>!</span>;
+  }
+
+  const lido = status === 'read';
+  const duplo = status === 'delivered' || lido;
+  return (
+    <span
+      title={lido ? 'Lida' : duplo ? 'Entregue' : 'Enviada'}
+      style={{ marginLeft: 5, color: lido ? '#3b82f6' : 'rgba(0,0,0,0.4)', fontWeight: 700, letterSpacing: '-0.18em' }}
+    >
+      {duplo ? '✓✓' : '✓'}
+    </span>
+  );
+};
+
 const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; campanha?: CampanhaInfo }) {
   const isCustomer = msg.role === 'customer';
   const isBot      = msg.role === 'bot';
@@ -186,6 +213,7 @@ const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; cam
         </p>
         <p style={{ margin: '4px 0 0', fontSize: '0.65rem', color: timeColor, textAlign: 'right' }}>
           {time}
+          {!isCustomer && <VistoWhats status={msg.wa_status} />}
         </p>
       </div>
     </div>
@@ -412,7 +440,7 @@ export default function Conversations() {
     // Limit agressivo: apenas as colunas necessárias e no máximo 3× o nº de conversas
     const { data } = await supabaseTyped
       .from('messages')
-      .select('id, conversation_id, role, content, wa_message_id, transcribed_from_audio, campaign_id, created_at')
+      .select('id, conversation_id, role, content, wa_message_id, transcribed_from_audio, campaign_id, wa_status, created_at')
       .in('conversation_id', convIds)
       .order('created_at', { ascending: false })
       .limit(Math.max(convIds.length * 3, 60));
@@ -681,6 +709,7 @@ export default function Conversations() {
       wa_message_id: null,
       transcribed_from_audio: false,
       campaign_id: null,
+      wa_status: null,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticMsg]);

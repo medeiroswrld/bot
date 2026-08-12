@@ -62,6 +62,21 @@ async function processStatuses(payload: any): Promise<void> {
 
           console.log('[webhook-status]', wamid, '→', newStatus);
 
+          // Mensagem do bot na conversa: é o "visto" que o lojista vê no CRM.
+          // Só avança o status (sent → delivered → read); a Meta às vezes
+          // entrega os eventos fora de ordem, e um 'delivered' atrasado não
+          // pode apagar um 'read' que já chegou.
+          const ORDEM: Record<string, number> = { sent: 1, delivered: 2, read: 3, failed: 4 };
+          const { data: msg } = await supabase
+            .from('messages')
+            .select('id, wa_status')
+            .eq('wa_message_id', wamid)
+            .maybeSingle();
+
+          if (msg && (ORDEM[newStatus] ?? 0) > (ORDEM[String(msg.wa_status)] ?? 0)) {
+            await supabase.from('messages').update({ wa_status: newStatus }).eq('id', msg.id);
+          }
+
           // Busca o envio de campanha por wamid. Se não existir, não é campanha — ignora.
           const { data: existing } = await supabase
             .from('campaign_sends')
