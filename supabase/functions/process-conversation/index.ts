@@ -2276,13 +2276,19 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     const welcomeText =
       `Olá! 👋 Bem-vindo à ${companyName}.\n\nPra começar, qual o seu nome?`;
 
-    const now = new Date().toISOString();
-    await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: welcomeText });
-    await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);
-
-    const wSent = await sendMessage(customerPhone, welcomeText, wPid || undefined, wToken, log);
-    if (wSent) log.info('boas-vindas enviadas', { action: 'welcome' });
+    // Envia ANTES de gravar: o wamid só existe depois da resposta da Meta, e é
+    // ele que liga esta mensagem aos webhooks de entregue/lido.
+    const { ok: wSent, wamid: wWamid } =
+      await sendMessageComId(customerPhone, welcomeText, wPid || undefined, wToken, log);
+    if (wSent) log.info('boas-vindas enviadas', { action: 'welcome', wamid: wWamid });
     else log.error('falha ao enviar boas-vindas', { action: 'welcome', phone: customerPhone });
+
+    const now = new Date().toISOString();
+    await supabase.from('messages').insert({
+      conversation_id: conversationId, role: 'bot', content: welcomeText,
+      wa_message_id: wWamid, wa_status: wSent ? 'sent' : 'failed',
+    });
+    await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);
 
     return new Response('OK', { status: 200 });
   }
@@ -2509,8 +2515,12 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     const fallbackMsg = 'Opa, me perdi aqui rapidinho 😅 me lembra o que a gente tava vendo? Já te ajudo.';
 
     try {
-      const fbSent = await sendMessage(customerPhone, fallbackMsg, phoneNumberId || undefined, waToken, log);
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: fallbackMsg });
+      const { ok: fbSent, wamid: fbWamid } =
+        await sendMessageComId(customerPhone, fallbackMsg, phoneNumberId || undefined, waToken, log);
+      await supabase.from('messages').insert({
+        conversation_id: conversationId, role: 'bot', content: fallbackMsg,
+        wa_message_id: fbWamid, wa_status: fbSent ? 'sent' : 'failed',
+      });
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
       if (!fbSent) log.error('falha ao enviar ponte de erro (salva no banco mesmo assim)', { action: 'fallback', phone: customerPhone });
     } catch (sendErr) {
@@ -2527,8 +2537,12 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     log.error('resposta vazia mesmo após retry — enviando ponte (sem handoff)', { action: 'fallback' });
     const bridge = 'Opa, me perdi aqui rapidinho 😅 me lembra o que a gente tava vendo? Quero te ajudar a achar o carro certo.';
     try {
-      await sendMessage(customerPhone, bridge, phoneNumberId || undefined, waToken, log);
-      await supabase.from('messages').insert({ conversation_id: conversationId, role: 'bot', content: bridge });
+      const { ok: brSent, wamid: brWamid } =
+        await sendMessageComId(customerPhone, bridge, phoneNumberId || undefined, waToken, log);
+      await supabase.from('messages').insert({
+        conversation_id: conversationId, role: 'bot', content: bridge,
+        wa_message_id: brWamid, wa_status: brSent ? 'sent' : 'failed',
+      });
       await supabase.from('conversations').update({ last_message_at: new Date().toISOString() }).eq('id', conversationId);
     } catch (e) {
       log.error('erro ao enviar ponte de resposta vazia', { action: 'fallback', error: e });
