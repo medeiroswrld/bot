@@ -18,6 +18,13 @@ out/
 .env
 .env.*
 !.env.example
+
+# Nunca versionar: é o system prompt inteiro renderizado, o núcleo do produto.
+# Fica de fora pra um `git add .` distraído não publicá-lo.
+system-prompt-render-*.md
+
+# Lockfile do Deno, gerado pelo `deno check` local
+deno.lock
 *.local
 
 # Editor directories and files
