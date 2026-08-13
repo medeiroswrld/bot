@@ -360,6 +360,12 @@ function variantesDeModelo(termo: string): string[] {
   return [...new Set([limpo, espacos, colado, hifen])].filter(Boolean);
 }
 
+// Fecha o histórico quando ele termina em mensagem do bot (ver o uso, na
+// montagem do histórico). NÃO é fala do cliente: as travas de resgate precisam
+// ignorá-la, senão passam a testar este texto em vez do que a pessoa escreveu.
+const NOTA_FECHAMENTO =
+  '(sistema: as mensagens acima já foram enviadas por você ao cliente depois da última fala dele. Continue o atendimento a partir do que o cliente disse por último, sem reenviar mídia nem repetir o que já foi dito.)';
+
 /** Normaliza pra comparar sentido, não forma: sem acento, emoji ou pontuação. */
 function textoCru(s: string): string {
   return s
@@ -2387,6 +2393,24 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     return new Response('OK', { status: 200 });
   }
 
+  // A Anthropic exige que a conversa TERMINE em mensagem do cliente. Quando não
+  // termina, ela devolve 400 "does not support assistant message prefill" — que
+  // não é retentável, então o turno inteiro morre na ponte de erro.
+  //
+  // Acontece por CORRIDA entre turnos, e as fotos tornam provável: cada foto
+  // vira uma linha role='bot', o envio das 7 leva ~6s, e se o cliente escrever
+  // nesse meio-tempo o turno novo carrega um histórico que termina no bot.
+  // Foi exatamente isso na conversa do Cesar (12/08).
+  //
+  // Em vez de descartar essas linhas (o modelo reenviaria as fotos), fecha com
+  // uma nota de sistema explicando o que já saiu.
+  if (history[history.length - 1].role === 'assistant') {
+    log.warn('histórico terminava em mensagem do bot — fechando com nota de sistema', {
+      action: 'history', ultimas: history.length,
+    });
+    history.push({ role: 'user', content: NOTA_FECHAMENTO });
+  }
+
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
   const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
   const waToken = await resolveWhatsAppToken(supabase, userId);
@@ -2604,7 +2628,8 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   //    como prova, mandou ela procurar a loja PELO INSTAGRAM — o canal de onde
   //    ela veio — e continuou repetindo depois de "péssimo atendimento".
   //    Nenhum humano foi chamado em nenhum momento.
-  const ultimaDoCliente = [...history].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const ultimaDoCliente = [...history].reverse()
+    .find((m) => m.role === 'user' && m.content !== NOTA_FECHAMENTO)?.content ?? '';
 
   // (a) O cliente reclamou do atendimento. Continuar respondendo só piora.
   const INSATISFACAO =
