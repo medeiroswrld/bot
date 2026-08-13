@@ -1660,6 +1660,7 @@ Oferecer horário é certo. Insistir depois que ele respondeu, não.
 - **Ele sugeriu outro dia ou horário** → vá pelo dele. Confira em ver_horarios_disponiveis e, se estiver livre, agende NO HORÁRIO QUE ELE PEDIU. Só ofereça alternativa se o dele estiver mesmo indisponível.
 - **NUNCA mande a mesma pergunta duas vezes.** Se ele não respondeu o que você esperava, é porque respondeu outra coisa — leia de novo o que ele disse e trate aquilo. Repetir a frase soa que você não escutou.
 - **Toda pergunta dele merece resposta.** Se ele perguntar de um modelo no meio de outro assunto ("Fiorino não tem?"), responda ANTES de seguir seu roteiro. Pergunta ignorada é cliente perdido.
+- **NUNCA termine em "não tenho essa informação".** Isso é um beco sem saída: o cliente perguntou algo legítimo (aro da roda, se tem manual, quantos donos, se aceita troca por moto) e recebe uma porta fechada. Toda pergunta que você não consegue responder pelas ferramentas vira a MESMA coisa: diga que vai confirmar com a equipe e **chame \`chamar_atendente\`**. Exemplo: "Boa pergunta! Esse detalhe não está aqui comigo — já vou confirmar com a equipe e te falo em seguida 😊". Prometer e não chamar é pior que não prometer: o cliente fica esperando uma resposta que nunca vem.
 - **"Com quem eu falo?" é apresentação, não desafio.** Responda com naturalidade — seu nome e que é da equipe da loja — e siga. NÃO responda com "pode falar comigo mesmo", "sou eu mesmo" ou qualquer variação que soe defensiva: a pessoa só quer saber com quem está falando. Exemplo: "Sou da equipe da ${company} 😊 E você, como se chama?"
 
 ## Limites (vendedor bom, não chato)
@@ -2615,6 +2616,15 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   const VIU_ANUNCIADO =
     /\b(vi|vimos|vc|vcs|voc[êe]s?)\b[^.!?\n]{0,30}\b(postaram|postou|anunciaram|anunciou|publicaram|publicou)\b|\bvi\s+(no|na|pelo|pela)\s+(instagram|insta|face|facebook|site|story|stories|status)\b|\b(no|na)\s+(an[úu]ncio|post|reel|story)\b|instagram\.com|facebook\.com/i;
 
+  // (e) O bot prometeu CHECAR E VOLTAR. É a promessa mais comum e a que mais
+  //     vaza: "esse detalhe eu confirmo com a equipe e já te passo" (Cesar,
+  //     12/08, perguntando o aro da roda). A frase está certa — o erro é não
+  //     chamar ninguém. A conversa segue em 'bot', o bot não tem como voltar
+  //     com a resposta, e o cliente fica esperando pra sempre. Naquele dia só
+  //     não virou lead perdido porque um humano notou por acaso.
+  const PROMETEU_VERIFICAR =
+    /(confirm\w+|verific\w+|checa\w+|pergunt\w+|vou\s+ver)\s+[^.!?\n]{0,30}\bcom\s+(a\s+|o\s+|meu\s+|minha\s+)?(equipe|gerente|superior|ger[êe]ncia|respons[áa]vel|time|pessoal|dono|propriet[áa]ri\w+|mec[âa]nic\w+)\b|\bj[áa]\s+te\s+(passo|falo|retorno|aviso|respondo|confirmo)\b|\bte\s+(retorno|respondo|confirmo)\s+(j[áa]|em|assim)/i;
+
   let motivoResgate: string | null = null;
   if (INSATISFACAO.test(ultimaDoCliente)) {
     motivoResgate = 'cliente reclamou do atendimento';
@@ -2627,6 +2637,8 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     motivoResgate = VIU_ANUNCIADO.test(ultimaDoCliente)
       ? 'cliente diz que viu o carro anunciado'
       : 'segunda negativa de estoque na mesma conversa';
+  } else if (PROMETEU_VERIFICAR.test(finalText)) {
+    motivoResgate = 'bot prometeu confirmar com a equipe';
   }
 
   if (motivoResgate && !toolsUsadas.has('chamar_atendente')) {
@@ -2639,6 +2651,10 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     } else if (motivoResgate === 'bot mandou o cliente pra outro canal') {
       // Substitui: o texto é ativamente nocivo (manda o cliente embora).
       finalText = `${nome}deixa eu confirmar isso certinho com a equipe pra não te passar informação errada. Já te respondem por aqui, é rapidinho. 😊`;
+    } else if (motivoResgate === 'bot prometeu confirmar com a equipe') {
+      // Texto INTACTO: ele já disse a coisa certa ("confirmo com a equipe e já
+      // te passo"). O defeito era só não chamar ninguém — o que a linha do
+      // status acima resolve. Acrescentar aviso aqui soaria repetido.
     } else {
       // ACRESCENTA: aqui o modelo costuma ter oferecido uma alternativa boa
       // (o Onix Plus no lugar do Prisma). Chamar gente não pode custar a
