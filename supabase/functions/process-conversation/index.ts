@@ -2511,9 +2511,25 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
       stack: err.stack,
     });
 
-    // Erro transitório do modelo NÃO é motivo de handoff — manda uma ponte
-    // amigável e mantém a conversa com o bot (o próximo turno do cliente reativa).
-    const fallbackMsg = 'Opa, me perdi aqui rapidinho 😅 me lembra o que a gente tava vendo? Já te ajudo.';
+    // Falha do modelo UMA vez é hiccup: manda uma ponte e mantém a conversa com
+    // o bot (o próximo turno do cliente reativa). Falhar DUAS vezes na mesma
+    // conversa não é hiccup — é o cliente batendo num bot quebrado, e aí quem
+    // atende tem que ser gente.
+    const jaFalhouAntes = history.some(
+      (m) => m.role === 'assistant' && m.content.includes('me perdi aqui rapidinho'),
+    );
+
+    // A ponte antiga pedia pro cliente repetir o que já tinha dito ("me lembra
+    // o que a gente tava vendo?") — e caía logo depois de uma resposta completa
+    // do bot, o que soava quebrado. Agora ela não devolve trabalho pro cliente.
+    const fallbackMsg = jaFalhouAntes
+      ? 'Desculpa a demora! Já chamei uma pessoa da equipe pra te atender direitinho — é rapidinho. 🙏'
+      : 'Opa, tive um probleminha aqui rapidinho 😅 pode repetir a última mensagem? Já te respondo.';
+
+    if (jaFalhouAntes) {
+      await supabase.from('conversations').update({ status: 'pending' }).eq('id', conversationId);
+      log.warn('segunda falha do modelo na mesma conversa — handoff', { action: 'fallback', forcado: true });
+    }
 
     try {
       const { ok: fbSent, wamid: fbWamid } =
