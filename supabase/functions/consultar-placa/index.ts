@@ -172,8 +172,22 @@ serve(async (req) => {
     const corpo = await res.text();
 
     if (!res.ok) {
-      console.error('[placa] fornecedor recusou', res.status, corpo.slice(0, 300));
-      return json({ error: `O serviço de consulta respondeu ${res.status}. Confira a placa ou o saldo do plano.` }, 502);
+      // O RegCheck devolve 500 com o motivo em texto dentro do XML
+      // (<faultstring>, <Message> ou <string>). Sem extrair, o lojista via só
+      // "respondeu 500" e não tinha como saber se era placa inexistente,
+      // crédito acabado ou credencial errada — três coisas bem diferentes.
+      const motivo = (
+        corpo.match(/<faultstring>([\s\S]*?)<\/faultstring>/i) ??
+        corpo.match(/<Message>([\s\S]*?)<\/Message>/i) ??
+        corpo.match(/<string[^>]*>([\s\S]*?)<\/string>/i)
+      )?.[1]?.replace(/<[^>]+>/g, '').trim();
+
+      console.error('[placa] fornecedor recusou', res.status, corpo.slice(0, 400));
+      return json({
+        error: motivo
+          ? `O serviço de consulta recusou: "${motivo}"`
+          : `O serviço de consulta respondeu ${res.status}. Confira a placa ou o saldo do plano.`,
+      }, 502);
     }
 
     // O RegCheck (usado pelo PlacaAPI) responde XML com o JSON de verdade dentro
