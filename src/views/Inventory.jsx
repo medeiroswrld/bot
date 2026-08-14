@@ -33,7 +33,111 @@ const parsePriceBR = (value) => {
     return parseFloat(cleaned) || 0;
 };
 
-const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
+// Consulta avulsa de placa — "que carro é esse?", sem compromisso de cadastrar.
+// Serve pra avaliar carro que o cliente ofereceu na troca ou que a loja pensa em
+// comprar. Não grava nada no estoque; quem cadastra é o botão do rodapé.
+const ConsultaPlacaModal = ({ onClose, onAdicionar }) => {
+    const { inventoryCars } = useAppContext();
+    const [placa, setPlaca] = useState('');
+    const [buscando, setBuscando] = useState(false);
+    const [erro, setErro] = useState('');
+    const [dados, setDados] = useState(null);
+
+    // Placa já cadastrada não deve virar duplicata — avisa e leva pro que existe.
+    const jaNoEstoque = dados && (inventoryCars || []).find(c =>
+        String(c.brand || '').toLowerCase() === String(dados.marca || '').toLowerCase() &&
+        String(c.model || '').toLowerCase().includes(String(dados.modelo || '').toLowerCase().split(' ')[0]) &&
+        String(c.year) === String(dados.ano),
+    );
+
+    const consultar = async () => {
+        const limpa = placa.replace(/[^A-Z0-9]/g, '');
+        if (limpa.length < 7) return;
+        setBuscando(true); setErro(''); setDados(null);
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/consultar-placa`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+                body: JSON.stringify({ placa: limpa }),
+            });
+            const j = await res.json();
+            if (!res.ok) { setErro(j.error || 'Não consegui consultar essa placa.'); return; }
+            setDados(j);
+        } catch (e) {
+            setErro(e.message ?? 'Falha na consulta.');
+        } finally { setBuscando(false); }
+    };
+
+    const LINHAS = [['Marca', 'marca'], ['Modelo', 'modelo'], ['Ano', 'ano'], ['Cor', 'cor'], ['Combustível', 'combustivel']];
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content modal-sm" onClick={e => e.stopPropagation()}>
+                <div className="modal-header">
+                    <h2>Consultar veículo</h2>
+                    <button className="icon-btn" onClick={onClose}><X size={18} /></button>
+                </div>
+
+                <div style={{ padding: '1.25rem 1.5rem' }}>
+                    <div className="form-group">
+                        <label>Placa</label>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <input
+                                type="text" value={placa} maxLength={8} autoFocus
+                                onChange={e => setPlaca(e.target.value.toUpperCase())}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); consultar(); } }}
+                                placeholder="ABC1D23"
+                                style={{ maxWidth: 160, textTransform: 'uppercase', fontFamily: 'monospace' }}
+                            />
+                            <button className="btn-primary" onClick={consultar} disabled={buscando || placa.length < 7}>
+                                {buscando ? 'Consultando…' : 'Consultar'}
+                            </button>
+                        </div>
+                        {erro && <p className="error-message">{erro}</p>}
+                    </div>
+
+                    {dados && (
+                        <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+                            {LINHAS.map(([rotulo, campo]) => dados[campo] && (
+                                <div key={campo} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: '0.88rem' }}>
+                                    <span style={{ color: 'var(--text-secondary)' }}>{rotulo}</span>
+                                    <strong>{dados[campo]}</strong>
+                                </div>
+                            ))}
+                            {dados.cache && (
+                                <p className="text-muted" style={{ fontSize: '0.76rem', marginTop: 8 }}>
+                                    Já consultada antes — sem custo novo.
+                                </p>
+                            )}
+                            {jaNoEstoque && (
+                                <p style={{ fontSize: '0.82rem', color: '#b45309', marginTop: 10 }}>
+                                    ⚠ Parece que esse veículo já está no seu estoque
+                                    ({jaNoEstoque.brand} {jaNoEstoque.model} {jaNoEstoque.year}).
+                                </p>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                <div className="modal-footer">
+                    <button className="btn-secondary" onClick={onClose}>Fechar</button>
+                    {dados && (
+                        <button className="btn-primary" onClick={() => onAdicionar({
+                            brand: dados.marca || '', model: dados.modelo || '',
+                            year: dados.ano || '', color: dados.cor || '',
+                            fuel: dados.combustivel || 'Flex', placa: dados.placa,
+                        })}>
+                            Adicionar ao estoque
+                        </button>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
     const { addToast } = useAppContext();
     const [form, setForm] = useState(car ? {
         ...car,
@@ -43,9 +147,10 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
         images: (car.images || (car.image ? [car.image] : [])).map(img => typeof img === 'string' ? { preview: img, file: null } : img),
         specsImage: car.specs_image_url ? { url: car.specs_image_url } : null,
         video: car.video_url ? { url: car.video_url } : null,
-    } : { ...EMPTY_CAR });
+    } : { ...EMPTY_CAR, ...(inicial ?? {}) });
     const [errors, setErrors] = useState({});
-    const [placa, setPlaca] = useState('');
+    // Vindo da consulta por placa, o campo já nasce preenchido e não reconsulta.
+    const [placa, setPlaca] = useState(inicial?.placa ?? '');
     const [buscandoPlaca, setBuscandoPlaca] = useState(false);
     const [erroPlaca, setErroPlaca] = useState('');
     const [saving, setSaving] = useState(false);
@@ -508,6 +613,9 @@ const Inventory = () => {
     const [search, setSearch] = useState('');
     const [filterStatus, setFilterStatus] = useState('todos');
     const [showAddModal, setShowAddModal] = useState(false);
+    const [showConsulta, setShowConsulta] = useState(false);
+    // Dados vindos da consulta avulsa, pra abrir o cadastro já preenchido.
+    const [preenchido, setPreenchido] = useState(null);
     const [editCar, setEditCar] = useState(null);
     const [sellCarObj, setSellCarObj] = useState(null);
     const [viewCar, setViewCar] = useState(null);
@@ -557,9 +665,14 @@ const Inventory = () => {
                     <h1>Meu Estoque</h1>
                     <p>Gerencie seus veículos. <strong>{filtered.length}</strong> listado{filtered.length !== 1 ? 's' : ''}.</p>
                 </div>
-                <button className="btn-primary" onClick={() => setShowAddModal(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Plus size={20} /> Novo Veículo
-                </button>
+                <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+                    <button className="btn-secondary" onClick={() => setShowConsulta(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Search size={17} /> Consultar placa
+                    </button>
+                    <button className="btn-primary" onClick={() => setShowAddModal(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Plus size={20} /> Novo Veículo
+                    </button>
+                </div>
             </header>
 
             <div className="inv-toolbar">
@@ -630,7 +743,19 @@ const Inventory = () => {
                 )}
             </div>
 
-            {showAddModal && <CarFormModal onClose={() => setShowAddModal(false)} onSave={handleAddCar} />}
+            {showConsulta && (
+                <ConsultaPlacaModal
+                    onClose={() => setShowConsulta(false)}
+                    onAdicionar={(dados) => { setShowConsulta(false); setPreenchido(dados); setShowAddModal(true); }}
+                />
+            )}
+            {showAddModal && (
+                <CarFormModal
+                    inicial={preenchido}
+                    onClose={() => { setShowAddModal(false); setPreenchido(null); }}
+                    onSave={handleAddCar}
+                />
+            )}
             {editCar && <CarFormModal car={editCar} isEdit onClose={() => setEditCar(null)} onSave={handleEditCar} />}
             {sellCarObj && <SellModal car={sellCarObj} onClose={() => setSellCarObj(null)} onConfirm={handleSell} />}
             {viewCar && <DetailDrawer car={viewCar} onClose={() => setViewCar(null)} />}
