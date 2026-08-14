@@ -153,22 +153,31 @@ serve(async (req) => {
     const usaGet = apiUrl.includes('{placa}');
     const url = usaGet ? apiUrl.replace('{placa}', placa) : apiUrl;
 
-    // Cada fornecedor autentica de um jeito. Mandamos as três formas comuns —
-    // header Bearer, header DeviceToken (APIBrasil usa DOIS tokens) e ?token= —
-    // porque header a mais é ignorado, e assim a mesma função serve a todos.
+    // Credencial em HEADER apenas. Nada é acrescentado à query string.
+    //
+    // A versão anterior anexava `&token=...` quando havia uma chave configurada,
+    // e isso derrubava o RegCheck: o método CheckBrazil aceita exatamente
+    // RegistrationNumber e username, e um serviço .asmx do ASP.NET tenta mapear
+    // CADA parâmetro da query num argumento do método — parâmetro desconhecido
+    // estoura "Runtime Error", que foi o 500 que a gente perseguiu.
+    //
+    // Quem precisa de credencial na URL (o próprio RegCheck usa ?username=)
+    // coloca direto no PLACA_API_URL, que é secreto de qualquer forma.
     const deviceToken = Deno.env.get('PLACA_API_DEVICE_TOKEN') ?? '';
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = {};
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
     if (deviceToken) headers.DeviceToken = deviceToken;
 
     const res = usaGet
-      ? await fetch(
-        apiKey && !deviceToken
-          ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiKey)}`
-          : url,
-        { headers },
-      )
-      : await fetch(url, { method: 'POST', headers, body: JSON.stringify({ placa }) });
+      ? await fetch(url, { headers })
+      : await fetch(
+        url,
+        {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ placa }),
+        },
+      );
     const corpo = await res.text();
 
     if (!res.ok) {
