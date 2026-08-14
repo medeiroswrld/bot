@@ -40,9 +40,23 @@ function normalizar(payload: Json): Record<string, string> {
   const varrer = (obj: Json, profundidade = 0) => {
     if (!obj || typeof obj !== 'object' || profundidade > 4) return;
     for (const [k, v] of Object.entries(obj)) {
-      if (v && typeof v === 'object') { varrer(v, profundidade + 1); continue; }
-      if (v === null || v === '') continue;
       const chave = k.toLowerCase().replace(/[^a-z]/g, '');
+
+      // O RegCheck embrulha vários campos em { CurrentValue, CurrentTextValue }.
+      // Sem colapsar isso no nome do PAI, "CarMake" e "FuelType" virariam ambos
+      // "currenttextvalue" e um sobrescreveria o outro.
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const interno = v as Record<string, unknown>;
+        const texto = interno.CurrentTextValue ?? interno.CurrentValue;
+        if (texto !== undefined && texto !== null && texto !== '') {
+          if (!(chave in achatado)) achatado[chave] = String(texto);
+          continue;
+        }
+        varrer(v, profundidade + 1);
+        continue;
+      }
+
+      if (v === null || v === '' || typeof v === 'object') continue;
       if (!(chave in achatado)) achatado[chave] = String(v);
     }
   };
@@ -53,13 +67,17 @@ function normalizar(payload: Json): Record<string, string> {
     return '';
   };
 
-  const anoBruto = primeiro('anomodelo', 'ano', 'anofabricacao', 'anofabricacaomodelo', 'year');
+  // Nomes em pt-BR (fornecedores nacionais) e em inglês (RegCheck/PlacaAPI).
+  const anoBruto = primeiro(
+    'anomodelo', 'ano', 'anofabricacao', 'anofabricacaomodelo',
+    'year', 'registrationyear', 'manufactureyearfrom',
+  );
   return {
-    marca:       primeiro('marca', 'brand', 'fabricante'),
-    modelo:      primeiro('modelo', 'model', 'submodelo'),
+    marca:       primeiro('marca', 'brand', 'fabricante', 'carmake', 'makedescription'),
+    modelo:      primeiro('modelo', 'model', 'submodelo', 'carmodel', 'modeldescription'),
     ano:         (anoBruto.match(/\d{4}/) ?? [''])[0],
-    cor:         primeiro('cor', 'color', 'corveiculo'),
-    combustivel: primeiro('combustivel', 'fuel', 'tipocombustivel'),
+    cor:         primeiro('cor', 'color', 'corveiculo', 'colour'),
+    combustivel: primeiro('combustivel', 'fuel', 'tipocombustivel', 'fueltype'),
   };
 }
 
@@ -137,9 +155,24 @@ serve(async (req) => {
       return json({ error: `O serviço de consulta respondeu ${res.status}. Confira a placa ou o saldo do plano.` }, 502);
     }
 
+    // O RegCheck (usado pelo PlacaAPI) responde XML com o JSON de verdade dentro
+    // da tag <vehicleJson>, escapado. Sem tratar isso, todo retorno dele cairia
+    // como "formato inesperado".
     let payload: Json;
-    try { payload = JSON.parse(corpo); } catch {
-      console.error('[placa] resposta não é JSON', corpo.slice(0, 300));
+    const bruto = corpo.trim();
+    try {
+      if (bruto.startsWith('<')) {
+        const m = bruto.match(/<vehicleJson>([\s\S]*?)<\/vehicleJson>/i);
+        if (!m) throw new Error('XML sem vehicleJson');
+        const desescapado = m[1]
+          .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+          .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+        payload = JSON.parse(desescapado);
+      } else {
+        payload = JSON.parse(bruto);
+      }
+    } catch {
+      console.error('[placa] resposta ilegível', bruto.slice(0, 300));
       return json({ error: 'Resposta do serviço de consulta em formato inesperado.' }, 502);
     }
 
