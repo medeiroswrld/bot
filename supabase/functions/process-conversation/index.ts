@@ -2393,6 +2393,45 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     .eq('phone', customerPhone)
     .maybeSingle();
 
+  // ── Captura automática do que o cliente já respondeu ──────────────────────
+  //    Estes campos só eram preenchidos quando o MODELO lembrava de chamar a
+  //    tool de qualificação. Quando ele esquecia, o bloco abaixo dizia "FALTA"
+  //    e ele reperguntava — fazendo o que o prompt mandava, sem saber que já
+  //    tinha perguntado. Caso do Jeberson (13/08): resolveu pagamento às 13:55
+  //    e às 14:26 ouviu "financia ou à vista?" de novo.
+  //
+  //    Guarda o texto CRU da fala dele. O campo não precisa ser relatório:
+  //    precisa dizer ao modelo "essa dimensão já foi coberta, siga em frente".
+  //    Só preenche campo VAZIO — nunca sobrescreve o que a tool salvou.
+  const ultimaFalaCliente = [...orderedMessages].reverse()
+    .find((m) => m.role === 'customer')?.content ?? '';
+
+  const SINAIS: Array<[string, RegExp]> = [
+    ['financial_info',  /financi|[àa]\s+vista|entrada|parcel|na troca|cart[ãa]o|\bpix\b|boleto|cons[óo]rcio/i],
+    ['recreation_info', /dia a dia|fam[íi]li|trabalh|viag|estrada|cidade|passei|fim de semana/i],
+    ['family_info',     /esposa|marido|filh|crian[çc]a|namorad|casad|minha mulher|meu marido/i],
+  ];
+
+  if (leadRow && ultimaFalaCliente) {
+    const novos: Record<string, string> = {};
+    for (const [campo, re] of SINAIS) {
+      const jaTem = String((leadRow as Record<string, unknown>)[campo] ?? '').trim();
+      if (!jaTem && re.test(ultimaFalaCliente)) {
+        novos[campo] = ultimaFalaCliente.slice(0, 300);
+        // Vale já NESTE turno: sem isso o bot ainda perguntaria de novo agora.
+        (leadRow as Record<string, unknown>)[campo] = novos[campo];
+      }
+    }
+    if (Object.keys(novos).length) {
+      await supabase.from('leads')
+        .update({ ...novos, updated_at: new Date().toISOString() })
+        .eq('user_id', userId).eq('phone', customerPhone);
+      log.info('qualificação capturada da fala do cliente', {
+        action: 'auto_qualificacao', campos: Object.keys(novos),
+      });
+    }
+  }
+
   const perfil: Array<[string, unknown]> = [
     ['família',   leadRow?.family_info],
     ['ocupação',  leadRow?.occupation],
