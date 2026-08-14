@@ -127,6 +127,7 @@ const ConsultaPlacaModal = ({ onClose, onAdicionar }) => {
                             brand: dados.marca || '', model: dados.modelo || '',
                             year: dados.ano || '', color: dados.cor || '',
                             fuel: dados.combustivel || 'Flex', placa: dados.placa,
+                            vehicle_type: dados.tipo || 'carro',
                         })}>
                             Adicionar ao estoque
                         </button>
@@ -244,6 +245,7 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
                 year:  prev.year  || dados.ano || '',
                 color: prev.color || dados.cor || '',
                 fuel:  dados.combustivel || prev.fuel,
+                vehicle_type: dados.tipo || prev.vehicle_type,
             }));
             addToast(dados.cache ? 'Dados preenchidos (já consultada antes).' : 'Dados do veículo preenchidos.', 'success');
         } catch (e) {

@@ -72,12 +72,21 @@ function normalizar(payload: Json): Record<string, string> {
     'anomodelo', 'ano', 'anofabricacao', 'anofabricacaomodelo',
     'year', 'registrationyear', 'manufactureyearfrom',
   );
+  const marca  = primeiro('marca', 'brand', 'fabricante', 'carmake', 'makedescription');
+  const modelo = primeiro('modelo', 'model', 'submodelo', 'carmodel', 'modeldescription');
+  const desc   = primeiro('description', 'descricao');
+
   return {
-    marca:       primeiro('marca', 'brand', 'fabricante', 'carmake', 'makedescription'),
-    modelo:      primeiro('modelo', 'model', 'submodelo', 'carmodel', 'modeldescription'),
+    marca,
+    modelo,
     ano:         (anoBruto.match(/\d{4}/) ?? [''])[0],
     cor:         primeiro('cor', 'color', 'corveiculo', 'colour'),
     combustivel: primeiro('combustivel', 'fuel', 'tipocombustivel', 'fueltype'),
+    // Moto já entra marcada como moto. O fornecedor não devolve o tipo, mas o
+    // nome entrega ("HONDA MOTO CG 160") — e sem isso o lojista teria que
+    // lembrar de trocar o campo toda vez, ou a moto entraria como carro no
+    // estoque e apareceria em busca de carro no bot.
+    tipo: /\bmoto|motocicl|scooter|tricicl/i.test(`${desc} ${modelo}`) ? 'moto' : 'carro',
   };
 }
 
