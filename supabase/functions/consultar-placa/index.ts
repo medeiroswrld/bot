@@ -108,9 +108,11 @@ serve(async (req) => {
       }, 501);
     }
 
-    const url = apiUrl.includes('{placa}')
-      ? apiUrl.replace('{placa}', placa)
-      : `${apiUrl}${apiUrl.includes('?') ? '&' : '?'}placa=${placa}`;
+    // Dois estilos de fornecedor, decididos pela própria URL configurada:
+    //   com {placa} → GET, a placa entra no caminho
+    //   sem {placa} → POST com {"placa": "..."} no corpo (é o caso da APIBrasil)
+    const usaGet = apiUrl.includes('{placa}');
+    const url = usaGet ? apiUrl.replace('{placa}', placa) : apiUrl;
 
     // Cada fornecedor autentica de um jeito. Mandamos as três formas comuns —
     // header Bearer, header DeviceToken (APIBrasil usa DOIS tokens) e ?token= —
@@ -120,12 +122,14 @@ serve(async (req) => {
     if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
     if (deviceToken) headers.DeviceToken = deviceToken;
 
-    const res = await fetch(
-      apiKey && !deviceToken
-        ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiKey)}`
-        : url,
-      { headers },
-    );
+    const res = usaGet
+      ? await fetch(
+        apiKey && !deviceToken
+          ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiKey)}`
+          : url,
+        { headers },
+      )
+      : await fetch(url, { method: 'POST', headers, body: JSON.stringify({ placa }) });
     const corpo = await res.text();
 
     if (!res.ok) {
