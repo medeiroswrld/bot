@@ -101,13 +101,25 @@ serve(async (req) => {
 
   try {
     const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader.startsWith('Bearer ')) return json({ error: 'Authorization ausente' }, 401);
+
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_ANON_KEY') ?? '',
-      { global: { headers: { Authorization: authHeader } } },
+      { auth: { autoRefreshToken: false, persistSession: false } },
     );
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return json({ error: 'Não autenticado' }, 401);
+
+    // O JWT vai EXPLÍCITO no getUser. Sem o argumento, o supabase-js procura a
+    // sessão no armazenamento local — que não existe no runtime da edge
+    // function — e devolve user null mesmo com o header certo. É o padrão que
+    // as outras functions autenticadas do projeto já usam.
+    const { data: { user }, error: authErr } = await supabase.auth.getUser(
+      authHeader.replace('Bearer ', ''),
+    );
+    if (authErr || !user) {
+      console.warn('[placa] JWT recusado', authErr?.message);
+      return json({ error: 'Não autenticado' }, 401);
+    }
 
     const { placa: placaBruta } = await req.json();
     const placa = normalizarPlaca(placaBruta);
