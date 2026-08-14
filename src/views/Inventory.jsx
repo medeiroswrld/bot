@@ -45,6 +45,9 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
         video: car.video_url ? { url: car.video_url } : null,
     } : { ...EMPTY_CAR });
     const [errors, setErrors] = useState({});
+    const [placa, setPlaca] = useState('');
+    const [buscandoPlaca, setBuscandoPlaca] = useState(false);
+    const [erroPlaca, setErroPlaca] = useState('');
     const [saving, setSaving] = useState(false);
 
     const handleChange = (field, value) => {
@@ -107,6 +110,43 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
         setForm(prev => ({ ...prev, video: { file, preview: URL.createObjectURL(file) } }));
     };
     const removeVideo = () => setForm(prev => ({ ...prev, video: null }));
+
+    // Consulta paga: só dispara no clique, nunca enquanto digita.
+    const buscarPlaca = async () => {
+        const limpa = placa.replace(/[^A-Z0-9]/g, '');
+        if (limpa.length < 7) return;
+        setBuscandoPlaca(true);
+        setErroPlaca('');
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/consultar-placa`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${session?.access_token ?? ''}`,
+                },
+                body: JSON.stringify({ placa: limpa }),
+            });
+            const dados = await res.json();
+            if (!res.ok) { setErroPlaca(dados.error || 'Não consegui consultar essa placa.'); return; }
+
+            // Não sobrescreve o que o lojista já digitou: se ele corrigiu o
+            // modelo à mão, a consulta não pode desfazer.
+            setForm(prev => ({
+                ...prev,
+                brand: prev.brand || dados.marca || '',
+                model: prev.model || dados.modelo || '',
+                year:  prev.year  || dados.ano || '',
+                color: prev.color || dados.cor || '',
+                fuel:  dados.combustivel || prev.fuel,
+            }));
+            addToast(dados.cache ? 'Dados preenchidos (já consultada antes).' : 'Dados do veículo preenchidos.', 'success');
+        } catch (e) {
+            setErroPlaca(e.message ?? 'Falha na consulta.');
+        } finally {
+            setBuscandoPlaca(false);
+        }
+    };
 
     const handleSubmit = async () => {
         const newErrors = {};
@@ -232,6 +272,30 @@ const CarFormModal = ({ car, isEdit, onClose, onSave }) => {
                             placeholder="Ex: Único dono, revisado, IPVA 2026 pago, chave reserva..."
                             style={{ resize: 'vertical', fontFamily: 'inherit' }}
                         />
+                    </div>
+
+                    {/* Preenche marca/modelo/ano/cor pela placa. Fica ANTES dos
+                        campos porque é o atalho: quem tem a placa não digita nada. */}
+                    <div className="form-group">
+                        <label>Buscar pela placa</label>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                            <input
+                                type="text"
+                                value={placa}
+                                onChange={e => setPlaca(e.target.value.toUpperCase())}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); buscarPlaca(); } }}
+                                placeholder="ABC1234"
+                                maxLength={8}
+                                style={{ maxWidth: 160, textTransform: 'uppercase', fontFamily: 'monospace' }}
+                            />
+                            <button type="button" className="btn-secondary" onClick={buscarPlaca} disabled={buscandoPlaca || placa.length < 7}>
+                                {buscandoPlaca ? 'Buscando…' : 'Preencher'}
+                            </button>
+                        </div>
+                        {erroPlaca && <p className="error-message">{erroPlaca}</p>}
+                        <p className="text-muted" style={{ fontSize: '0.78rem', marginTop: 4 }}>
+                            Preenche marca, modelo, ano e cor. Confira antes de salvar — preço, km e fotos você completa.
+                        </p>
                     </div>
 
                     <div className="form-row">
