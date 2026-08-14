@@ -112,9 +112,19 @@ serve(async (req) => {
       ? apiUrl.replace('{placa}', placa)
       : `${apiUrl}${apiUrl.includes('?') ? '&' : '?'}placa=${placa}`;
 
+    // Cada fornecedor autentica de um jeito. Mandamos as três formas comuns —
+    // header Bearer, header DeviceToken (APIBrasil usa DOIS tokens) e ?token= —
+    // porque header a mais é ignorado, e assim a mesma função serve a todos.
+    const deviceToken = Deno.env.get('PLACA_API_DEVICE_TOKEN') ?? '';
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+    if (deviceToken) headers.DeviceToken = deviceToken;
+
     const res = await fetch(
-      apiKey ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiKey)}` : url,
-      { headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {} },
+      apiKey && !deviceToken
+        ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiKey)}`
+        : url,
+      { headers },
     );
     const corpo = await res.text();
 
