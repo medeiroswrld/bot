@@ -183,10 +183,19 @@ serve(async (req) => {
       )?.[1]?.replace(/<[^>]+>/g, '').trim();
 
       console.error('[placa] fornecedor recusou', res.status, corpo.slice(0, 400));
+
+      // O RegCheck estoura exceção (página "Runtime Error" do ASP.NET) quando
+      // a placa não está na base dele, em vez de responder "não encontrado".
+      // Como a página genérica não diz o motivo, o erro técnico não ajuda
+      // ninguém — o que o lojista precisa saber é que a placa não retornou.
+      const paginaDeErro = /<!DOCTYPE html|<html/i.test(corpo);
+
       return json({
         error: motivo
           ? `O serviço de consulta recusou: "${motivo}"`
-          : `O serviço de consulta respondeu ${res.status}. Confira a placa ou o saldo do plano.`,
+          : paginaDeErro
+            ? 'Não encontramos esse veículo na base de consulta. Confira se a placa está correta — se estiver, o veículo pode não constar lá e você pode cadastrar manualmente.'
+            : `O serviço de consulta respondeu ${res.status}. Confira a placa ou o saldo do plano.`,
       }, 502);
     }
 
