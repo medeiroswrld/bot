@@ -728,6 +728,10 @@ async function executeTool(
       ...(totalReal > data.length
         ? { aviso: `A loja tem ${totalReal} veículos nesse critério; estes são os ${data.length} mais baratos. Ao falar o número, use ${totalReal} — e ofereça filtrar (marca, faixa de preço, ano) pra mostrar os outros.` }
         : {}),
+      // O cliente já disse o que queria (faixa, marca, ano): esconder parte da
+      // lista faz ele achar que a loja tem menos do que tem. Antes o modelo
+      // escolhia "destaques" por conta e mostrava 3 de 7.
+      instrucao: `Liste TODOS os ${data.length} veículos acima, sem escolher destaques e sem omitir nenhum — o cliente pediu esta faixa e tem direito de ver tudo que cabe nela. Uma linha por carro, curta: modelo, ano, preço e 1 ou 2 diferenciais. Só depois pergunte qual chamou a atenção.`,
       veiculos: (data as CarListRow[]).map((c) => {
         const v = visitasPorCarro.get(String(c.id));
         return {
