@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
+import ConectarWhatsApp from './ConectarWhatsApp.jsx';
 
 const WEEK_DAYS = [
     { key: 'mon', label: 'Segunda-feira' },
@@ -785,6 +786,10 @@ const Settings = () => {
 
             {/* ── Integração WhatsApp (API) ──────────────────────────────────── */}
             <div style={{ marginTop: '2rem' }}>
+                {/* Embedded Signup: caminho recomendado. Os campos manuais
+                    abaixo ficam como alternativa pra quem ja configurou na mao. */}
+                <ConectarWhatsApp />
+
                 <section className="settings-section card">
                     <div className="section-title">
                         <MessageSquare size={20} />
