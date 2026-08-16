@@ -12,6 +12,7 @@ export interface InboundMessage {
   waMessageId: string     // ID da mensagem no WhatsApp (para deduplicação)
   type: 'text' | 'audio'  // Tipo da mensagem recebida
   mediaId?: string        // ID da mídia na Meta (presente quando type === 'audio')
+  isEcho?: boolean        // Mensagem que a LOJA enviou pelo celular (coexistência)
 }
 
 // ─── parseInboundMessage ───────────────────────────────────────────────────────
@@ -53,7 +54,31 @@ function parseCloud(payload: unknown): InboundMessage | null {
     const entry  = (p.entry as unknown[])?.[0] as Record<string, unknown>;
     const change = (entry?.changes as unknown[])?.[0] as Record<string, unknown>;
     const value  = change?.value as Record<string, unknown>;
-    if (!value || change?.field !== 'messages') return null;
+    if (!value) return null;
+    if (change?.field !== 'messages' && change?.field !== 'smb_message_echoes') return null;
+
+    // ── Coexistência: mensagem que o LOJISTA mandou pelo celular ──────────
+    //    Chega em outro campo (smb_message_echoes) e com os papéis INVERTIDOS:
+    //    `from` é a loja e `to` é o cliente. Mapeamos `to` para `from` pra que
+    //    toda a resolução de conversa a seguir funcione sem alteração — senão a
+    //    conversa seria aberta com o número da própria loja como cliente.
+    if (change?.field === 'smb_message_echoes') {
+      const meta = value.metadata as Record<string, string>;
+      const echo = (value.message_echoes as unknown[])?.[0] as Record<string, unknown>;
+      if (!echo) return null;
+      const texto = ((echo.text as Record<string, string>)?.body ?? '').trim();
+      if (!texto) return null;   // mídia enviada pelo celular fica de fora por ora
+
+      return {
+        phoneNumberId: meta?.phone_number_id ?? '',
+        from:          String(echo.to ?? ''),      // o CLIENTE
+        senderName:    '',
+        waMessageId:   String(echo.id ?? ''),
+        text:          texto,
+        type:          'text',
+        isEcho:        true,
+      };
+    }
 
     const messages = value.messages as unknown[];
     if (!messages?.length) return null;

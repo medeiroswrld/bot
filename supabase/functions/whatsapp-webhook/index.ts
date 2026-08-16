@@ -322,6 +322,28 @@ serve(async (req) => {
     );
   };
 
+  // 9-eco. Coexistência: quem falou foi o LOJISTA, pelo celular dele.
+  //   Grava pra aparecer no CRM, NÃO aciona o bot, e passa a conversa para
+  //   'human': se o dono está respondendo pelo aparelho, o bot respondendo
+  //   junto significaria duas vozes na mesma conversa. Volta ao bot quando
+  //   alguém clicar "Devolver pro bot" no CRM.
+  if (msg.isEcho) {
+    const { error: ecoErr } = await supabase.from('messages').insert({
+      conversation_id: upsertedConv.id,
+      role: 'agent',
+      content: text,
+      wa_message_id: waMessageId,
+    });
+    if (ecoErr) console.error('[WH] erro ao salvar eco:', ecoErr);
+
+    await supabase.from('conversations')
+      .update({ status: 'human', last_message_at: now })
+      .eq('id', upsertedConv.id);
+
+    console.log(`[WH] mensagem do lojista via celular (eco), bot não responde — ${maskPhone(from)}`);
+    return ok();
+  }
+
   // 9a. Mensagem de TEXTO — fluxo normal
   if (msg.type === 'text') {
     const { error: msgErr } = await supabase.from('messages').insert({
