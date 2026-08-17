@@ -112,7 +112,16 @@ const ConectarWhatsApp = () => {
             config_id: CONFIG_ID,
             response_type: 'code',
             override_default_response_type: true,
-            extras: { setup: {} },
+            // featureType é o que pede COEXISTÊNCIA. Sem ele o fluxo registra o
+            // número na Cloud API e TIRA o WhatsApp do celular da loja - o
+            // oposto do que queremos. Valores copiados do link hospedado que a
+            // própria Meta gera no painel do app.
+            extras: {
+                setup: {},
+                featureType: 'whatsapp_business_app_onboarding',
+                version: 'v4',
+                sessionInfoVersion: '3',
+            },
         });
     };
 
