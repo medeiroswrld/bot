@@ -73,8 +73,22 @@ async function processStatuses(payload: any): Promise<void> {
             .eq('wa_message_id', wamid)
             .maybeSingle();
 
+          // Quando falha, a Meta diz POR QUE num array `errors`. Sem guardar,
+          // o lojista ve so um "!" vermelho e a causa so aparece indo no Graph
+          // API Explorer na mao.
+          const erroMeta = Array.isArray(status?.errors) && status.errors.length
+            ? [status.errors[0]?.code, status.errors[0]?.title || status.errors[0]?.message]
+                .filter(Boolean).join(' - ')
+            : null;
+          if (newStatus === 'failed') {
+            console.error('[webhook-status] FALHA', wamid, JSON.stringify(status?.errors ?? []));
+          }
+
           if (msg && (ORDEM[newStatus] ?? 0) > (ORDEM[String(msg.wa_status)] ?? 0)) {
-            await supabase.from('messages').update({ wa_status: newStatus }).eq('id', msg.id);
+            await supabase
+              .from('messages')
+              .update({ wa_status: newStatus, wa_error: erroMeta })
+              .eq('id', msg.id);
           }
 
           // Busca o envio de campanha por wamid. Se não existir, não é campanha — ignora.

@@ -148,11 +148,21 @@ export type CampanhaInfo = { nome: string; template: string };
  * antiga, ou envio pelo provider que não devolve id) não mostra nada, em vez de
  * mostrar um estado falso.
  */
-const VistoWhats = ({ status }: { status: string | null }) => {
+const VistoWhats = ({ status, erro }: { status: string | null; erro?: string | null }) => {
   if (!status) return null;
 
   if (status === 'failed') {
-    return <span title="Falha no envio" style={{ marginLeft: 5, color: '#dc2626', fontWeight: 700 }}>!</span>;
+    // Sem o motivo da Meta o "!" nao ajuda ninguem: o lojista nao sabe se e
+    // faturamento, janela de 24h ou numero invalido. Cada um tem conserto
+    // diferente, e so o codigo da Meta distingue.
+    return (
+      <span
+        title={erro ? `Falha no envio — ${erro}` : 'Falha no envio'}
+        style={{ marginLeft: 5, color: '#dc2626', fontWeight: 700, cursor: 'help' }}
+      >
+        !
+      </span>
+    );
   }
 
   const lido = status === 'read';
@@ -240,7 +250,7 @@ const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; cam
         )}
         <p style={{ margin: '4px 0 0', fontSize: '0.65rem', color: timeColor, textAlign: 'right' }}>
           {time}
-          {!isCustomer && <VistoWhats status={msg.wa_status} />}
+          {!isCustomer && <VistoWhats status={msg.wa_status} erro={msg.wa_error} />}
         </p>
       </div>
     </div>
@@ -467,7 +477,7 @@ export default function Conversations() {
     // Limit agressivo: apenas as colunas necessárias e no máximo 3× o nº de conversas
     const { data } = await supabaseTyped
       .from('messages')
-      .select('id, conversation_id, role, content, wa_message_id, transcribed_from_audio, campaign_id, wa_status, created_at')
+      .select('id, conversation_id, role, content, wa_message_id, transcribed_from_audio, campaign_id, wa_status, wa_error, created_at')
       .in('conversation_id', convIds)
       .order('created_at', { ascending: false })
       .limit(Math.max(convIds.length * 3, 60));
@@ -737,6 +747,7 @@ export default function Conversations() {
       transcribed_from_audio: false,
       campaign_id: null,
       wa_status: null,
+      wa_error: null,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticMsg]);
