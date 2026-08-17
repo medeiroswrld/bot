@@ -4,7 +4,7 @@ import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
 
 const APP_ID    = '871165479168665';
-const CONFIG_ID = '849531434793375';
+const CONFIG_ID = '1801786580982173';
 
 // Embedded Signup: conecta o WhatsApp da loja em um passo, sem o lojista
 // precisar copiar Phone Number ID, WABA e token na mão.
