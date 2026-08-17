@@ -52,7 +52,14 @@ serve(async (req) => {
   });
   if (rpcErr) {
     console.error('[set-whatsapp-token] rpc erro:', rpcErr.message);
-    return json({ error: 'Falha ao salvar o token.' }, 500);
+    // Devolve o motivo do Postgres: 'Falha ao salvar o token' sozinho nao
+    // distingue Vault indisponivel de company_settings ausente, e sem log
+    // acessivel isso vira tentativa e erro. Tela e so do dono da loja.
+    // Cinto de seguranca: se por algum caminho o valor entrar na mensagem
+    // (ex.: DETAIL de constraint), ele nao sai daqui.
+    let detalhe = String(rpcErr.message ?? '');
+    if (token.length >= 20) detalhe = detalhe.replaceAll(token, '[token]');
+    return json({ error: `Falha ao salvar o token: ${detalhe}` }, 500);
   }
 
   // 6. Nunca devolve o token
