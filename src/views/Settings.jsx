@@ -205,18 +205,32 @@ const Settings = () => {
         setSavingToken(true); setTokenMsg('');
         const { data, error } = await supabase.functions.invoke('set-whatsapp-token', { body: { token: t } });
         setSavingToken(false);
-        if (error || data?.error) { setTokenMsg(data?.error || error?.message || 'Erro ao salvar token.'); return; }
+        if (error || data?.error) { setTokenMsg(await mensagemDoErro(error, data, 'Erro ao salvar token.')); return; }
         setWpToken('');                 // limpa o input (write-only)
         setWpTokenSet(true);
         setTokenMsg('Token cadastrado ✓');
         await refreshCompanySettings();
     };
 
+    // O supabase.functions.invoke NAO devolve o corpo em `data` quando o status
+    // e non-2xx: ele vira FunctionsHttpError e a mensagem especifica da funcao
+    // fica presa em error.context. Sem ler dali, o lojista via so "Edge Function
+    // returned a non-2xx status code" - que nao diz se foi token com espaco,
+    // token curto ou falha do Vault.
+    const mensagemDoErro = async (error, data, padrao) => {
+        if (data?.error) return data.error;
+        try {
+            const corpo = await error?.context?.json?.();
+            if (corpo?.error) return corpo.error;
+        } catch { /* corpo ilegivel: cai no padrao */ }
+        return error?.message || padrao;
+    };
+
     const removeToken = async () => {
         setSavingToken(true); setTokenMsg('');
         const { data, error } = await supabase.functions.invoke('set-whatsapp-token', { body: { remove: true } });
         setSavingToken(false);
-        if (error || data?.error) { setTokenMsg(data?.error || error?.message || 'Erro ao remover token.'); return; }
+        if (error || data?.error) { setTokenMsg(await mensagemDoErro(error, data, 'Erro ao remover token.')); return; }
         setWpToken('');
         setWpTokenSet(false);
         setTokenMsg('Token removido — usando o padrão.');
