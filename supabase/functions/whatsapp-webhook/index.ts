@@ -39,6 +39,52 @@ async function computeHmac(secret: string, data: string): Promise<string> {
 // ADICIONAL ao processamento de mensagens — não substitui nada.
 // Idempotente: só atualiza/incrementa se o status realmente mudou para aquele wamid.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+// Extensão por mime. Nota de voz do WhatsApp chega como 'audio/ogg; codecs=opus',
+// por isso o mime é cortado no ';' antes de consultar aqui.
+const EXTENSAO: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
+  'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a',
+  'audio/aac': 'aac', 'audio/amr': 'amr',
+};
+
+// Baixa a mídia da Meta e sobe pro nosso Storage, devolvendo a URL pública.
+// A URL que a Meta entrega EXPIRA em minutos: sem copiar, o lojista abre a
+// conversa depois e não vê nada, e o Claude não tem como ler a foto.
+async function baixarMidiaParaStorage(
+  supabase: any,
+  userId: string,
+  convId: string,
+  mediaId: string,
+  token: string,
+): Promise<string> {
+  // 1. A Meta devolve a URL da mídia, não a mídia.
+  const metaRes = await fetch(`https://graph.facebook.com/v20.0/${mediaId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const metaJson = await metaRes.json().catch(() => ({}));
+  const mediaUrl = String(metaJson?.url ?? '');
+  if (!mediaUrl) throw new Error('sem url da mídia');
+
+  // 2. Baixar exige o token de novo — a URL sozinha não abre.
+  const dl = await fetch(mediaUrl, { headers: { Authorization: `Bearer ${token}` } });
+  if (!dl.ok) throw new Error(`download ${dl.status}`);
+  const bytes = new Uint8Array(await dl.arrayBuffer());
+  const mime  = (dl.headers.get('content-type') ?? 'application/octet-stream').split(';')[0].trim();
+  const ext   = EXTENSAO[mime] ?? 'bin';
+
+  // 3. Storage nosso, caminho por conversa pra facilitar limpeza depois.
+  const caminho = `${userId}/${convId}/${Date.now()}.${ext}`;
+  const { error: upErr } = await supabase.storage
+    .from('chat-media')
+    .upload(caminho, bytes, { contentType: mime, upsert: false });
+  if (upErr) throw new Error(`upload: ${upErr.message}`);
+
+  const { data: pub } = supabase.storage.from('chat-media').getPublicUrl(caminho);
+  const url = String(pub?.publicUrl ?? '');
+  if (!url) throw new Error('sem url pública');
+  return url;
+}
+
 async function processStatuses(payload: any): Promise<void> {
   try {
     const entries = payload?.entry ?? [];
@@ -342,6 +388,60 @@ serve(async (req) => {
   //   junto significaria duas vozes na mesma conversa. Volta ao bot quando
   //   alguém clicar "Devolver pro bot" no CRM.
   if (msg.isEcho) {
+    // Mídia que o lojista manda pelo celular (coexistência). Guardamos o
+    // arquivo em vez de transcrever: quem falou foi o próprio vendedor, o valor
+    // aqui é o registro pro time — e transcrever todo áudio dele seria custo
+    // recorrente sem ganho. O áudio do CLIENTE segue transcrito, porque ali o
+    // bot precisa do texto pra responder.
+    if (msg.type === 'image' || msg.type === 'audio') {
+      const ehFoto = msg.type === 'image';
+      const { data: ecoMidia, error: claimEcoErr } = await supabase
+        .from('messages')
+        .insert({
+          conversation_id: upsertedConv.id,
+          role: 'agent',
+          content: ehFoto ? '📷 Imagem enviada…' : '🎤 Áudio enviado…',
+          wa_message_id: waMessageId,
+        })
+        .select('id')
+        .single();
+
+      if (claimEcoErr || !ecoMidia) {
+        console.warn('[WH] claim de eco com mídia falhou (duplicado?):', claimEcoErr?.message);
+        return ok();
+      }
+
+      await supabase.from('conversations')
+        .update({ status: 'human', last_message_at: now })
+        .eq('id', upsertedConv.id);
+
+      const convIdEco  = upsertedConv.id;
+      const mediaIdEco = msg.mediaId ?? '';
+      const legendaEco = text;
+
+      // @ts-ignore — EdgeRuntime é global nas Supabase Edge Functions
+      EdgeRuntime.waitUntil((async () => {
+        try {
+          const token = await resolveWhatsAppToken(supabase, userId);
+          const url = await baixarMidiaParaStorage(supabase, userId, convIdEco, mediaIdEco, token);
+          const marcador = ehFoto ? '[imagem]' : '[audio]';
+          const conteudo = legendaEco ? `${marcador} ${url}
+${legendaEco}` : `${marcador} ${url}`;
+          await supabase.from('messages').update({ content: conteudo }).eq('id', ecoMidia.id);
+          console.log(`[WH-eco] ${ehFoto ? 'imagem' : 'áudio'} do lojista salvo (${maskPhone(from)})`);
+        } catch (e) {
+          console.error('[WH-eco] falha ao salvar mídia do lojista:', e);
+          // Aqui NÃO se responde ao cliente: quem mandou foi o próprio lojista,
+          // e um "não consegui abrir" iria pro cliente sem fazer sentido.
+          await supabase.from('messages')
+            .update({ content: ehFoto ? '[imagem enviada pelo celular]' : '[áudio enviado pelo celular]' })
+            .eq('id', ecoMidia.id);
+        }
+      })());
+
+      return ok();
+    }
+
     const { error: ecoErr } = await supabase.from('messages').insert({
       conversation_id: upsertedConv.id,
       role: 'agent',

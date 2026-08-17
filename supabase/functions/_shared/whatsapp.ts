@@ -66,18 +66,34 @@ function parseCloud(payload: unknown): InboundMessage | null {
       const meta = value.metadata as Record<string, string>;
       const echo = (value.message_echoes as unknown[])?.[0] as Record<string, unknown>;
       if (!echo) return null;
-      const texto = ((echo.text as Record<string, string>)?.body ?? '').trim();
-      if (!texto) return null;   // mídia enviada pelo celular fica de fora por ora
-
-      return {
+      const baseEco = {
         phoneNumberId: meta?.phone_number_id ?? '',
         from:          String(echo.to ?? ''),      // o CLIENTE
         senderName:    '',
         waMessageId:   String(echo.id ?? ''),
-        text:          texto,
-        type:          'text',
         isEcho:        true,
       };
+
+      // Foto e áudio que o lojista manda pelo celular. Antes caíam no
+      // `return null` e sumiam: o time abria a conversa e via o cliente
+      // perguntar seguido de nada, sem saber que o vendedor já tinha
+      // respondido com a foto do carro.
+      if (echo.type === 'image') {
+        const img = echo.image as Record<string, string> | undefined;
+        const mediaId = String(img?.id ?? '');
+        if (!mediaId) return null;
+        return { ...baseEco, text: String(img?.caption ?? '').trim(), type: 'image', mediaId };
+      }
+
+      if (echo.type === 'audio') {
+        const mediaId = String((echo.audio as Record<string, string>)?.id ?? '');
+        if (!mediaId) return null;
+        return { ...baseEco, text: '', type: 'audio', mediaId };
+      }
+
+      const texto = ((echo.text as Record<string, string>)?.body ?? '').trim();
+      if (!texto) return null;   // vídeo, documento e figurinha seguem de fora
+      return { ...baseEco, text: texto, type: 'text' };
     }
 
     const messages = value.messages as unknown[];

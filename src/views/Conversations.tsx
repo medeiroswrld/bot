@@ -186,8 +186,14 @@ const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; cam
   // e "[imagem] url" com legenda na linha seguinte (enviada pelo cliente).
   // Antes o CRM mostrava a URL crua e o lojista tinha que copiar e colar no
   // navegador pra ver o que o cliente mandou.
-  const mMidia = String(msg.content ?? '').match(/^\[(?:foto|imagem)\]\s*(https?:\/\/\S+)([\s\S]*)$/i);
-  const midia = mMidia ? { url: mMidia[1], legenda: mMidia[2].trim() } : null;
+  const mMidia = String(msg.content ?? '').match(/^\[(foto|imagem|audio)\]\s*(https?:\/\/\S+)([\s\S]*)$/i);
+  const midia = mMidia
+    ? {
+        ehAudio: mMidia[1].toLowerCase() === 'audio',
+        url:     mMidia[2],
+        legenda: mMidia[3].trim(),
+      }
+    : null;
   const align: React.CSSProperties['justifyContent'] = isCustomer ? 'flex-start' : 'flex-end';
 
   // Cores explícitas para garantir contraste independente do tema
@@ -225,13 +231,26 @@ const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; cam
           // mostrava a URL crua, e o lojista tinha que copiar e colar no
           // navegador pra ver o que o cliente mandou.
           <>
-            <a href={midia.url} target="_blank" rel="noreferrer">
-              <img
+            {midia.ehAudio ? (
+              // Áudio que o lojista mandou pelo celular. Guardamos o arquivo em
+              // vez de transcrever — quem falou foi o próprio vendedor, então o
+              // valor é ouvir, não ler. (Áudio do CLIENTE continua transcrito:
+              // ali o bot precisa do texto.)
+              <audio
+                controls
+                preload="none"
                 src={midia.url}
-                alt="anexo da conversa"
-                style={{ maxWidth: '100%', maxHeight: 260, borderRadius: 8, display: 'block' }}
+                style={{ maxWidth: '100%', display: 'block' }}
               />
-            </a>
+            ) : (
+              <a href={midia.url} target="_blank" rel="noreferrer">
+                <img
+                  src={midia.url}
+                  alt="anexo da conversa"
+                  style={{ maxWidth: '100%', maxHeight: 260, borderRadius: 8, display: 'block' }}
+                />
+              </a>
+            )}
             {midia.legenda && (
               <p style={{ margin: '6px 0 0', fontSize: '0.875rem', lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: textColor }}>
                 {midia.legenda}
