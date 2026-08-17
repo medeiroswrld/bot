@@ -341,7 +341,11 @@ function asUuidOrNull(v: unknown): string | null {
 function stripMediaUrls(text: string): string {
   return text
     .replace(/^\[foto\]\s*https?:\/\/\S+/i, '[foto enviada ao cliente]')
-    .replace(/^\[v[íi]deo\]\s*https?:\/\/\S+/i, '[vídeo enviado ao cliente]');
+    .replace(/^\[v[íi]deo\]\s*https?:\/\/\S+/i, '[vídeo enviado ao cliente]')
+    // Foto que o CLIENTE mandou: no histórico vira texto. Só a mais recente
+    // segue como imagem de verdade (ver a injeção antes do loop) — mandar
+    // todas em toda chamada multiplicaria o custo por conversa.
+    .replace(/^\[imagem\]\s*https?:\/\/\S+/i, '[imagem enviada pelo cliente]');
 }
 
 /**
@@ -1699,6 +1703,22 @@ isso é decisão da loja. Diga que vai levar a proposta pra equipe avaliar e cha
 o MESMO propósito (mesmo porte, mesmo tipo de uso). Sedan compacto não vira
 clássico de coleção; carro de família não vira carro de duas portas.
 
+## Quando o cliente manda FOTO de um carro
+
+Ele quer saber se você tem aquele carro, ou algo parecido.
+
+- **NUNCA afirme o modelo. Sempre confirme.** Diga o que parece e pergunte:
+  "Esse parece um Gol, é isso mesmo?". O cliente sabe qual carro ele
+  fotografou — errar com confiança destrói a credibilidade na hora, e com a
+  pergunta um erro vira conversa.
+- Depois de identificar, **chame consultar_estoque** com marca e modelo. Tendo,
+  apresente. Não tendo, ofereça o que há de parecido — mesmo porte e mesmo uso.
+- **Foto do carro do cliente** (troca): comente o que dá pra ver e registre com
+  save_trade_in_evaluation. **NUNCA estime valor por foto** — avaliação só na
+  loja, com a equipe vendo o carro.
+- **Não consegue identificar?** Peça ajuda em vez de chutar: "Não consegui
+  ver direito o modelo — me diz qual é que eu já procuro aqui".
+
 ## Limites (vendedor bom, não chato)
 
 - Nada de pressão desonesta, falsa urgência, mentira sobre o carro ou esconder defeito.
@@ -2512,6 +2532,34 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     .map((m) => m.content);
 
   const claudeMessages: Array<{ role: 'user' | 'assistant'; content: string | unknown[] }> = [...history];
+
+  // ── Foto do cliente vai para o modelo VER ─────────────────────────────────
+  //    Só a MAIS RECENTE, e só se for a última coisa que ele mandou. As demais
+  //    ficam como texto no histórico: reenviar todas em cada chamada
+  //    multiplicaria o custo de uma conversa com várias fotos.
+  //    Formato de URL (não base64) porque a imagem já está no nosso Storage,
+  //    público, e assim não trafega duas vezes.
+  const ultimaMsg = orderedMessages[orderedMessages.length - 1];
+  const urlImagem = ultimaMsg?.role === 'customer'
+    ? (String(ultimaMsg.content).match(/^\[imagem\]\s*(https?:\/\/\S+)/i)?.[1] ?? '')
+    : '';
+
+  if (urlImagem && provider === 'anthropic' && claudeMessages.length) {
+    const ultima = claudeMessages[claudeMessages.length - 1];
+    if (ultima.role === 'user') {
+      const legenda = String(ultimaMsg.content).replace(/^\[imagem\]\s*\S+/i, '').trim();
+      ultima.content = [
+        { type: 'image', source: { type: 'url', url: urlImagem } },
+        {
+          type: 'text',
+          text: legenda
+            ? `O cliente mandou esta foto e escreveu: "${legenda}"`
+            : 'O cliente mandou esta foto, sem escrever nada junto.',
+        },
+      ];
+      log.info('imagem do cliente enviada ao modelo', { action: 'visao' });
+    }
+  }
 
   try {
     for (let iteration = 0; iteration < 10; iteration++) {

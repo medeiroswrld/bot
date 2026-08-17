@@ -361,6 +361,91 @@ serve(async (req) => {
   }
 
   // 9b. Mensagem de ÁUDIO — claim de dedup + transcrição em background
+  // ── FOTO do cliente ────────────────────────────────────────────────────────
+  //    Mesmo desenho do áudio: reserva a mensagem (dedup pelo wamid) e faz o
+  //    trabalho pesado em segundo plano, pra Meta receber o 200 na hora.
+  //
+  //    Copiamos a imagem pro nosso Storage porque a URL que a Meta devolve
+  //    EXPIRA em minutos — sem isso o lojista abriria a conversa depois e não
+  //    veria a foto, e o Claude não teria como lê-la.
+  if (msg.type === 'image') {
+    const { data: imgMsg, error: claimImgErr } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: upsertedConv.id,
+        role: 'customer',
+        content: '📷 Imagem recebida…',
+        wa_message_id: waMessageId,
+      })
+      .select('id')
+      .single();
+
+    if (claimImgErr || !imgMsg) {
+      console.warn('[WH] claim de imagem falhou (duplicado?):', claimImgErr?.message);
+      return ok();
+    }
+
+    const convIdImg  = upsertedConv.id;
+    const isHumanImg = upsertedConv.status === 'human';
+    const mediaIdImg = msg.mediaId ?? '';
+    const legenda    = text;   // o cliente quase sempre escreve junto com a foto
+
+    // @ts-ignore — EdgeRuntime é global nas Supabase Edge Functions
+    EdgeRuntime.waitUntil((async () => {
+      try {
+        const token = await resolveWhatsAppToken(supabase, userId);
+
+        // 1. A Meta devolve a URL da mídia, não a mídia.
+        const metaRes = await fetch(`https://graph.facebook.com/v20.0/${mediaIdImg}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const metaJson = await metaRes.json().catch(() => ({}));
+        const mediaUrl = String(metaJson?.url ?? '');
+        if (!mediaUrl) throw new Error('sem url da mídia');
+
+        // 2. Baixar exige o token de novo — a URL sozinha não abre.
+        const dl = await fetch(mediaUrl, { headers: { Authorization: `Bearer ${token}` } });
+        if (!dl.ok) throw new Error(`download ${dl.status}`);
+        const bytes = new Uint8Array(await dl.arrayBuffer());
+        const mime  = dl.headers.get('content-type') ?? 'image/jpeg';
+        const ext   = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+
+        // 3. Storage nosso, caminho por conversa pra facilitar limpeza depois.
+        const caminho = `${userId}/${convIdImg}/${Date.now()}.${ext}`;
+        const { error: upErr } = await supabase.storage
+          .from('chat-media')
+          .upload(caminho, bytes, { contentType: mime, upsert: false });
+        if (upErr) throw new Error(`upload: ${upErr.message}`);
+
+        const { data: pub } = supabase.storage.from('chat-media').getPublicUrl(caminho);
+        const url = String(pub?.publicUrl ?? '');
+        if (!url) throw new Error('sem url pública');
+
+        // 4. Mesmo formato do [foto] que o bot envia, pro CRM renderizar igual.
+        //    A legenda entra na mesma linha: é o que o cliente perguntou.
+        const conteudo = legenda ? `[imagem] ${url}
+${legenda}` : `[imagem] ${url}`;
+        await supabase.from('messages').update({ content: conteudo }).eq('id', imgMsg.id);
+
+        console.log(`[WH-img] imagem salva (${maskPhone(from)})${legenda ? ' com legenda' : ''}`);
+        if (!isHumanImg) fireProcess(convIdImg);
+      } catch (e) {
+        console.error('[WH-img] falha ao processar imagem:', e);
+        // Sem a foto o bot não tem o que ler — avisa em vez de deixar no vácuo.
+        await supabase.from('messages')
+          .update({ content: '[imagem que não consegui abrir]' }).eq('id', imgMsg.id);
+        const token = await resolveWhatsAppToken(supabase, userId);
+        const aviso = 'Recebi sua foto mas não consegui abrir aqui 😕 pode mandar de novo, ou me descrever o que é?';
+        await sendMessage(from, aviso, phoneNumberId || undefined, token);
+        await supabase.from('messages').insert({ conversation_id: convIdImg, role: 'bot', content: aviso });
+        await supabase.from('conversations')
+          .update({ last_message_at: new Date().toISOString() }).eq('id', convIdImg);
+      }
+    })());
+
+    return ok();
+  }
+
   if (msg.type === 'audio') {
     // Claim: insere já a mensagem (placeholder) para reservar o wa_message_id e
     // evitar transcrição dupla caso chegue uma entrega duplicada da Meta.

@@ -171,6 +171,13 @@ const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; cam
   const isCustomer = msg.role === 'customer';
   const isBot      = msg.role === 'bot';
   const time = new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  // Mensagem de mídia vira imagem de verdade: "[foto] url" (enviada pelo bot)
+  // e "[imagem] url" com legenda na linha seguinte (enviada pelo cliente).
+  // Antes o CRM mostrava a URL crua e o lojista tinha que copiar e colar no
+  // navegador pra ver o que o cliente mandou.
+  const mMidia = String(msg.content ?? '').match(/^\[(?:foto|imagem)\]\s*(https?:\/\/\S+)([\s\S]*)$/i);
+  const midia = mMidia ? { url: mMidia[1], legenda: mMidia[2].trim() } : null;
   const align: React.CSSProperties['justifyContent'] = isCustomer ? 'flex-start' : 'flex-end';
 
   // Cores explícitas para garantir contraste independente do tema
@@ -203,6 +210,25 @@ const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; cam
             )}
           </div>
         )}
+        {midia ? (
+          // Foto (do bot ou do cliente) vira imagem de verdade. Antes o CRM
+          // mostrava a URL crua, e o lojista tinha que copiar e colar no
+          // navegador pra ver o que o cliente mandou.
+          <>
+            <a href={midia.url} target="_blank" rel="noreferrer">
+              <img
+                src={midia.url}
+                alt="anexo da conversa"
+                style={{ maxWidth: '100%', maxHeight: 260, borderRadius: 8, display: 'block' }}
+              />
+            </a>
+            {midia.legenda && (
+              <p style={{ margin: '6px 0 0', fontSize: '0.875rem', lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: textColor }}>
+                {midia.legenda}
+              </p>
+            )}
+          </>
+        ) : (
         <p style={{ margin: 0, fontSize: '0.875rem', lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: textColor }}>
           {msg.transcribed_from_audio && (
             <span title="Mensagem recebida como áudio (transcrita)">
@@ -211,6 +237,7 @@ const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; cam
           )}
           {msg.content}
         </p>
+        )}
         <p style={{ margin: '4px 0 0', fontSize: '0.65rem', color: timeColor, textAlign: 'right' }}>
           {time}
           {!isCustomer && <VistoWhats status={msg.wa_status} />}

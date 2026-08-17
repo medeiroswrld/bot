@@ -10,8 +10,8 @@ export interface InboundMessage {
   senderName: string      // Nome exibido no WhatsApp
   text: string            // Texto da mensagem (vazio quando type === 'audio', preenchido após transcrição)
   waMessageId: string     // ID da mensagem no WhatsApp (para deduplicação)
-  type: 'text' | 'audio'  // Tipo da mensagem recebida
-  mediaId?: string        // ID da mídia na Meta (presente quando type === 'audio')
+  type: 'text' | 'audio' | 'image'  // Tipo da mensagem recebida
+  mediaId?: string        // ID da mídia na Meta (presente em 'audio' e 'image')
   isEcho?: boolean        // Mensagem que a LOJA enviou pelo celular (coexistência)
 }
 
@@ -101,6 +101,18 @@ function parseCloud(payload: unknown): InboundMessage | null {
       return { ...base, text, type: 'text' };
     }
 
+    // Foto que o cliente manda. Antes caía no `return null` lá embaixo: a
+    // mensagem não existia, não aparecia no CRM e o bot não respondia NADA -
+    // vácuo justamente para quem está no momento mais quente da conversa
+    // (fotografando o carro da troca, ou perguntando "vocês têm esse?").
+    // A legenda vem junto porque o cliente quase sempre escreve algo com a foto.
+    if (msg.type === 'image') {
+      const img = msg.image as Record<string, string> | undefined;
+      const mediaId = String(img?.id ?? '');
+      if (!mediaId) return null;
+      return { ...base, text: String(img?.caption ?? '').trim(), type: 'image', mediaId };
+    }
+
     if (msg.type === 'audio') {
       const mediaId = String((msg.audio as Record<string, string>)?.id ?? '');
       if (!mediaId) return null;
@@ -127,7 +139,7 @@ function parseCloud(payload: unknown): InboundMessage | null {
       return { ...base, text: texto, type: 'text' };
     }
 
-    return null; // imagem, vídeo, documento, etc. — não suportados
+    return null; // vídeo, documento, sticker, etc. — não suportados
   } catch {
     return null;
   }
