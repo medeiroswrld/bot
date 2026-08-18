@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   Bot, UserCheck, MessageCircle, Send, RefreshCw,
-  PhoneCall, Search, Loader2, AlertCircle, Bell, BellOff, Trash2, Mic,
+  PhoneCall, Search, Loader2, AlertCircle, Bell, BellOff, Trash2, Mic, ChevronLeft,
 } from 'lucide-react';
 import { supabaseTyped } from '../lib/supabase-typed';
 // useAppContext is from a .jsx file — cast to known shape below
@@ -820,10 +820,13 @@ export default function Conversations() {
 
   return (
     <>
-    <div style={{ display: 'flex', height: 'calc(100vh - 80px)', overflow: 'hidden' }}>
+    <div
+      className={`conv-layout${selectedConv ? ' com-conversa' : ''}`}
+      style={{ display: 'flex', height: 'calc(100vh - 80px)', overflow: 'hidden' }}
+    >
 
       {/* ── lista ──────────────────────────────────────────────────────────── */}
-      <div style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--bg-main)' }}>
+      <div className="conv-lista" style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--bg-main)' }}>
         <div style={{ padding: '16px 16px 8px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <MessageCircle size={20} style={{ color: 'var(--primary)' }} />
@@ -893,15 +896,26 @@ export default function Conversations() {
 
       {/* ── chat ───────────────────────────────────────────────────────────── */}
       {!selectedConv ? (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'var(--text-secondary)', gap: 8 }}>
+        <div className="conv-chat" style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', color: 'var(--text-secondary)', gap: 8 }}>
           <MessageCircle size={48} style={{ opacity: 0.2 }} />
           <p style={{ margin: 0, fontSize: '0.9rem' }}>Selecione uma conversa para ver as mensagens.</p>
         </div>
       ) : (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div className="conv-chat" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {/* header */}
           <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-card)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {/* No celular a lista e o chat dividem a mesma tela, entao precisa
+                  de um caminho de volta. No desktop os dois aparecem juntos e o
+                  botao seria ruido — o CSS o esconde. */}
+              <button
+                type="button"
+                className="conv-voltar"
+                aria-label="Voltar para a lista"
+                onClick={() => setSelectedId(null)}
+              >
+                <ChevronLeft size={20} />
+              </button>
               <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'var(--primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.8rem', fontWeight: 700 }}>
                 {initials(selectedConv.customer_name, selectedConv.customer_phone)}
               </div>

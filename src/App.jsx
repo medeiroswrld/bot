@@ -1,9 +1,9 @@
-import { useState, lazy, Suspense } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, CarFront, Users, Calendar, Settings,
   Bell, LogOut, Loader2, MessageCircle, Bot,
-  Sun, Moon, Megaphone,
+  Sun, Moon, Megaphone, Menu,
 } from 'lucide-react';
 import './App.css';
 
@@ -60,7 +60,7 @@ const NAV_ITEMS = [
 // Todos os caminhos que um item cobre (o próprio + os das abas).
 const itemPaths = (item) => (item.tabs ? item.tabs.map((t) => t.path) : [item.path]);
 
-const Sidebar = () => {
+const Sidebar = ({ aberta = false, onFechar = () => {} }) => {
   const location = useLocation();
   const { logout, matchedCount } = useAppContext();
 
@@ -82,7 +82,7 @@ const Sidebar = () => {
     );
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar${aberta ? ' aberta' : ''}`}>
       {/* Logo */}
       <Link to="/" className="sidebar-logo-link">
         <img src="/logo.png" className="sidebar-logo-img" alt="" />
@@ -100,6 +100,7 @@ const Sidebar = () => {
                 <Link
                   to={item.path}
                   className={`sidebar-nav-item${isActive(item) ? ' active' : ''}`}
+                  onClick={onFechar}
                   data-tooltip={item.name}
                 >
                   <span className="sidebar-nav-icon" style={{ position: 'relative' }}>
@@ -153,7 +154,7 @@ const Sidebar = () => {
 
 // ─── Header ──────────────────────────────────────────────────────────────────
 
-const Header = () => {
+const Header = ({ onAbrirMenu = () => {} }) => {
   const { company, profile } = useAppContext();
   const navigate = useNavigate();
 
@@ -166,6 +167,10 @@ const Header = () => {
 
   return (
     <header className="main-header">
+      {/* So aparece no mobile (CSS): no desktop a barra lateral esta sempre visivel. */}
+      <button className="menu-toggle" onClick={onAbrirMenu} aria-label="Abrir menu">
+        <Menu size={20} />
+      </button>
       <div className="header-actions">
         <button className="icon-btn"><Bell size={18} /></button>
         <div
@@ -217,11 +222,20 @@ const PageTabs = () => {
 
 const AuthenticatedApp = () => {
   const location = useLocation();
+  const [menuAberto, setMenuAberto] = useState(false);
+
+  // Fecha ao trocar de rota. Sem isso o drawer fica aberto por cima da tela
+  // nova, e no celular ele cobre quase tudo.
+  useEffect(() => { setMenuAberto(false); }, [location.pathname]);
+
   return (
     <div className="app-container">
-      <Sidebar />
+      <Sidebar aberta={menuAberto} onFechar={() => setMenuAberto(false)} />
+      {menuAberto && (
+        <div className="sidebar-backdrop" onClick={() => setMenuAberto(false)} />
+      )}
       <main className="main-content">
-        <Header />
+        <Header onAbrirMenu={() => setMenuAberto(true)} />
         <PageTabs />
         <Suspense fallback={<PageLoader />}>
           <div key={location.pathname} className="page-transition">

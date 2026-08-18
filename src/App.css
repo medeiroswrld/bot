@@ -889,8 +889,48 @@
 @media (max-width: 1024px) {
   .lead-kanban-board { grid-template-columns: repeat(2, 1fr); }
 }
+/* Botao de menu: so existe no mobile. */
+.menu-toggle {
+  display: none;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-primary); padding: 6px; margin-right: auto;
+  align-items: center; border-radius: 8px;
+}
+/* Voltar da conversa: so no mobile. No desktop lista e chat ficam lado a lado. */
+.conv-voltar {
+  display: none;
+  background: none; border: none; cursor: pointer;
+  color: var(--text-primary); padding: 4px; margin-right: 2px;
+  align-items: center; border-radius: 8px;
+}
+
+.sidebar-backdrop {
+  position: fixed; inset: 0; z-index: 90;
+  background: rgba(0, 0, 0, 0.45);
+}
+
 @media (max-width: 768px) {
-  .main-content { margin-left: calc(var(--sidebar-w) + 8px); }
+  /* A barra lateral vira gaveta: sai da tela e o conteudo ocupa tudo. Antes
+     ela ficava fixa ocupando largura no celular, onde ela e mais cara. */
+  .main-content { margin-left: 0; }
+  .sidebar {
+    z-index: 100;
+    transform: translateX(-110%);
+    transition: transform 0.22s ease;
+    /* Sem hover no celular: abre ja na largura expandida, com os rotulos. */
+    width: var(--sidebar-w-expanded);
+  }
+  .sidebar.aberta { transform: translateX(0); }
+  .sidebar .sidebar-label { opacity: 1; width: auto; }
+  .menu-toggle { display: flex; }
+
+  /* Conversas: dois paineis nao cabem num celular. Mostra a lista, e quando
+     uma conversa e aberta troca pelo chat, com botao de voltar. */
+  .conv-layout .conv-lista { width: 100%; border-right: none; }
+  .conv-layout .conv-chat { display: none; }
+  .conv-layout.com-conversa .conv-lista { display: none; }
+  .conv-layout.com-conversa .conv-chat { display: flex; }
+  .conv-voltar { display: flex; }
   .view-content { padding: 16px 20px; gap: 1.25rem; }
   .header-search { width: 180px; }
   .view-header-flex { flex-direction: column; align-items: flex-start; gap: 12px; }
