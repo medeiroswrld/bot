@@ -1596,6 +1596,44 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
       + (tradeInExtra ? `\n\n## Perguntas adicionais (configuradas pela loja)\n\nAlém das perguntas padrão acima, descubra também:\n${tradeInExtra}\n\nQuando obter resposta dessas perguntas extras, salve no campo extra_info junto com as outras informações extras.` : '')
     : '';
 
+  // Equipe e contatos de outros setores. Duas lacunas que apareciam na
+  // conversa real: o cliente cita alguem da loja ("falei com o Rodrigo") e o
+  // bot improvisa, soando como se a loja nao conhecesse o proprio time; e o
+  // cliente pergunta de consignacao/administrativo, que ficam em OUTRO numero,
+  // e o bot nao tem o que passar.
+  type Membro  = { nome?: string; funcao?: string };
+  type Contato = { setor?: string; telefone?: string; quando_usar?: string };
+  const equipe = Array.isArray(settings.team_members)
+    ? (settings.team_members as Membro[]).filter((m) => String(m?.nome ?? '').trim())
+    : [];
+  const contatosSetor = Array.isArray(settings.department_contacts)
+    ? (settings.department_contacts as Contato[]).filter((c) => String(c?.telefone ?? '').trim())
+    : [];
+
+  const listaEquipe = equipe
+    .map((m) => `- ${String(m.nome).trim()}${m.funcao ? ` — ${String(m.funcao).trim()}` : ''}`)
+    .join('\n');
+  const listaContatos = contatosSetor
+    .map((c) => `- ${String(c.setor ?? 'Setor').trim()}: ${String(c.telefone).trim()}`
+      + (c.quando_usar ? ` — encaminhe quando: ${String(c.quando_usar).trim()}` : ''))
+    .join('\n');
+
+  const equipeBlock = (equipe.length || contatosSetor.length)
+    ? `\n\n## Equipe da loja e outros setores`
+      + (equipe.length
+          ? `\n\nQuem trabalha na loja:\n${listaEquipe}\n\n`
+            + `Se o cliente citar alguem dessa lista, confirme com naturalidade que a pessoa e da equipe e siga a conversa.\n`
+            + `Se citar um nome que NAO esta na lista, NAO diga que a pessoa nao trabalha aqui — a lista pode estar desatualizada, e negar um funcionario real na frente do cliente e pior do que nao saber. Diga que vai confirmar e chame a tool chamar_atendente.`
+          : '')
+      + (contatosSetor.length
+          ? `\n\nVoce e o atendimento de VENDAS. Outros assuntos sao atendidos em numeros diferentes:\n${listaContatos}\n\n`
+            + `REGRA RIGIDA sobre telefone:\n`
+            + `- So escreva um numero que esteja EXATAMENTE na lista acima, copiado digito por digito.\n`
+            + `- NUNCA invente, complete nem "corrija" um numero.\n`
+            + `- Se o assunto nao tem setor cadastrado, nao invente contato: diga que vai confirmar com a equipe.`
+          : '')
+    : '';
+
   const visitReminderBlock = `\n\n## Resposta do cliente ao lembrete de visita\n\nSe o cliente responde algo como "não vou poder ir", "preciso desmarcar", "vou cancelar", "tô com problema" ou "vou ter que remarcar" (normalmente após um lembrete de visita):\n\n1. Mostre empatia ("Tudo bem, imprevistos acontecem!").\n2. Pergunte: "Você prefere remarcar pra outro horário ou cancelar de vez?"\n3. Se quiser REMARCAR: chame a tool cancelar_visita (cancela o agendamento atual) e em seguida conduza uma nova marcação seguindo o fluxo normal (dia → período → confirmação).\n4. Se quiser CANCELAR: chame a tool cancelar_visita e responda algo acolhedor: "Sem problemas, fica pra próxima! Quando quiser voltar, é só me chamar."\n\nSe o cliente responder positivamente ("ok", "tô indo", "estou a caminho"), apenas confirme: "Perfeito, te esperamos! 😊"`;
 
   // Financiamento — bloco condicional ao toggle financing_enabled.
@@ -1837,7 +1875,7 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
     faqs.length > 0
       ? `\n\n## Perguntas frequentes — use estas respostas quando o cliente perguntar algo relacionado\n\n${faqs.map((f) => `P: ${f.question}\nR: ${f.answer}`).join('\n\n')}`
       : ''
-  }${paymentBlock}${fordBlock}${tradeInBlock}${visitReminderBlock}`;
+  }${paymentBlock}${fordBlock}${tradeInBlock}${equipeBlock}${visitReminderBlock}`;
 }
 
 // ─── chamada à API do Claude ──────────────────────────────────────────────────
@@ -2838,6 +2876,37 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     log.warn('handoff de resgate', {
       action: 'chamar_atendente', forcado: true, motivo: motivoResgate, negativasAnteriores,
     });
+  }
+
+  // ── 7c. Trava de telefone ──────────────────────────────────────────────────
+  // Digito trocado e o erro mais caro desta feature: o cliente liga pra empresa
+  // errada, ou pro celular de um estranho que nunca ouviu falar da loja. Pedir
+  // no prompt nao basta — numero e exatamente o tipo de coisa que o modelo
+  // "completa" sozinho. Entao confere aqui, contra o que a loja cadastrou.
+  const soDigitos = (t: string) => t.replace(/\D/g, '').replace(/^55/, '');
+  const telsCadastrados = (Array.isArray(settings?.department_contacts)
+    ? (settings.department_contacts as Array<{ telefone?: string }>)
+    : [])
+    .map((c) => soDigitos(String(c?.telefone ?? '')))
+    .filter((d) => d.length >= 10);
+
+  // Exige 10-11 digitos (DDD + numero): assim ano ("2015 2020"), preco e
+  // quilometragem nao sao confundidos com telefone.
+  const candidatos = finalText.match(/(?:\+?55[\s.-]*)?\(?\d{2}\)?[\s.-]*\d{4,5}[\s.-]?\d{4}/g) ?? [];
+  const naoCadastrados = candidatos.filter((c) => {
+    const d = soDigitos(c);
+    if (d.length < 10 || d.length > 11) return false;
+    // endsWith nos dois sentidos tolera o 9o digito do celular BR.
+    return !telsCadastrados.some((t) => t.endsWith(d) || d.endsWith(t));
+  });
+
+  if (naoCadastrados.length) {
+    log.error('bot escreveu telefone fora do cadastro — resposta substituida', {
+      action: 'guard_telefone', quantidade: naoCadastrados.length,
+    });
+    await supabase.from('conversations').update({ status: 'pending' }).eq('id', conversationId);
+    const nomeG = customerName ? `${String(customerName).split(' ')[0]}, ` : '';
+    finalText = `${nomeG}deixa eu confirmar esse contato certinho com a equipe pra nao te passar numero errado. Ja te respondem por aqui. 😊`;
   }
 
   // ── 8. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────

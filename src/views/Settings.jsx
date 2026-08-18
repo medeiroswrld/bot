@@ -264,6 +264,41 @@ const Settings = () => {
         setTimeout(() => setSavedPay(false), 2000);
     };
 
+    // ── Equipe e contatos de outros setores ───────────────────────────────────
+    // Duas listas curtas que o bot passa a conhecer: quem trabalha na loja (pra
+    // confirmar quando o cliente cita um nome) e o telefone de cada setor (pra
+    // encaminhar consignacao, administrativo etc. em vez de improvisar).
+    const [equipe,   setEquipe]   = useState([]);   // [{ nome, funcao }]
+    const [contatos, setContatos] = useState([]);   // [{ setor, telefone, quando_usar }]
+    const [savingEquipe, setSavingEquipe] = useState(false);
+    const [savedEquipe,  setSavedEquipe]  = useState(false);
+
+    const saveEquipe = async () => {
+        if (!user?.id) return;
+        setSavingEquipe(true);
+        // Descarta linha em branco: o lojista adiciona e deixa vazia o tempo
+        // todo, e linha vazia no prompt vira ruido pro modelo.
+        const time = equipe
+            .map(m => ({ nome: (m.nome || '').trim(), funcao: (m.funcao || '').trim() }))
+            .filter(m => m.nome);
+        const setores = contatos
+            .map(c => ({
+                setor: (c.setor || '').trim(),
+                telefone: (c.telefone || '').trim(),
+                quando_usar: (c.quando_usar || '').trim(),
+            }))
+            .filter(c => c.setor && c.telefone);
+        await supabase
+            .from('company_settings')
+            .update({ team_members: time, department_contacts: setores, updated_at: new Date().toISOString() })
+            .eq('user_id', user.id);
+        await refreshCompanySettings();
+        setEquipe(time); setContatos(setores);
+        setSavingEquipe(false);
+        setSavedEquipe(true);
+        setTimeout(() => setSavedEquipe(false), 2000);
+    };
+
     // ── Financiamento ─────────────────────────────────────────────────────────
     const [financing, setFinancing] = useState({ enabled: false, rate: '', maxInstallments: 48, minDownPct: 20, banks: '' });
     const [savingFin, setSavingFin] = useState(false);
@@ -338,6 +373,9 @@ const Settings = () => {
         const pay = Array.isArray(s.payment_methods) ? s.payment_methods : [];
         setPayMethods(pay.filter(m => PAYMENT_OPTIONS.includes(m)));
         setPayOther(pay.filter(m => !PAYMENT_OPTIONS.includes(m)).join(', '));
+        // Equipe e contatos por setor
+        setEquipe(Array.isArray(s.team_members) ? s.team_members : []);
+        setContatos(Array.isArray(s.department_contacts) ? s.department_contacts : []);
         // Financiamento
         setFinancing({
             enabled: s.financing_enabled === true,
@@ -938,6 +976,113 @@ const Settings = () => {
                                 ? <><CheckCircle size={18} /> Salvo!</>
                                 : savingPay ? 'Salvando...'
                                 : <><Save size={18} /> Salvar Formas de Pagamento</>}
+                        </button>
+                    </div>
+                </section>
+            </div>
+
+            {/* -- Equipe e Outros Setores --------------------------------- */}
+            <div style={{ marginTop: '2rem' }}>
+                <section className="settings-section card">
+                    <div className="section-title">
+                        <User size={20} />
+                        <h2>Equipe e Outros Setores</h2>
+                    </div>
+                    <div className="settings-form">
+                        <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+                            O bot usa estas listas pra reconhecer quem trabalha na loja e pra encaminhar
+                            assuntos que nao sao de vendas ao numero certo.
+                        </p>
+
+                        <div className="form-group">
+                            <label>Equipe da loja</label>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '0 0 0.75rem', lineHeight: 1.5 }}>
+                                Quando o cliente cita alguem, o bot confirma que a pessoa e da equipe. Se o
+                                nome nao estiver aqui, ele nao nega -- passa pra um atendente.
+                            </p>
+                            {equipe.map((m, i) => (
+                                <div key={i} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                    <input
+                                        type="text" value={m.nome || ''} placeholder="Nome"
+                                        style={{ flex: 2 }}
+                                        onChange={e => setEquipe(equipe.map((x, j) => j === i ? { ...x, nome: e.target.value } : x))}
+                                    />
+                                    <input
+                                        type="text" value={m.funcao || ''} placeholder="Funcao (ex: Vendedor)"
+                                        style={{ flex: 2 }}
+                                        onChange={e => setEquipe(equipe.map((x, j) => j === i ? { ...x, funcao: e.target.value } : x))}
+                                    />
+                                    <button
+                                        type="button" className="btn-icon" title="Remover"
+                                        onClick={() => setEquipe(equipe.filter((_, j) => j !== i))}
+                                    >
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
+                            ))}
+                            <button
+                                type="button" className="btn-secondary"
+                                style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}
+                                onClick={() => setEquipe([...equipe, { nome: '', funcao: '' }])}
+                            >
+                                <Plus size={16} /> Adicionar pessoa
+                            </button>
+                        </div>
+
+                        <div className="form-group" style={{ marginTop: '1.5rem' }}>
+                            <label>Contatos de outros setores</label>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '0 0 0.75rem', lineHeight: 1.5 }}>
+                                O campo "encaminhe quando" e o que faz o bot acertar: descreva com as palavras
+                                do cliente, nao com o nome do setor. Ex: "quer deixar o carro pra loja vender".
+                            </p>
+                            {contatos.map((c, i) => (
+                                <div key={i} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                                    <input
+                                        type="text" value={c.setor || ''} placeholder="Setor (ex: Consignacao)"
+                                        style={{ flex: '1 1 140px' }}
+                                        onChange={e => setContatos(contatos.map((x, j) => j === i ? { ...x, setor: e.target.value } : x))}
+                                    />
+                                    <input
+                                        type="text" value={c.telefone || ''} placeholder="Telefone com DDD"
+                                        style={{ flex: '1 1 140px' }}
+                                        onChange={e => setContatos(contatos.map((x, j) => j === i ? { ...x, telefone: e.target.value } : x))}
+                                    />
+                                    <input
+                                        type="text" value={c.quando_usar || ''} placeholder="Encaminhe quando..."
+                                        style={{ flex: '2 1 220px' }}
+                                        onChange={e => setContatos(contatos.map((x, j) => j === i ? { ...x, quando_usar: e.target.value } : x))}
+                                    />
+                                    <button
+                                        type="button" className="btn-icon" title="Remover"
+                                        onClick={() => setContatos(contatos.filter((_, j) => j !== i))}
+                                    >
+                                        <Trash2 size={16} />
+                                    </button>
+                                </div>
+                            ))}
+                            <button
+                                type="button" className="btn-secondary"
+                                style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem' }}
+                                onClick={() => setContatos([...contatos, { setor: '', telefone: '', quando_usar: '' }])}
+                            >
+                                <Plus size={16} /> Adicionar setor
+                            </button>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '0.75rem', lineHeight: 1.5 }}>
+                                O bot so escreve numero que estiver cadastrado aqui. Se ele tentar passar
+                                qualquer outro, a resposta e bloqueada e a conversa vai pra um atendente.
+                            </p>
+                        </div>
+
+                        <button
+                            className="btn-primary"
+                            onClick={saveEquipe}
+                            disabled={savingEquipe}
+                            style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                            {savedEquipe
+                                ? <><CheckCircle size={18} /> Salvo!</>
+                                : savingEquipe ? 'Salvando...'
+                                : <><Save size={18} /> Salvar Equipe e Setores</>}
                         </button>
                     </div>
                 </section>
