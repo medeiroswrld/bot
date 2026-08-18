@@ -451,7 +451,11 @@ input, select, textarea { font: inherit; color: inherit; }
 .error-message { color: var(--danger); font-size: 0.75rem; font-weight: 600; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .input-with-icon { position: relative; display: flex; align-items: center; }
-.input-with-icon svg { position: absolute; left: 14px; color: var(--text-secondary); pointer-events: none; }
+/* Filho DIRETO: a regra pegava todo svg do container, inclusive o olho de
+   mostrar senha (que fica dentro de um <button>). Ele era jogado pra
+   left:14px em cima do cadeado e ganhava pointer-events:none — o botao
+   ficava sem conteudo no fluxo, largura zero, impossivel de clicar. */
+.input-with-icon > svg { position: absolute; left: 14px; color: var(--text-secondary); pointer-events: none; }
 .input-with-icon input { padding-left: 42px; width: 100%; }
 
 /* ══════════════════════════════════════════
