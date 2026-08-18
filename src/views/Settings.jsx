@@ -362,7 +362,10 @@ const Settings = () => {
         // Horário / agenda
         if (s.business_hours) setBh({ ...DEFAULT_BH, ...s.business_hours });
         if (s.appointment_duration) setApptDuration(String(s.appointment_duration));
-        if (s.appointment_interval) setApptInterval(String(s.appointment_interval));
+        // != null, nao truthy: 0 = "sem intervalo" e uma escolha valida da loja,
+        // e o if antigo a rejeitava. O valor era gravado certo no banco e a tela
+        // voltava pra 15 min no reload, parecendo que o salvamento nao pegou.
+        if (s.appointment_interval != null) setApptInterval(String(s.appointment_interval));
         if (s.max_appointments_per_slot) setApptMaxPerSlot(String(s.max_appointments_per_slot));
         // WhatsApp
         if (s.whatsapp_about) setWpAbout(s.whatsapp_about);

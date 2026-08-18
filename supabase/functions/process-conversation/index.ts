@@ -82,6 +82,53 @@ function getBrazilDateInfo(): { label: string; iso: string } {
   return { label, iso };
 }
 
+/**
+ * Nota de horario pro modelo, entregue como ULTIMA mensagem (nunca no system
+ * prompt).
+ *
+ * O system prompt so tem a DATA, de proposito: hora muda a cada minuto e
+ * invalidaria o prompt caching. A suposicao era que computeFreeSlots cobria o
+ * resto server-side — mas ele so roda quando o modelo CHAMA a tool. Quando o
+ * bot escreve "quer vir hoje ou amanha?" em texto livre, as 20h, nada valida, e
+ * ele oferece um dia que ja acabou.
+ *
+ * Aqui a hora entra pelo array de mensagens, DEPOIS dos cache breakpoints do
+ * system prompt e das tools, entao o cache continua valendo.
+ */
+function notaDeHorario(settings: Record<string, unknown> | null): string {
+  const agora = new Date();
+  const hhmm = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(agora);
+
+  const DIAS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const diaCurto = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo', weekday: 'short',
+  }).format(agora).toLowerCase().slice(0, 3);
+  const dayKey = DIAS.includes(diaCurto) ? diaCurto : 'mon';
+
+  type DayHours = { open?: boolean; start?: string; end?: string };
+  const bh = (settings?.business_hours ?? null) as Record<string, DayHours> | null;
+  const hoje = bh?.[dayKey];
+
+  const base = `(sistema: agora sao ${hhmm} no horario de Brasilia.`;
+
+  if (bh && !hoje?.open) {
+    return `${base} A loja NAO abre hoje. Nao ofereca visita para hoje; ofereca o proximo dia em que a loja abre. Confirme os horarios com a tool antes de sugerir.)`;
+  }
+
+  const abre  = String(hoje?.start ?? settings?.business_hours_start ?? '09:00');
+  const fecha = String(hoje?.end   ?? settings?.business_hours_end   ?? '18:00');
+
+  if (hhmm >= fecha) {
+    return `${base} A loja fechou as ${fecha}. NAO ofereca visita para hoje — hoje ja acabou. O mais cedo possivel e amanha.)`;
+  }
+  if (hhmm < abre) {
+    return `${base} A loja abre as ${abre} e fecha as ${fecha}. Hoje ainda e possivel, mas so a partir das ${abre}.)`;
+  }
+  return `${base} A loja fecha as ${fecha}. Se oferecer hoje, so horario depois de ${hhmm} e antes de ${fecha}.)`;
+}
+
 // ─── mescla mensagens consecutivas do mesmo papel ────────────────────────────
 
 function mergeConsecutiveRoles(
@@ -2553,6 +2600,11 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     });
     history.push({ role: 'user', content: NOTA_FECHAMENTO });
   }
+
+  // Hora atual + expediente de hoje. Vai aqui, no fim do array, e nao no system
+  // prompt: assim o modelo sabe que ja passou das 18h sem que o cache do prompt
+  // seja invalidado a cada minuto.
+  history.push({ role: 'user', content: notaDeHorario((settings ?? {}) as Record<string, unknown>) });
 
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
   const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
