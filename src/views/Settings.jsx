@@ -328,6 +328,9 @@ const Settings = () => {
 
     // ── Qualificação FORD (toggles independentes, salvar próprio) ──────────────
     const [ford,       setFord]       = useState({ family: true, occupation: true, recreation: true, financial: true });
+    // Cada pergunta da troca liga/desliga sozinha: "nota de 0 a 10" cai bem numa
+    // loja e soa estranha em outra. Mesmo padrao do ford acima.
+    const [tradeQ, setTradeQ] = useState({ modelo: true, ano: true, km: true, tempo_dono: true, nota: true, pagamento: true });
     const [savingFord, setSavingFord] = useState(false);
     const [savedFord,  setSavedFord]  = useState(false);
 
@@ -389,6 +392,9 @@ const Settings = () => {
         });
         // Comportamento do bot / FORD / lembrete / troca
         setDelayedSched(s.delayed_schedule_enabled !== false);
+        if (s.trade_in_questions && typeof s.trade_in_questions === 'object') {
+            setTradeQ({ ...{ modelo: true, ano: true, km: true, tempo_dono: true, nota: true, pagamento: true }, ...s.trade_in_questions });
+        }
         if (s.ford_qualification && typeof s.ford_qualification === 'object') {
             setFord({ family: true, occupation: true, recreation: true, financial: true, ...s.ford_qualification });
         }
@@ -453,6 +459,7 @@ const Settings = () => {
             .update({
                 trade_in_evaluation_enabled: tradeIn.enabled,
                 trade_in_extra_questions: tradeIn.extraQuestions || null,
+                trade_in_questions: tradeQ,
                 updated_at: new Date().toISOString(),
             })
             .eq('user_id', user.id);
@@ -1219,15 +1226,31 @@ const Settings = () => {
                         </div>
                         {tradeIn.enabled && (
                             <>
-                                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: 4 }}>Perguntas padrão que o vendedor faz:</p>
-                                <ul style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', margin: '0 0 1rem', paddingLeft: '1.1rem', lineHeight: 1.6 }}>
-                                    <li>Modelo (marca e modelo)</li>
-                                    <li>Ano</li>
-                                    <li>Quilometragem</li>
-                                    <li>Há quanto tempo é dono</li>
-                                    <li>Nota que daria pro carro (0-10)</li>
-                                    <li>Forma de pagamento desejada (à vista, financiamento, troca, diferença)</li>
-                                </ul>
+                                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginBottom: 8 }}>
+                                    Perguntas que o vendedor faz — desligue as que não fazem sentido na sua loja:
+                                </p>
+                                <div style={{ marginBottom: '1rem' }}>
+                                    {[
+                                        ['modelo',     'Modelo (marca e modelo)',   '"Você tem o quê hoje?"'],
+                                        ['ano',        'Ano',                       '"É de qual ano?"'],
+                                        ['km',         'Quilometragem',             '"Tá com quantos km mais ou menos?"'],
+                                        ['tempo_dono', 'Há quanto tempo é dono',    '"Faz tempo que tá com ele?"'],
+                                        ['nota',       'Nota de 0 a 10 pro carro',  '"Que nota você daria pra ele?"'],
+                                        ['pagamento',  'Forma de pagamento',        '"Trocar diretinho ou pagar diferença?"'],
+                                    ].map(([key, label, hint]) => (
+                                        <div key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
+                                            <button type="button" onClick={() => setTradeQ(q => ({ ...q, [key]: !q[key] }))}
+                                                title={tradeQ[key] ? 'Desativar' : 'Ativar'}
+                                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, color: tradeQ[key] ? '#10b981' : '#94a3b8' }}>
+                                                {tradeQ[key] ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
+                                            </button>
+                                            <div>
+                                                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>{label}</span>
+                                                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>{hint}</p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                                 <div className="form-group">
                                     <label>Perguntas adicionais (opcional)</label>
                                     <textarea

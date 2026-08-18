@@ -1638,8 +1638,31 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
   // Pré-avaliação de troca — só inclui se o toggle estiver ativo no tenant.
   const tradeInEnabled = settings.trade_in_evaluation_enabled !== false; // default ON
   const tradeInExtra = String(settings.trade_in_extra_questions ?? '').trim();
-  const tradeInBlock = tradeInEnabled
-    ? `\n\n## Pré-avaliação do carro do cliente (quando há troca)\n\nQuando o cliente mencionar que TEM um carro pra dar de entrada/trocar/vender, OU quando você perceber que ele já tá decidido por um carro e ainda não falou sobre troca, descubra naturalmente as seguintes informações:\n\n1. **Modelo (marca e modelo)** — "E qual é o seu atual?", "Você tem o quê hoje?"\n2. **Ano** — "É de qual ano?"\n3. **Quilometragem aproximada** — "Tá com quantos km mais ou menos?"\n4. **Há quanto tempo é dono** — "Faz tempo que tá com ele?"\n5. **Nota de 0 a 10 que daria pro carro** — "Numa escala de 0 a 10, que nota você daria pra ele?"\n6. **Forma de pagamento desejada** — "Você quer trocar diretinho, ou já tá pensando em pagar uma diferença?"\n   - Se for diferença: "A diferença você quer pagar à vista ou financiar?"\n\nREGRAS importantes:\n- Distribua as perguntas ao longo da conversa, NÃO em sequência rápida (vira interrogatório)\n- Pergunte com naturalidade, frases curtas\n- Use a tool save_trade_in_evaluation pra ir salvando aos poucos cada informação que descobrir\n- Se o cliente mencionar algo extra sobre o carro (cor, modificações, "tá batidinho na lateral"), salve no campo extra_info`
+  // Cada pergunta da troca liga/desliga separadamente. Antes era tudo-ou-nada, e
+  // pergunta que cai bem numa loja soa estranha em outra ("nota de 0 a 10" é o
+  // caso clássico). Mesmo molde do ford_qualification: mapa de linhas filtrado
+  // pelos toggles, numerado depois — assim desligar a 3ª não deixa buraco na
+  // contagem que o modelo lê.
+  const TRADE_IN_LINES: Record<string, string> = {
+    modelo:     '**Modelo (marca e modelo)** — "E qual é o seu atual?", "Você tem o quê hoje?"',
+    ano:        '**Ano** — "É de qual ano?"',
+    km:         '**Quilometragem aproximada** — "Tá com quantos km mais ou menos?"',
+    tempo_dono: '**Há quanto tempo é dono** — "Faz tempo que tá com ele?"',
+    nota:       '**Nota de 0 a 10 que daria pro carro** — "Numa escala de 0 a 10, que nota você daria pra ele?"',
+    pagamento:  '**Forma de pagamento desejada** — "Você quer trocar diretinho, ou já tá pensando em pagar uma diferença?"\n   - Se for diferença: "A diferença você quer pagar à vista ou financiar?"',
+  };
+  const tradeInCfg = (settings.trade_in_questions && typeof settings.trade_in_questions === 'object')
+    ? settings.trade_in_questions as Record<string, unknown>
+    : null;
+  // cfg null (coluna nunca configurada) → tudo ON, igual ao default da migration.
+  const tradeInKeys = (['modelo', 'ano', 'km', 'tempo_dono', 'nota', 'pagamento'] as const)
+    .filter((k) => tradeInCfg ? tradeInCfg[k] !== false : true);
+  const tradeInPerguntas = tradeInKeys
+    .map((k, i) => `${i + 1}. ${TRADE_IN_LINES[k]}`)
+    .join('\n');
+
+  const tradeInBlock = (tradeInEnabled && tradeInKeys.length)
+    ? `\n\n## Pré-avaliação do carro do cliente (quando há troca)\n\nQuando o cliente mencionar que TEM um carro pra dar de entrada/trocar/vender, OU quando você perceber que ele já tá decidido por um carro e ainda não falou sobre troca, descubra naturalmente as seguintes informações:\n\n${tradeInPerguntas}\n\nREGRAS importantes:\n- Pergunte APENAS o que está na lista acima. Se algo não está listado, a loja decidiu não perguntar — não improvise.\n- Distribua as perguntas ao longo da conversa, NÃO em sequência rápida (vira interrogatório)\n- Pergunte com naturalidade, frases curtas\n- Use a tool save_trade_in_evaluation pra ir salvando aos poucos cada informação que descobrir\n- Se o cliente mencionar algo extra sobre o carro (cor, modificações, "tá batidinho na lateral"), salve no campo extra_info`
       + (tradeInExtra ? `\n\n## Perguntas adicionais (configuradas pela loja)\n\nAlém das perguntas padrão acima, descubra também:\n${tradeInExtra}\n\nQuando obter resposta dessas perguntas extras, salve no campo extra_info junto com as outras informações extras.` : '')
     : '';
 
