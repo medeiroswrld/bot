@@ -2635,6 +2635,8 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   const ctx = { userId, conversationId, customerPhone, customerName, phoneNumberId, token: waToken, log };
   let finalText = '';
   const toolsUsadas = new Set<string>();  // o que o modelo REALMENTE chamou neste turno
+  // Modelo que o cliente pediu e a loja nao tem — candidato a lista de espera.
+  let interesseSemEstoque: { model: string; brand: string } | null = null;
   let lastWasTool = false;   // a iteração anterior executou uma tool?
   let retriedEmpty = false;  // já re-chamamos uma vez por resposta vazia pós-tool?
   let reformulou   = false;  // já pedimos uma reformulação por repetição?
@@ -2767,6 +2769,20 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
           ctx,
           supabase,
         );
+        // Guarda o modelo buscado sem resultado. Se uma busca POSTERIOR no mesmo
+        // turno achar algo (retry de grafia, "T Cross" -> "T-Cross"), limpa: nao
+        // e falta real de estoque, era so o nome escrito diferente.
+        if (block.name === 'consultar_estoque') {
+          const entrada = (block.input ?? {}) as Record<string, unknown>;
+          const modeloBuscado = String(entrada.model ?? '').trim();
+          const semMatch = (result as Record<string, unknown>)?.modo === 'sem_correspondencia';
+          if (semMatch && modeloBuscado) {
+            interesseSemEstoque = { model: modeloBuscado, brand: String(entrada.brand ?? '').trim() };
+          } else if (!semMatch) {
+            interesseSemEstoque = null;
+          }
+        }
+
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
       }
 
@@ -2951,6 +2967,37 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     log.warn('handoff de resgate', {
       action: 'chamar_atendente', forcado: true, motivo: motivoResgate, negativasAnteriores,
     });
+  }
+
+  // ── 7b. Lista de espera ────────────────────────────────────────────────────
+  // O bot promete "registro pra te avisar quando entrar" e nao registra. A
+  // descricao da tool exige duas coisas antes: que o cliente PECA pra ser
+  // avisado, e que os detalhes (ano, km, preco) venham primeiro. Entao ele
+  // adia — e quando emenda numa alternativa do estoque, nunca volta. Foi o caso
+  // do Golf em 18/08: "antes de registrar, deixa eu te mostrar o A3". O
+  // interesse morreu ali e a Lista de Espera ficou vazia.
+  //
+  // Aqui nao depende de o modelo lembrar: se ELE MESMO buscou o modelo e a loja
+  // nao tem, registra. A tool ja tem anti-duplicacao por cliente+modelo, entao
+  // chamar de novo e inofensivo.
+  if (interesseSemEstoque && !toolsUsadas.has('registrar_interesse_veiculo')) {
+    try {
+      await executeTool(
+        'registrar_interesse_veiculo',
+        {
+          model: interesseSemEstoque.model,
+          ...(interesseSemEstoque.brand ? { brand: interesseSemEstoque.brand } : {}),
+        },
+        ctx,
+        supabase,
+      );
+      log.info('interesse registrado pela trava (modelo fora de estoque)', {
+        action: 'guard_lista_espera', model: interesseSemEstoque.model,
+      });
+    } catch (e) {
+      // Nao pode derrubar a resposta: o cliente ja tem texto pra receber.
+      log.error('falha ao registrar interesse pela trava', { action: 'guard_lista_espera', error: e });
+    }
   }
 
   // ── 7c. Trava de telefone ──────────────────────────────────────────────────
