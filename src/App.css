@@ -925,12 +925,23 @@
   .menu-toggle { display: flex; }
 
   /* Conversas: dois paineis nao cabem num celular. Mostra a lista, e quando
-     uma conversa e aberta troca pelo chat, com botao de voltar. */
-  .conv-layout .conv-lista { width: 100%; border-right: none; }
-  .conv-layout .conv-chat { display: none; }
-  .conv-layout.com-conversa .conv-lista { display: none; }
-  .conv-layout.com-conversa .conv-chat { display: flex; }
+     uma conversa e aberta troca pelo chat, com botao de voltar.
+     !important porque a largura e o display sao estilos INLINE no componente,
+     e inline vence qualquer seletor — sem isso estas regras nao valem nada. */
+  .conv-layout .conv-lista {
+    width: 100% !important;
+    border-right: none !important;
+  }
+  .conv-layout .conv-chat { display: none !important; }
+  .conv-layout.com-conversa .conv-lista { display: none !important; }
+  .conv-layout.com-conversa .conv-chat { display: flex !important; }
   .conv-voltar { display: flex; }
+
+  /* Nada pode empurrar a pagina pra lateral: no celular isso vira scroll
+     horizontal e corta o cabecalho. */
+  .app-container, .main-content, .view-content { max-width: 100vw; overflow-x: hidden; }
+  .main-header { flex-wrap: wrap; gap: 8px; }
+  .profile-info { display: none; }
   .view-content { padding: 16px 20px; gap: 1.25rem; }
   .header-search { width: 180px; }
   .view-header-flex { flex-direction: column; align-items: flex-start; gap: 12px; }
