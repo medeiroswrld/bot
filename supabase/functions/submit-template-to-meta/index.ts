@@ -139,7 +139,12 @@ serve(async (req) => {
         const listUrl = `https://graph.facebook.com/v25.0/${wabaId}/message_templates`
           + `?name=${encodeURIComponent(template.meta_template_name)}&limit=1`;
         const listResponse = await fetch(listUrl, {
-          headers: { Authorization: `Bearer ${whatsappToken}` },
+          // tenantToken, nao o global: o WHATSAPP_TOKEN global e de OUTRO
+          // negocio e nao enxerga a WABA do cliente. A submissao acima ja usa
+          // o do tenant; so este fallback tinha ficado para tras, e ele roda
+          // justamente quando o nome ja existe - o caso em que mais importa
+          // achar o template certo.
+          headers: { Authorization: `Bearer ${tenantToken}` },
         });
         const listResult = await listResponse.json();
         console.log('[submit-template] existing template lookup:', JSON.stringify(listResult));
