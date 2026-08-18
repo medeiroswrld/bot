@@ -39,6 +39,33 @@ async function computeHmac(secret: string, data: string): Promise<string> {
 // ADICIONAL ao processamento de mensagens — não substitui nada.
 // Idempotente: só atualiza/incrementa se o status realmente mudou para aquele wamid.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
+// Dispara a notificação no celular do lojista. Fire-and-forget de propósito:
+// push é acessório e NÃO pode atrasar nem derrubar o processamento da mensagem,
+// que é o caminho crítico. Por isso nem espera a resposta.
+function avisarNoCelular(userId: string, nome: string, texto: string, convId: string): void {
+  try {
+    const corpo = texto.length > 120 ? `${texto.slice(0, 117)}...` : texto;
+    fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/send-push`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+      },
+      body: JSON.stringify({
+        user_id: userId,
+        titulo: nome || 'Novo contato',
+        corpo,
+        url: '/conversas',
+        // Tag por conversa: cliente que manda cinco mensagens seguidas gera UMA
+        // notificação que se atualiza, em vez de cinco empilhadas na tela.
+        tag: `conversa-${convId}`,
+      }),
+    }).catch((e) => console.warn('[WH-push] falha ao disparar:', e));
+  } catch (e) {
+    console.warn('[WH-push] erro inesperado:', e);
+  }
+}
+
 // Extensão por mime. Nota de voz do WhatsApp chega como 'audio/ogg; codecs=opus',
 // por isso o mime é cortado no ';' antes de consultar aqui.
 const EXTENSAO: Record<string, string> = {
@@ -470,6 +497,7 @@ ${legendaEco}` : `${marcador} ${url}`;
       console.error('[WH] Erro ao salvar mensagem:', msgErr);
       return ok();
     }
+    avisarNoCelular(userId, senderName || upsertedConv.customer_name || '', text, upsertedConv.id);
     if (upsertedConv.status !== 'human') fireProcess(upsertedConv.id);
     return ok();
   }

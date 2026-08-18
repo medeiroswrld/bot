@@ -7,6 +7,17 @@ import { supabaseTyped } from '../lib/supabase-typed';
 // useAppContext is from a .jsx file — cast to known shape below
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import { useAppContext } from '../context/AppContext.jsx';
+
+// Chave VAPID publica. E publica por design: identifica o servidor que assina o
+// push. A privada vive so no secret VAPID_PRIVATE_KEY da edge function.
+const VAPID_PUBLIC = 'BMaOd4xS2zTUsc1KM3M_ErMUITFqN8UZtFxPVBSfn9xbHYoLeRN0voZeoTfRwl63kkntbI9pU2vV5Z_tIQmnFec';
+
+// applicationServerKey exige bytes, nao a string base64url.
+const base64UrlParaBytes = (b64: string): Uint8Array => {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const bin = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+};
 import type { Tables } from '../lib/database.types';
 
 type Conversation = Tables<'conversations'>;
@@ -449,6 +460,35 @@ export default function Conversations() {
     if (!('Notification' in window)) return;
     const perm = await Notification.requestPermission();
     setNotifPerm(perm);
+    if (perm !== 'granted' || !user?.id) return;
+
+    // Inscricao de push. A Notification acima so dispara com a ABA ABERTA - ou
+    // seja, quando o lojista ja esta olhando a tela e nao precisa ser avisado.
+    // O push abaixo e o que chega com o CRM fechado.
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      const reg = await navigator.serviceWorker.ready;
+      const existente = await reg.pushManager.getSubscription();
+      const sub = existente ?? await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64UrlParaBytes(VAPID_PUBLIC),
+      });
+      const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
+      if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return;
+
+      // onConflict no endpoint: reinstalar ou reativar no mesmo aparelho
+      // atualiza a linha em vez de criar outra e notificar em duplicidade.
+      await supabaseTyped.from('push_subscriptions').upsert({
+        user_id: user.id,
+        endpoint: json.endpoint,
+        p256dh: json.keys.p256dh,
+        auth: json.keys.auth,
+        user_agent: navigator.userAgent.slice(0, 200),
+      } as never, { onConflict: 'endpoint' });
+    } catch (e) {
+      // Nao pode quebrar a tela: sem push o CRM segue funcionando normalmente.
+      console.warn('[push] nao foi possivel inscrever este aparelho:', e);
+    }
   };
 
   const testNotification = () => {
