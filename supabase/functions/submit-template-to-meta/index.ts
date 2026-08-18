@@ -175,6 +175,20 @@ serve(async (req) => {
         // Não achou o existente — cai pro fluxo de erro normal abaixo.
       }
 
+      // is_transient = instabilidade da Meta, nao reprovacao do texto. A
+      // propria resposta dela diz "Please retry your request later". Gravar
+      // 'rejected' aqui mente pro lojista, que vai reescrever um template que
+      // nunca teve problema. Volta pra 'draft' pra tentar de novo.
+      if (metaResult.error?.is_transient === true) {
+        await supabase.from('message_templates')
+          .update({ status: 'draft', rejection_reason: null })
+          .eq('id', template_id);
+        return new Response(JSON.stringify({
+          error: 'A Meta está instável no momento e pediu para tentar de novo. Reenvie em alguns minutos — o template não foi reprovado.',
+          transient: true,
+        }), { status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+
       await supabase.from('message_templates')
         .update({ status: 'rejected', rejection_reason: JSON.stringify(metaResult.error || metaResult) })
         .eq('id', template_id);
