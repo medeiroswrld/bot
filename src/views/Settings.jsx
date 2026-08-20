@@ -264,6 +264,27 @@ const Settings = () => {
         setTimeout(() => setSavedPay(false), 2000);
     };
 
+    // ── Troca de senha ────────────────────────────────────────────────────────
+    // Nao existia em lugar nenhum do sistema: quem esquecia a senha dependia do
+    // e-mail de recuperacao, que aponta pra Site URL do projeto — e ela estava
+    // em localhost. Aqui o proprio usuario define a nova, ja logado.
+    const [senhaNova, setSenhaNova] = useState('');
+    const [senhaConf, setSenhaConf] = useState('');
+    const [senhaMsg,  setSenhaMsg]  = useState('');
+    const [salvandoSenha, setSalvandoSenha] = useState(false);
+
+    const trocarSenha = async () => {
+        setSenhaMsg('');
+        if (senhaNova.length < 6) { setSenhaMsg('A senha precisa de pelo menos 6 caracteres.'); return; }
+        if (senhaNova !== senhaConf) { setSenhaMsg('As duas senhas nao sao iguais.'); return; }
+        setSalvandoSenha(true);
+        const { error } = await supabase.auth.updateUser({ password: senhaNova });
+        setSalvandoSenha(false);
+        if (error) { setSenhaMsg(error.message || 'Nao foi possivel alterar a senha.'); return; }
+        setSenhaNova(''); setSenhaConf('');
+        setSenhaMsg('Senha alterada com sucesso.');
+    };
+
     // ── Funcionamento do bot (liga/desliga + janela de horario) ────────────────
     const [botCfg, setBotCfg] = useState({ enabled: true, agendado: false, inicio: '08:00', fim: '18:00' });
     const [savingBot, setSavingBot] = useState(false);
@@ -1018,6 +1039,43 @@ const Settings = () => {
                                 ? <><CheckCircle size={18} /> Salvo!</>
                                 : savingPay ? 'Salvando...'
                                 : <><Save size={18} /> Salvar Formas de Pagamento</>}
+                        </button>
+                    </div>
+                </section>
+            </div>
+
+            {/* -- Senha -------------------------------------------------------- */}
+            <div style={{ marginTop: '2rem' }}>
+                <section className="settings-section card">
+                    <div className="section-title">
+                        <User size={20} />
+                        <h2>Alterar Senha</h2>
+                    </div>
+                    <div className="settings-form">
+                        <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+                            Define uma nova senha de acesso. Voce continua logado depois de trocar.
+                        </p>
+                        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                            <div className="form-group" style={{ flex: '1 1 200px' }}>
+                                <label>Nova senha</label>
+                                <input type="password" value={senhaNova} autoComplete="new-password"
+                                    placeholder="Minimo 6 caracteres"
+                                    onChange={e => setSenhaNova(e.target.value)} />
+                            </div>
+                            <div className="form-group" style={{ flex: '1 1 200px' }}>
+                                <label>Repita a nova senha</label>
+                                <input type="password" value={senhaConf} autoComplete="new-password"
+                                    onChange={e => setSenhaConf(e.target.value)} />
+                            </div>
+                        </div>
+                        {senhaMsg && (
+                            <p style={{ fontSize: '0.82rem', marginTop: 4, color: senhaMsg.includes('sucesso') ? '#15803d' : '#dc2626' }}>
+                                {senhaMsg}
+                            </p>
+                        )}
+                        <button className="btn-primary" onClick={trocarSenha} disabled={salvandoSenha}
+                            style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {salvandoSenha ? 'Salvando...' : <><Save size={18} /> Alterar Senha</>}
                         </button>
                     </div>
                 </section>
