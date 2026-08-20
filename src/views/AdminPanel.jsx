@@ -159,6 +159,37 @@ const DetalheLoja = ({ loja, dias, cotacao, chamar, onFechar }) => {
             </div>
 
             <div style={{ ...box, marginBottom: 16 }}>
+              <p style={{ ...rot, marginBottom: 10 }}>Leads atendidos e custo por janela</p>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                <thead>
+                  <tr style={{ color: '#8b8b96', fontSize: '0.7rem', textAlign: 'right' }}>
+                    <th style={{ padding: '4px 0', textAlign: 'left' }}>Período</th>
+                    <th style={{ padding: '4px 0' }}>Leads</th>
+                    <th style={{ padding: '4px 0' }}>Por dia</th>
+                    <th style={{ padding: '4px 0' }}>Custo</th>
+                    <th style={{ padding: '4px 0' }}>Por lead</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(d.janelas ?? []).map((j) => (
+                    <tr key={j.dias} style={{ borderTop: '1px solid #26262f', textAlign: 'right' }}>
+                      <td style={{ padding: '7px 0', textAlign: 'left' }}>{j.dias} dias</td>
+                      <td style={{ padding: '7px 0' }}>{j.conversas}</td>
+                      <td style={{ padding: '7px 0', fontWeight: 600 }}>{j.por_dia}</td>
+                      <td style={{ padding: '7px 0' }}>{brl(j.custo_usd, cotacao)}</td>
+                      <td style={{ padding: '7px 0', color: '#8b8b96' }}>
+                        {num(j.conversas) ? brl(num(j.custo_usd) / num(j.conversas), cotacao) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{ margin: '8px 0 0', fontSize: '0.68rem', color: '#6b6b76' }}>
+                As janelas são acumuladas, não fatias: a de 30 dias inclui a de 7.
+              </p>
+            </div>
+
+            <div style={{ ...box, marginBottom: 16 }}>
               <p style={{ ...rot, marginBottom: 10 }}>Conversas atendidas pelo bot, por dia</p>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 90 }}>
                 {serie.map((x) => (
@@ -378,6 +409,26 @@ const Painel = ({ onSair }) => {
               <p style={{ margin: 0, fontSize: '0.72rem', color: '#8b8b96' }}>Receita do mês</p>
               <p style={{ margin: '2px 0 0', fontSize: '1.3rem', fontWeight: 700 }}>{brlDireto(dados.total.receita_mes)}</p>
               <p style={{ margin: 0, fontSize: '0.7rem', color: '#4ade80' }}>recebido {brlDireto(dados.total.recebido_mes)}</p>
+            </div>
+            <div style={card}>
+              <p style={{ margin: 0, fontSize: '0.72rem', color: '#8b8b96' }}>Lucro do mês</p>
+              {(() => {
+                // Faturamento menos custo real. E o unico numero que diz se o
+                // preco fecha — receita sozinha nao diz nada.
+                const lucro = num(dados.total.receita_mes) - num(dados.total.custo_usd) * cotacao;
+                const margem = num(dados.total.receita_mes)
+                  ? (lucro / num(dados.total.receita_mes)) * 100 : 0;
+                return (
+                  <>
+                    <p style={{ margin: '2px 0 0', fontSize: '1.3rem', fontWeight: 700, color: lucro >= 0 ? '#4ade80' : '#fca5a5' }}>
+                      {brlDireto(lucro)}
+                    </p>
+                    <p style={{ margin: 0, fontSize: '0.7rem', color: '#6b6b76' }}>
+                      margem {margem.toFixed(0)}%
+                    </p>
+                  </>
+                );
+              })()}
             </div>
             <div style={card}>
               <p style={{ margin: 0, fontSize: '0.72rem', color: '#8b8b96' }}>Custo por conversa</p>
