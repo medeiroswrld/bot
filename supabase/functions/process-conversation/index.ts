@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendMessageComId, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
+import { enviarSocial, enviarImagemSocial } from '../_shared/social.ts';
 import { maskName } from '../_shared/maskPII.ts';
 import { withRequest, type Logger } from '../_shared/logger.ts';
 
@@ -577,10 +578,19 @@ async function computeFreeSlots(
 async function executeTool(
   name: string,
   input: Record<string, unknown>,
-  ctx: { userId: string; conversationId: string; customerPhone: string; customerName: string | null; phoneNumberId: string; token: string; log: Logger },
+  ctx: {
+    userId: string; conversationId: string; customerPhone: string;
+    customerName: string | null; phoneNumberId: string; token: string; log: Logger;
+    // Canal de origem. Nos sociais o envio muda de endpoint e de token, e
+    // customerPhone guarda o PSID/IGSID em vez de um telefone.
+    canal?: string; contaId?: string; tokenSocial?: string;
+  },
   supabase: SupabaseClient,
 ): Promise<unknown> {
   const { userId, conversationId, customerPhone, customerName, phoneNumberId, token, log } = ctx;
+  const ctxCanal       = ctx.canal ?? 'whatsapp';
+  const ctxContaId     = ctx.contaId ?? '';
+  const ctxTokenSocial = ctx.tokenSocial ?? '';
 
   if (name === 'consultar_estoque') {
     // Teto de veículos por consulta. Existe pra não estourar o contexto numa loja
@@ -1325,7 +1335,18 @@ async function executeTool(
     // 4. Fotos, uma a uma e em ordem
     for (const url of fotosNovas) {
       try {
-        const ok = await sendImage(customerPhone, url, pid, token, log);
+        // Instagram e Messenger usam outro endpoint e o token da pagina. Sem
+        // este desvio a foto seria mandada pro Graph do WhatsApp com um PSID
+        // no lugar do telefone: falharia calado e o cliente ficaria sem a foto
+        // depois de o bot dizer que ia mandar.
+        let ok: boolean;
+        if (ctxCanal === 'whatsapp') {
+          ok = await sendImage(customerPhone, url, pid, token, log);
+        } else {
+          const r = await enviarImagemSocial(ctxContaId, customerPhone, url, ctxTokenSocial);
+          ok = r.ok;
+          if (!r.ok) log.error('falha ao enviar foto no canal social', { action: 'enviar_midia_carro', erro: r.erro });
+        }
         if (ok) {
           fotosEnviadas++;
           await supabase.from('messages').insert({
@@ -2356,6 +2377,9 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
 
   const userId        = conv.user_id        as string;
   const customerPhone = conv.customer_phone as string;
+  // Nos canais sociais customer_phone guarda o PSID/IGSID, nao um telefone
+  // (ver comentario da migration 056).
+  const canal = String(conv.channel ?? 'whatsapp');
   let   customerName  = conv.customer_name  as string | null;
   const log = base.child({ userId, conversationId });
 
@@ -2632,7 +2656,20 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
   const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
   const waToken = await resolveWhatsAppToken(supabase, userId);
-  const ctx = { userId, conversationId, customerPhone, customerName, phoneNumberId, token: waToken, log };
+  // Credenciais sociais resolvidas uma vez por turno: buscar o token dentro da
+  // tool faria uma consulta ao Vault por foto enviada.
+  let contaIdSocial = '';
+  let tokenSocial = '';
+  if (canal !== 'whatsapp') {
+    contaIdSocial = String((canal === 'instagram' ? settings?.ig_user_id : settings?.fb_page_id) ?? '');
+    const { data: tp } = await supabase.rpc('get_meta_page_token', { p_user_id: userId });
+    tokenSocial = String(tp ?? '');
+  }
+
+  const ctx = {
+    userId, conversationId, customerPhone, customerName, phoneNumberId,
+    token: waToken, log, canal, contaId: contaIdSocial, tokenSocial,
+  };
   let finalText = '';
   const toolsUsadas = new Set<string>();  // o que o modelo REALMENTE chamou neste turno
   // Modelo que o cliente pediu e a loja nao tem — candidato a lista de espera.
@@ -3069,12 +3106,29 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     finalText = `${nomeG}deixa eu confirmar esse contato certinho com a equipe pra nao te passar numero errado. Ja te respondem por aqui. 😊`;
   }
 
-  // ── 8. Envia resposta ao cliente pelo WhatsApp ─────────────────────────────
-  const { ok: sent, wamid } = await sendMessageComId(customerPhone, finalText, phoneNumberId || undefined, waToken, log);
-  if (sent) {
-    log.info('resposta enviada', { action: 'send_final', chars: finalText.length, wamid });
+  // ── 8. Envia resposta ao cliente, no canal de onde ele veio ────────────────
+  let sent = false;
+  let wamid: string | null = null;
+
+  if (canal === 'whatsapp') {
+    const r = await sendMessageComId(customerPhone, finalText, phoneNumberId || undefined, waToken, log);
+    sent = r.ok; wamid = r.wamid;
   } else {
-    log.error('falha ao enviar WhatsApp — mensagem salva no banco mesmo assim', { action: 'send_final', phone: customerPhone });
+    // Instagram e Messenger: outro endpoint, outro token (o da pagina) e o
+    // remetente vai na URL. O destinatario e o PSID/IGSID.
+    const contaId = String(
+      (canal === 'instagram' ? settings?.ig_user_id : settings?.fb_page_id) ?? '',
+    );
+    const { data: tokenPagina } = await supabase.rpc('get_meta_page_token', { p_user_id: userId });
+    const r = await enviarSocial(contaId, customerPhone, finalText, String(tokenPagina ?? ''));
+    sent = r.ok;
+    if (!r.ok) log.error('falha ao enviar no canal social', { action: 'send_final', canal, erro: r.erro });
+  }
+
+  if (sent) {
+    log.info('resposta enviada', { action: 'send_final', canal, chars: finalText.length, wamid });
+  } else {
+    log.error('falha ao enviar — mensagem salva no banco mesmo assim', { action: 'send_final', canal });
   }
 
   // ── 9. Salva resposta do bot e atualiza last_message_at ────────────────────
