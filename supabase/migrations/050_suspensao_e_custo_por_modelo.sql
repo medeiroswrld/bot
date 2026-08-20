@@ -21,6 +21,10 @@ comment on column public.company_settings.suspenso is
 -- A versão anterior aplicava preço da Anthropic a TODA linha do llm_usage,
 -- inclusive as de outro provedor. Agora só modelo claude entra no custo; os
 -- demais aparecem contados à parte, visíveis em vez de silenciosamente errados.
+-- DROP antes: a assinatura de retorno mudou (colunas novas), e o Postgres nao
+-- permite create or replace alterando OUT parameters.
+drop function if exists public.admin_metricas(timestamptz);
+
 create or replace function public.admin_metricas(p_desde timestamptz)
 returns table (
   user_id           uuid,
