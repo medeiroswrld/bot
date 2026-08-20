@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
+import { MODELO_PADRAO, CAMPOS, formatarCNPJ } from '../lib/contrato.js';
 import ConectarWhatsApp from './ConectarWhatsApp.jsx';
 
 const WEEK_DAYS = [
@@ -264,6 +265,31 @@ const Settings = () => {
         setTimeout(() => setSavedPay(false), 2000);
     };
 
+    // ── Contrato de venda ─────────────────────────────────────────────────────
+    const [cnpj, setCnpj] = useState('');
+    const [modeloContrato, setModeloContrato] = useState('');
+    const [savingCtr, setSavingCtr] = useState(false);
+    const [savedCtr, setSavedCtr] = useState(false);
+
+    const saveContrato = async () => {
+        if (!user?.id) return;
+        setSavingCtr(true);
+        await supabase
+            .from('company_settings')
+            .update({
+                cnpj: cnpj.replace(/\D/g, '') || null,
+                // Vazio grava NULL, nao string vazia: NULL significa "usa o
+                // padrao do sistema", string vazia geraria contrato em branco.
+                contract_template: modeloContrato.trim() || null,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', user.id);
+        await refreshCompanySettings();
+        setSavingCtr(false);
+        setSavedCtr(true);
+        setTimeout(() => setSavedCtr(false), 2000);
+    };
+
     // ── Troca de senha ────────────────────────────────────────────────────────
     // Nao existia em lugar nenhum do sistema: quem esquecia a senha dependia do
     // e-mail de recuperacao, que aponta pra Site URL do projeto — e ela estava
@@ -424,6 +450,9 @@ const Settings = () => {
         const pay = Array.isArray(s.payment_methods) ? s.payment_methods : [];
         setPayMethods(pay.filter(m => PAYMENT_OPTIONS.includes(m)));
         setPayOther(pay.filter(m => !PAYMENT_OPTIONS.includes(m)).join(', '));
+        // Contrato
+        setCnpj(s.cnpj ?? '');
+        setModeloContrato(s.contract_template ?? '');
         // Funcionamento do bot
         setBotCfg({
             enabled:  s.bot_enabled !== false,
@@ -1039,6 +1068,79 @@ const Settings = () => {
                                 ? <><CheckCircle size={18} /> Salvo!</>
                                 : savingPay ? 'Salvando...'
                                 : <><Save size={18} /> Salvar Formas de Pagamento</>}
+                        </button>
+                    </div>
+                </section>
+            </div>
+
+            {/* -- Contrato de Venda -------------------------------------------- */}
+            <div style={{ marginTop: '2rem' }}>
+                <section className="settings-section card">
+                    <div className="section-title">
+                        <Save size={20} />
+                        <h2>Contrato de Venda</h2>
+                    </div>
+                    <div className="settings-form">
+                        <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+                            Ao registrar uma venda com nome e CPF do comprador, o contrato é montado
+                            e fica pronto pra imprimir.
+                        </p>
+
+                        <div className="form-group">
+                            <label>CNPJ da loja</label>
+                            <input type="text" value={formatarCNPJ(cnpj)} placeholder="00.000.000/0000-00"
+                                onChange={e => setCnpj(e.target.value)} />
+                        </div>
+
+                        <div className="form-group">
+                            <label>Modelo do contrato</label>
+                            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: '0 0 8px', lineHeight: 1.5 }}>
+                                Deixe em branco para usar o modelo padrão. Aceita HTML simples
+                                (&lt;h2&gt;, &lt;p&gt;, &lt;ul&gt;, &lt;strong&gt;).
+                            </p>
+                            <textarea
+                                rows={14}
+                                value={modeloContrato}
+                                placeholder="Em branco = modelo padrão do sistema"
+                                onChange={e => setModeloContrato(e.target.value)}
+                                style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem', lineHeight: 1.55 }}
+                            />
+                            <button type="button" className="btn-secondary"
+                                style={{ marginTop: 8, fontSize: '0.8rem' }}
+                                onClick={() => setModeloContrato(MODELO_PADRAO)}>
+                                Carregar o modelo padrão para editar
+                            </button>
+                        </div>
+
+                        <div className="form-group">
+                            <label>Campos disponíveis</label>
+                            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: '0 0 8px' }}>
+                                Escreva no texto e o sistema preenche na hora da venda.
+                            </p>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                                {CAMPOS.map(([campo, rotulo]) => (
+                                    <span key={campo} title={rotulo}
+                                        style={{ fontSize: '0.72rem', fontFamily: 'ui-monospace, monospace',
+                                                 padding: '2px 7px', borderRadius: 5,
+                                                 background: 'var(--input-bg)', border: '1px solid var(--border)' }}>
+                                        {`{{${campo}}}`}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+
+                        <p style={{ fontSize: '0.78rem', color: '#b45309', background: '#fffbeb',
+                                    border: '1px solid #fde68a', borderRadius: 8, padding: '9px 12px', lineHeight: 1.5 }}>
+                            O modelo padrão é um ponto de partida, não uma peça jurídica pronta.
+                            Passe pelo seu advogado antes de usar com cliente.
+                        </p>
+
+                        <button className="btn-primary" onClick={saveContrato} disabled={savingCtr}
+                            style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {savedCtr
+                                ? <><CheckCircle size={18} /> Salvo!</>
+                                : savingCtr ? 'Salvando...'
+                                : <><Save size={18} /> Salvar Contrato</>}
                         </button>
                     </div>
                 </section>

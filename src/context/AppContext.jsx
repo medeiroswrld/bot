@@ -837,7 +837,7 @@ export const AppProvider = ({ children }) => {
     }
   };
 
-  const sellCar = async (inventoryId, salePrice, saleDate, sellerName) => {
+  const sellCar = async (inventoryId, salePrice, saleDate, sellerName, comprador = null) => {
     if (!user?.id) return;
     try {
       const { data: updatedCar, error } = await supabase
@@ -846,7 +846,17 @@ export const AppProvider = ({ children }) => {
           status: 'sold',
           sold_price: Number(salePrice),
           sold_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
-          sold_by: sellerName
+          sold_by: sellerName,
+          // Dados do comprador so entram se vieram preenchidos: venda sem
+          // contrato continua valida, e mandar null apagaria o que ja existisse.
+          ...(comprador?.buyer_name ? {
+            buyer_name: comprador.buyer_name,
+            buyer_cpf: String(comprador.buyer_cpf ?? '').replace(/\D/g, '') || null,
+            buyer_rg: comprador.buyer_rg || null,
+            buyer_address: comprador.buyer_address || null,
+            buyer_phone: comprador.buyer_phone || null,
+            payment_terms: comprador.payment_terms || null,
+          } : {}),
         })
         .eq('id', inventoryId)
         .eq('user_id', user.id)

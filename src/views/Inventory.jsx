@@ -3,8 +3,9 @@ import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
     X, Gauge, Tag, CheckCircle2, ShoppingCart, Package, Camera,
     Video, Loader2
-, CalendarDays } from 'lucide-react';
+, CalendarDays, Printer } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
+import { MODELO_PADRAO, montarContrato, dadosDoContrato, imprimirContrato, formatarCPF, cpfValido } from '../lib/contrato.js';
 import { supabase } from '../lib/supabase.js';
 import MatchFoundModal from './MatchFoundModal.jsx';
 
@@ -477,8 +478,17 @@ const SellModal = ({ car, onClose, onConfirm }) => {
     const [saleDate, setSaleDate] = useState(getTodayStr());
     const [sellerName, setSellerName] = useState('');
     const [error, setError] = useState(false);
+    // Dados do comprador: entram aqui porque e o unico momento em que a loja
+    // realmente os tem em maos. Pedir depois significa nao pedir.
+    const [comprador, setComprador] = useState({
+        buyer_name: '', buyer_cpf: '', buyer_rg: '',
+        buyer_address: '', buyer_phone: '', payment_terms: '',
+    });
+    const [erroCpf, setErroCpf] = useState('');
 
     if (!car) return null;
+
+    const setC = (campo, valor) => setComprador(c => ({ ...c, [campo]: valor }));
 
     const handleConfirm = () => {
         if (!sellerName.trim()) {
@@ -486,7 +496,14 @@ const SellModal = ({ car, onClose, onConfirm }) => {
             addToast('O nome do vendedor é obrigatório.', 'error');
             return;
         }
-        onConfirm(car.id, salePrice, saleDate, sellerName);
+        // CPF so e validado se preenchido: venda pode ser registrada sem contrato,
+        // e travar isso impediria de fechar a venda no sistema.
+        if (comprador.buyer_cpf && !cpfValido(comprador.buyer_cpf)) {
+            setErroCpf('CPF inválido — confira os dígitos.');
+            addToast('CPF do comprador inválido.', 'error');
+            return;
+        }
+        onConfirm(car.id, salePrice, saleDate, sellerName, comprador);
     };
 
     return (
@@ -522,12 +539,90 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                         />
                         {error && <p className="error-message">Campo obrigatório</p>}
                     </div>
+
+                    <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0 12px', paddingTop: 12 }}>
+                        <p style={{ margin: '0 0 2px', fontSize: '0.85rem', fontWeight: 600 }}>Dados do comprador</p>
+                        <p style={{ margin: '0 0 10px', fontSize: '0.76rem', color: 'var(--color-text-muted)' }}>
+                            Opcional para registrar a venda, obrigatório para gerar o contrato.
+                        </p>
+
+                        <div className="form-group">
+                            <label>Nome completo</label>
+                            <input type="text" value={comprador.buyer_name}
+                                onChange={e => setC('buyer_name', e.target.value)} />
+                        </div>
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            <div className="form-group" style={{ flex: '1 1 150px' }}>
+                                <label>CPF</label>
+                                <input type="text" value={formatarCPF(comprador.buyer_cpf)} placeholder="000.000.000-00"
+                                    onChange={e => { setC('buyer_cpf', e.target.value); setErroCpf(''); }} />
+                                {erroCpf && <p className="error-message">{erroCpf}</p>}
+                            </div>
+                            <div className="form-group" style={{ flex: '1 1 130px' }}>
+                                <label>RG</label>
+                                <input type="text" value={comprador.buyer_rg}
+                                    onChange={e => setC('buyer_rg', e.target.value)} />
+                            </div>
+                        </div>
+                        <div className="form-group">
+                            <label>Endereço</label>
+                            <input type="text" value={comprador.buyer_address}
+                                onChange={e => setC('buyer_address', e.target.value)} />
+                        </div>
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            <div className="form-group" style={{ flex: '1 1 150px' }}>
+                                <label>Telefone</label>
+                                <input type="text" value={comprador.buyer_phone}
+                                    onChange={e => setC('buyer_phone', e.target.value)} />
+                            </div>
+                            <div className="form-group" style={{ flex: '1 1 170px' }}>
+                                <label>Forma de pagamento</label>
+                                <input type="text" placeholder="Ex: à vista, financiado em 48x"
+                                    value={comprador.payment_terms}
+                                    onChange={e => setC('payment_terms', e.target.value)} />
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div className="modal-footer">
                     <button className="btn-secondary" onClick={onClose}>Cancelar</button>
                     <button className="btn-primary" style={{ background: '#059669' }} onClick={handleConfirm}>
                         <CheckCircle2 size={18} /> Confirmar Venda
                     </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// Contrato pronto pra conferir e imprimir. Aparece logo depois da venda, que e
+// quando a loja tem o comprador na frente — mandar procurar depois vira
+// "imprimo amanha" e nao imprime.
+const ContratoModal = ({ carro, venda, onClose }) => {
+    const { companySettings } = useAppContext();
+    const modelo = companySettings?.contract_template || MODELO_PADRAO;
+    const html = montarContrato(modelo, dadosDoContrato({ loja: companySettings, carro, venda }));
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 780 }}>
+                <div className="modal-header">
+                    <h2>Contrato de Compra e Venda</h2>
+                </div>
+                <div className="modal-body" style={{ maxHeight: '60vh', overflowY: 'auto', background: '#fff', color: '#111', padding: 22, borderRadius: 8 }}>
+                    <div dangerouslySetInnerHTML={{ __html: html }} />
+                </div>
+                <div className="modal-footer" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
+                    <p style={{ margin: 0, fontSize: '0.74rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                        Confira antes de imprimir. Os traços indicam dados que faltaram no cadastro —
+                        preencha à caneta ou complete no sistema e gere de novo.
+                    </p>
+                    <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                        <button className="btn-secondary" onClick={onClose}>Fechar</button>
+                        <button className="btn-primary" onClick={() => imprimirContrato(html)}>
+                            <Printer size={18} /> Imprimir
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -656,7 +751,19 @@ const Inventory = () => {
 
     const handleAddCar = async (carData) => { const car = await addInventoryCar(carData); await checkMatches(car); };
     const handleEditCar = async (carData) => { const car = await updateInventoryCar(editCar.id, carData); await checkMatches(car); };
-    const handleSell = (carId, price, date, seller) => { sellCar(carId, price, date, seller); setSellCarObj(null); };
+    const handleSell = async (carId, price, date, seller, comprador) => {
+        const carro = sellCarObj;
+        await sellCar(carId, price, date, seller, comprador);
+        setSellCarObj(null);
+        // Contrato so faz sentido com nome e CPF: sem isso sairia um documento
+        // cheio de linha em branco, pior que nao oferecer.
+        if (comprador?.buyer_name && comprador?.buyer_cpf) {
+            setContratoDe({ carro: { ...carro, ...comprador }, venda: { ...comprador, salePrice: price, saleDate: date, sellerName: seller } });
+        }
+    };
+
+    // Contrato pendente de impressao (aparece logo apos confirmar a venda).
+    const [contratoDe, setContratoDe] = useState(null);
     const handleDelete = (carId) => setConfirmDeleteId(carId);
     const confirmDelete = () => { removeInventoryCar(confirmDeleteId); setConfirmDeleteId(null); };
 
@@ -777,6 +884,13 @@ const Inventory = () => {
             )}
             {editCar && <CarFormModal car={editCar} isEdit onClose={() => setEditCar(null)} onSave={handleEditCar} />}
             {sellCarObj && <SellModal car={sellCarObj} onClose={() => setSellCarObj(null)} onConfirm={handleSell} />}
+            {contratoDe && (
+                <ContratoModal
+                    carro={contratoDe.carro}
+                    venda={contratoDe.venda}
+                    onClose={() => setContratoDe(null)}
+                />
+            )}
             {viewCar && <DetailDrawer car={viewCar} onClose={() => setViewCar(null)} />}
             {confirmDeleteId && (
                 <ConfirmModal
