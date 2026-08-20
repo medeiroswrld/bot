@@ -2638,6 +2638,10 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   // Modelo que o cliente pediu e a loja nao tem — candidato a lista de espera.
   let interesseSemEstoque: { model: string; brand: string } | null = null;
   let lastWasTool = false;   // a iteração anterior executou uma tool?
+  // Assinatura tool+argumentos ja executadas NESTE turno. Serve pra cortar
+  // repeticao identica, que e o que faz o laco chegar no teto de 10 iteracoes.
+  const jaChamadas = new Map<string, unknown>();
+  const sequencia: string[] = [];   // ordem das tools, so pra diagnostico
   let retriedEmpty = false;  // já re-chamamos uma vez por resposta vazia pós-tool?
   let reformulou   = false;  // já pedimos uma reformulação por repetição?
   // O que o bot já disse nesta conversa — base da checagem de repetição.
@@ -2763,12 +2767,38 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
       const toolResults: unknown[] = [];
       for (const block of toolUseBlocks) {
         toolsUsadas.add(block.name ?? '');
+        sequencia.push(String(block.name ?? '?'));
+
+        // Chamada IDENTICA (mesma tool, mesmos argumentos) ja feita neste turno.
+        // Reexecutar da o mesmo resultado e o modelo tende a repetir de novo —
+        // e assim o turno anda ate o teto de 10 iteracoes, cada uma pagando o
+        // prefixo inteiro. Medido em 20/08: conversa de ate 5 mensagens estava
+        // gastando 25 chamadas em media, pico de 55.
+        const assinatura = `${block.name}:${JSON.stringify(block.input ?? {})}`;
+        if (jaChamadas.has(assinatura)) {
+          log.warn('tool repetida no mesmo turno — curto-circuito', {
+            action: 'claude_loop', iteration, tool: block.name,
+          });
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            // Devolve o MESMO resultado (nao mente pro modelo) mais uma
+            // instrucao explicita de parar de repetir e responder ao cliente.
+            content: JSON.stringify({
+              ...(jaChamadas.get(assinatura) as Record<string, unknown>),
+              aviso_sistema: 'Você já fez exatamente esta chamada nesta mesma resposta e o resultado é o mesmo. NÃO chame de novo. Responda ao cliente agora com o que já tem.',
+            }),
+          });
+          continue;
+        }
+
         const result = await executeTool(
           block.name ?? '',
           (block.input ?? {}) as Record<string, unknown>,
           ctx,
           supabase,
         );
+        jaChamadas.set(assinatura, result);
         // Guarda o modelo buscado sem resultado. Se uma busca POSTERIOR no mesmo
         // turno achar algo (retry de grafia, "T Cross" -> "T-Cross"), limpa: nao
         // e falta real de estoque, era so o nome escrito diferente.
@@ -2966,6 +2996,14 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     }
     log.warn('handoff de resgate', {
       action: 'chamar_atendente', forcado: true, motivo: motivoResgate, negativasAnteriores,
+    });
+  }
+
+  // Sequencia de tools do turno. E o que permite descobrir QUAL tool provoca o
+  // laco — sem isso so se ve o total de chamadas, que nao aponta culpado.
+  if (sequencia.length >= 4) {
+    log.warn('turno com muitas tools', {
+      action: 'diag_laco', total: sequencia.length, sequencia: sequencia.join(' > '),
     });
   }
 
