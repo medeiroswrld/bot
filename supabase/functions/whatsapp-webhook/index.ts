@@ -77,7 +77,12 @@ function botPodeResponder(s: {
   bot_schedule_enabled?: boolean | null;
   bot_start?: string | null;
   bot_end?: string | null;
+  suspenso?: boolean | null;
 }): boolean {
+  // Suspensao do administrador vem primeiro e nao tem excecao. E separada de
+  // bot_enabled de proposito: aquela e do lojista, esta e do dono do sistema —
+  // senao o inadimplente se reativaria sozinho.
+  if (s?.suspenso === true) return false;
   if (s?.bot_enabled === false) return false;
   if (s?.bot_schedule_enabled !== true) return true;
 
@@ -387,7 +392,7 @@ serve(async (req) => {
   // 5. Resolve a concessionária pelo phone_number_id cadastrado
   const { data: settings } = await supabase
     .from('company_settings')
-    .select('user_id, bot_enabled, bot_schedule_enabled, bot_start, bot_end')
+    .select('user_id, bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso')
     .eq('whatsapp_phone_number_id', phoneNumberId)
     .maybeSingle();
 

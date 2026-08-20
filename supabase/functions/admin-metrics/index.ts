@@ -65,6 +65,24 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
+  // ── Suspender / reativar ───────────────────────────────────────────────────
+  if (acao === 'suspender') {
+    const { user_id, suspenso, motivo } = body as { user_id?: string; suspenso?: boolean; motivo?: string };
+    if (!user_id) return json({ error: 'user_id obrigatório' }, 400);
+    const ativar = suspenso === true;
+    const { error } = await admin
+      .from('company_settings')
+      .update({
+        suspenso: ativar,
+        suspenso_em: ativar ? new Date().toISOString() : null,
+        suspenso_motivo: ativar ? (motivo ?? null) : null,
+      })
+      .eq('user_id', user_id);
+    if (error) return json({ error: `Falha ao alterar suspensão: ${error.message}` }, 500);
+    console.log(`[admin-metrics] ${ativar ? 'SUSPENDEU' : 'reativou'} ${user_id} (por ${email})`);
+    return json({ ok: true });
+  }
+
   // ── Salvar o plano da loja (dia e valor) ───────────────────────────────────
   if (acao === 'salvar_plano') {
     const { user_id, billing_day, billing_amount } = body as {

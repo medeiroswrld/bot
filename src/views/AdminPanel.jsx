@@ -132,6 +132,21 @@ const Painel = ({ onSair }) => {
     finally { setSalvandoId(null); }
   };
 
+  const alternarSuspensao = async (loja) => {
+    const suspendendo = !loja.suspenso;
+    if (suspendendo && !window.confirm(
+      `Suspender ${loja.empresa || loja.email}?\n\n` +
+      'O bot para de responder na hora. As mensagens dos clientes continuam ' +
+      'sendo salvas e ficam como pendentes — nada se perde.'
+    )) return;
+    setSalvandoId(loja.user_id);
+    try {
+      await chamar({ acao: 'suspender', user_id: loja.user_id, suspenso: suspendendo });
+      await buscar();
+    } catch (e) { setErro(e.message); }
+    finally { setSalvandoId(null); }
+  };
+
   const salvarPlano = async (loja, dia, valor) => {
     setSalvandoId(loja.user_id);
     try {
@@ -225,6 +240,7 @@ const Painel = ({ onSair }) => {
                   <th style={th}>Última atividade</th>
                   <th style={th}>Plano</th>
                   <th style={th}>Pagamento</th>
+                  <th style={th}>Situação</th>
                 </tr>
               </thead>
               <tbody>
@@ -286,11 +302,27 @@ const Painel = ({ onSair }) => {
                           </button>
                         )}
                       </td>
+                      <td style={td}>
+                        <button type="button" onClick={() => alternarSuspensao(l)} disabled={salvandoId === l.user_id}
+                          title={l.suspenso ? 'Reativar a conta' : 'Suspender: o bot para de responder'}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 999,
+                            cursor: 'pointer', fontSize: '0.74rem', fontWeight: 600,
+                            border: `1px solid ${l.suspenso ? '#7f1d1d' : '#3f3f46'}`,
+                            background: l.suspenso ? '#2a1215' : '#18181b',
+                            color: l.suspenso ? '#fca5a5' : '#a1a1aa',
+                          }}>
+                          {l.suspenso ? 'suspensa' : 'ativa'}
+                        </button>
+                        {!l.bot_enabled && !l.suspenso && (
+                          <div style={{ fontSize: '0.68rem', color: '#f59e0b', marginTop: 3 }}>bot desligado pela loja</div>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
                 {!dados.lojas.length && (
-                  <tr><td colSpan={9} style={{ padding: 26, textAlign: 'center', color: '#6b6b76' }}>Nenhuma loja cadastrada.</td></tr>
+                  <tr><td colSpan={10} style={{ padding: 26, textAlign: 'center', color: '#6b6b76' }}>Nenhuma loja cadastrada.</td></tr>
                 )}
               </tbody>
             </table>

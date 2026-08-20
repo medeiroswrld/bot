@@ -221,6 +221,24 @@ const PageTabs = () => {
   );
 };
 
+// Aviso de conta suspensa. Sem isso o lojista veria o bot mudo sem explicacao e
+// abriria chamado achando que quebrou.
+const AvisoSuspensao = () => {
+  const { companySettings } = useAppContext();
+  if (!companySettings?.suspenso) return null;
+  return (
+    <div style={{
+      margin: '10px 20px 0', padding: '10px 14px', borderRadius: 10,
+      background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c',
+      fontSize: '0.85rem', lineHeight: 1.5,
+    }}>
+      <strong>Conta suspensa.</strong> O atendimento automático está pausado. As mensagens
+      dos seus clientes continuam chegando e ficam em Conversas — nada se perde. Fale com o
+      suporte para reativar.
+    </div>
+  );
+};
+
 const AuthenticatedApp = () => {
   const location = useLocation();
   const [menuAberto, setMenuAberto] = useState(false);
@@ -237,6 +255,7 @@ const AuthenticatedApp = () => {
       )}
       <main className="main-content">
         <Header onAbrirMenu={() => setMenuAberto(true)} />
+        <AvisoSuspensao />
         <PageTabs />
         <Suspense fallback={<PageLoader />}>
           <div key={location.pathname} className="page-transition">
