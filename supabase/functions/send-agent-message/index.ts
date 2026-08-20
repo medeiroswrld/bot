@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
-import { sendMessage, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
+import { sendMessage, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { buildCors } from '../_shared/cors.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
@@ -41,17 +41,18 @@ serve(async (req) => {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  let body: { conversation_id?: string; text?: string };
+  let body: { conversation_id?: string; text?: string; car_id?: string };
   try {
     body = await req.json();
   } catch {
     return jsonResponse({ error: 'JSON inválido' }, 400);
   }
 
-  const { conversation_id, text } = body;
+  const { conversation_id, text, car_id } = body;
 
-  if (!conversation_id || !text?.trim()) {
-    return jsonResponse({ error: 'conversation_id e text são obrigatórios' }, 400);
+  // Com car_id o texto e opcional: a ficha do veiculo e montada aqui.
+  if (!conversation_id || (!car_id && !text?.trim())) {
+    return jsonResponse({ error: 'conversation_id e (text ou car_id) são obrigatórios' }, 400);
   }
 
   // ── valida que o usuário é dono da conversa (via RLS) ──────────────────────
@@ -66,6 +67,79 @@ serve(async (req) => {
   }
 
   const now = new Date().toISOString();
+
+  // ── ENVIO DE VEÍCULO ───────────────────────────────────────────────────────
+  // Quando o vendedor assume a conversa ele perdia a ferramenta que o bot tem:
+  // não havia como mandar foto de carro pelo CRM. Aqui ele escolhe o veículo e
+  // sai ficha + galeria + vídeo de uma vez, no mesmo formato que o bot usa —
+  // por isso o CRM renderiza igual.
+  if (car_id) {
+    // userClient (não admin): o RLS garante que o veículo é da loja dele.
+    const { data: carro, error: carErr } = await userClient
+      .from('cars')
+      .select('id, brand, model, version, year, km, price, transmission, fuel, specs_image_url, video_url')
+      .eq('id', car_id)
+      .single();
+
+    if (carErr || !carro) return jsonResponse({ error: 'Veículo não encontrado' }, 404);
+
+    const { data: cfg } = await adminClient
+      .from('company_settings')
+      .select('whatsapp_phone_number_id')
+      .eq('user_id', conv.user_id)
+      .single();
+    const pid = String(cfg?.whatsapp_phone_number_id ?? '');
+    const tk  = await resolveWhatsAppToken(adminClient, conv.user_id);
+    const fone = conv.customer_phone as string;
+
+    const linhas = [
+      `*${carro.brand} ${carro.model}*${carro.version ? ` ${carro.version}` : ''}`,
+      carro.year ? `Ano ${carro.year}` : '',
+      carro.km != null ? `${Number(carro.km).toLocaleString('pt-BR')} km` : '',
+      [carro.transmission, carro.fuel].filter(Boolean).join(' · '),
+      carro.price != null ? `\nR$ ${Number(carro.price).toLocaleString('pt-BR')}` : '',
+    ].filter(Boolean);
+    const ficha = linhas.join('\n');
+
+    await sendMessage(fone, ficha, pid || undefined, tk);
+    await userClient.from('messages').insert({ conversation_id, role: 'agent', content: ficha });
+
+    // Galeria: specs primeiro (quando existe), depois as fotos na ordem da loja.
+    // Teto de 8, igual ao que o painel deixa cadastrar e ao que o bot envia.
+    const fotos: string[] = [];
+    if (carro.specs_image_url) fotos.push(String(carro.specs_image_url));
+    const { data: galeria } = await userClient
+      .from('car_images')
+      .select('image_url')
+      .eq('car_id', car_id)
+      .order('sort_order', { ascending: true })
+      .limit(8);
+    for (const g of (galeria ?? [])) {
+      const u = String(g.image_url ?? '').trim();
+      if (u && !fotos.includes(u)) fotos.push(u);   // dedupe: specs pode repetir a 1ª
+    }
+
+    let enviadas = 0;
+    for (const url of fotos.slice(0, 8)) {
+      // Atencao a assinatura: sendImage e (to, url, phoneNumberId, token) — NAO
+      // tem legenda. Ja sendVideo tem, numa posicao diferente. Passar na ordem
+      // errada nao quebra o build, so falha em runtime.
+      const ok = await sendImage(fone, url, pid || undefined, tk);
+      if (ok) {
+        enviadas++;
+        // Mesmo formato do bot: o CRM renderiza como imagem, não como URL crua.
+        await userClient.from('messages').insert({ conversation_id, role: 'agent', content: `[foto] ${url}` });
+      }
+    }
+
+    if (carro.video_url) {
+      const ok = await sendVideo(fone, String(carro.video_url), pid || undefined, undefined, tk);
+      if (ok) await userClient.from('messages').insert({ conversation_id, role: 'agent', content: `[vídeo] ${carro.video_url}` });
+    }
+
+    await adminClient.from('conversations').update({ last_message_at: now }).eq('id', conversation_id);
+    return jsonResponse({ success: true, fotos: enviadas, video: Boolean(carro.video_url) });
+  }
 
   // ── salva mensagem com role = 'agent' ──────────────────────────────────────
   const { data: msg, error: msgErr } = await userClient

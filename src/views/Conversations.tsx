@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   Bot, UserCheck, MessageCircle, Send, RefreshCw,
-  PhoneCall, Search, Loader2, AlertCircle, Bell, BellOff, Trash2, Mic, ChevronLeft,
+  PhoneCall, Search, Loader2, AlertCircle, Bell, BellOff, Trash2, Mic, ChevronLeft, CarFront,
 } from 'lucide-react';
 import { supabaseTyped } from '../lib/supabase-typed';
 // useAppContext is from a .jsx file — cast to known shape below
@@ -454,6 +454,47 @@ export default function Conversations() {
     await supabaseTyped.from('conversations').delete().eq('id', id);
     setConversations((prev) => prev.filter((c) => c.id !== id));
     if (selectedId === id) { setSelectedId(null); setMessages([]); }
+  };
+
+  // ── Enviar veículo do estoque ─────────────────────────────────────────────
+  // Ao assumir a conversa o vendedor perdia a ferramenta que o bot tem: não
+  // havia como mandar foto de carro pelo CRM, e ele acabava mandando pelo
+  // celular — fora do histórico.
+  const [showCarros, setShowCarros] = useState(false);
+  const [carros, setCarros] = useState<Array<Record<string, unknown>>>([]);
+  const [buscaCarro, setBuscaCarro] = useState('');
+  const [enviandoCarro, setEnviandoCarro] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!showCarros || carros.length || !user?.id) return;
+    supabaseTyped
+      .from('cars')
+      .select('id, brand, model, version, year, km, price, status')
+      .eq('user_id', user.id)
+      .eq('status', 'available')
+      .order('created_at', { ascending: false })
+      .then(({ data }) => setCarros((data ?? []) as Array<Record<string, unknown>>));
+  }, [showCarros, carros.length, user?.id]);
+
+  const enviarCarro = async (carId: string) => {
+    if (!selectedId || !session?.access_token) return;
+    setEnviandoCarro(carId);
+    try {
+      const res = await fetch(`${supabaseUrl}/functions/v1/send-agent-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ conversation_id: selectedId, car_id: carId }),
+      });
+      if (!res.ok) { console.error('[Conversations] falha ao enviar veículo'); return; }
+      setShowCarros(false); setBuscaCarro('');
+      // O realtime traz as mensagens; recarrega como rede de segurança porque
+      // são várias (ficha + fotos + vídeo) e uma pode chegar fora de ordem.
+      await fetchMessages(selectedId);
+    } catch (e) {
+      console.error('[Conversations] erro de rede ao enviar veículo:', e);
+    } finally {
+      setEnviandoCarro(null);
+    }
   };
 
   const requestNotifPermission = async () => {
@@ -1013,6 +1054,68 @@ export default function Conversations() {
                 placeholder="Digite sua mensagem... (Enter para enviar)" rows={2}
                 style={{ flex: 1, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-main)', fontSize: '0.875rem', color: 'var(--text-primary)', resize: 'none', outline: 'none', fontFamily: 'inherit' }}
               />
+              {/* Enviar veículo do estoque */}
+              <div style={{ position: 'relative', flexShrink: 0 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowCarros((p) => !p)}
+                  title="Enviar veículo do estoque"
+                  style={{ width: 40, height: 40, borderRadius: 8, border: '1px solid var(--border)', background: showCarros ? 'var(--input-bg)' : 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-primary)' }}
+                >
+                  <CarFront size={18} />
+                </button>
+                {showCarros && (
+                  <div style={{
+                    position: 'absolute', bottom: '100%', right: 0, marginBottom: 6,
+                    width: 320, maxHeight: 340, overflowY: 'auto',
+                    background: 'var(--bg-card)', border: '1px solid var(--border)',
+                    borderRadius: 10, padding: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.18)', zIndex: 20,
+                  }}>
+                    <input
+                      autoFocus value={buscaCarro} onChange={(e) => setBuscaCarro(e.target.value)}
+                      placeholder="Buscar modelo..."
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-primary)', fontSize: '0.83rem', marginBottom: 6 }}
+                    />
+                    {carros
+                      .filter((c) => {
+                        const t = `${c.brand} ${c.model} ${c.version ?? ''}`.toLowerCase();
+                        return t.includes(buscaCarro.toLowerCase().trim());
+                      })
+                      .slice(0, 40)
+                      .map((c) => (
+                        <button
+                          key={String(c.id)}
+                          type="button"
+                          disabled={enviandoCarro !== null}
+                          onClick={() => enviarCarro(String(c.id))}
+                          style={{
+                            width: '100%', textAlign: 'left', padding: '7px 9px', borderRadius: 7,
+                            border: 'none', background: enviandoCarro === c.id ? 'var(--input-bg)' : 'transparent',
+                            cursor: enviandoCarro ? 'wait' : 'pointer', color: 'var(--text-primary)',
+                          }}
+                        >
+                          <div style={{ fontSize: '0.84rem', fontWeight: 600 }}>
+                            {String(c.brand)} {String(c.model)} {c.version ? String(c.version) : ''}
+                          </div>
+                          <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                            {c.year ? `${c.year} · ` : ''}
+                            {c.km != null ? `${Number(c.km).toLocaleString('pt-BR')} km · ` : ''}
+                            {c.price != null ? `R$ ${Number(c.price).toLocaleString('pt-BR')}` : ''}
+                          </div>
+                        </button>
+                      ))}
+                    {!carros.length && (
+                      <p style={{ margin: 0, padding: 10, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        Carregando estoque...
+                      </p>
+                    )}
+                    <p style={{ margin: '6px 0 0', padding: '0 4px', fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                      Envia ficha, fotos e vídeo de uma vez.
+                    </p>
+                  </div>
+                )}
+              </div>
+
               {/* Emoji picker */}
               <div ref={emojiRef} style={{ position: 'relative', flexShrink: 0 }}>
                 <button
