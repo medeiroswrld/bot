@@ -77,7 +77,7 @@ serve(async (req) => {
     // userClient (não admin): o RLS garante que o veículo é da loja dele.
     const { data: carro, error: carErr } = await userClient
       .from('cars')
-      .select('id, brand, model, version, year, km, price, transmission, fuel, specs_image_url, video_url')
+      .select('id, brand, model, version, year, mileage, price, transmission, fuel, specs_image_url, video_url')
       .eq('id', car_id)
       .single();
 
@@ -95,7 +95,7 @@ serve(async (req) => {
     const linhas = [
       `*${carro.brand} ${carro.model}*${carro.version ? ` ${carro.version}` : ''}`,
       carro.year ? `Ano ${carro.year}` : '',
-      carro.km != null ? `${Number(carro.km).toLocaleString('pt-BR')} km` : '',
+      carro.mileage != null ? `${Number(carro.mileage).toLocaleString('pt-BR')} km` : '',
       [carro.transmission, carro.fuel].filter(Boolean).join(' · '),
       carro.price != null ? `\nR$ ${Number(carro.price).toLocaleString('pt-BR')}` : '',
     ].filter(Boolean);

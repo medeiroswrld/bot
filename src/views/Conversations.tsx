@@ -477,7 +477,8 @@ export default function Conversations() {
       // fica com status NULL, e `eq('status','available')` o descarta em
       // silêncio — a lista vinha vazia e a tela dizia "carregando" pra sempre.
       // O filtro vai abaixo, no cliente, tratando NULL como disponível.
-      .select('id, brand, model, version, year, km, price, status')
+      // No banco a coluna e `mileage`; `km` so existe no mapeamento do AppContext.
+      .select('id, brand, model, version, year, mileage, price, status')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
@@ -1115,7 +1116,7 @@ export default function Conversations() {
                           </div>
                           <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
                             {c.year ? `${c.year} · ` : ''}
-                            {c.km != null ? `${Number(c.km).toLocaleString('pt-BR')} km · ` : ''}
+                            {c.mileage != null ? `${Number(c.mileage).toLocaleString('pt-BR')} km · ` : ''}
                             {c.price != null ? `R$ ${Number(c.price).toLocaleString('pt-BR')}` : ''}
                           </div>
                         </button>
