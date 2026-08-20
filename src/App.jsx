@@ -10,6 +10,7 @@ import './App.css';
 import { AppProvider, useAppContext } from './context/AppContext.jsx';
 
 const Dashboard    = lazy(() => import('./views/Dashboard.jsx'));
+const Admin        = lazy(() => import('./views/Admin.jsx'));
 const Inventory    = lazy(() => import('./views/Inventory.jsx'));
 const Leads        = lazy(() => import('./views/Leads.jsx'));
 const Agenda       = lazy(() => import('./views/Agenda.jsx'));
@@ -252,6 +253,10 @@ const AuthenticatedApp = () => {
               <Route path="/campanhas/:id" element={<CampaignDetails />} />
               <Route path="/assistente"    element={<BotSettings />} />
               <Route path="/configuracoes" element={<SettingsView />} />
+              {/* Painel do dono do sistema. A rota nao tem privilegio: quem
+                  manda e a edge function, que confere o e-mail e devolve 403
+                  pra qualquer outro. Aqui e so a tela. */}
+              <Route path="/admin"         element={<Admin />} />
             </Routes>
           </div>
         </Suspense>
