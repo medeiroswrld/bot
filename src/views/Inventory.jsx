@@ -3,7 +3,7 @@ import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
     X, Gauge, Tag, CheckCircle2, ShoppingCart, Package, Camera,
     Video, Loader2
-} from 'lucide-react';
+, CalendarDays } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
 import MatchFoundModal from './MatchFoundModal.jsx';
@@ -718,6 +718,23 @@ const Inventory = () => {
                                 <span><Tag size={14} /> {car.transmission}</span>
                                 <span>{car.fuel}</span>
                             </div>
+                            {car.created_at && (() => {
+                                // Dias parado importa mais que a data crua: carro
+                                // encalhado e o que precisa de decisao (baixar preco,
+                                // anunciar, repassar). Cor a partir de 60 e 120 dias.
+                                const dias = Math.floor((Date.now() - new Date(car.created_at)) / 86400000);
+                                const cor = dias >= 120 ? '#dc2626' : dias >= 60 ? '#d97706' : 'var(--color-text-muted)';
+                                return (
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: cor, marginTop: 4 }}>
+                                        <CalendarDays size={13} />
+                                        <span>
+                                            entrou {new Date(car.created_at).toLocaleDateString('pt-BR')}
+                                            {' · '}
+                                            <strong>{dias} {dias === 1 ? 'dia' : 'dias'} em estoque</strong>
+                                        </span>
+                                    </div>
+                                );
+                            })()}
                             <div className="inv-card-actions">
                                 <button className="inv-action-btn sell" onClick={() => setSellCarObj(car)} title="Finalizar venda">
                                     <ShoppingCart size={16} /> Vendido

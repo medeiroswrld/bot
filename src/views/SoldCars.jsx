@@ -172,9 +172,24 @@ const SoldCars = () => {
                             <strong style={{ color: '#059669' }}>R$ {car.sold_price?.toLocaleString('pt-BR')}</strong>
                         </div>
                         <div className="sold-card-detail">
-                            <small className="text-muted">Data</small>
+                            <small className="text-muted">Entrada</small>
+                            <strong>{car.created_at ? new Date(car.created_at).toLocaleDateString('pt-BR') : '—'}</strong>
+                        </div>
+                        <div className="sold-card-detail">
+                            <small className="text-muted">Saída</small>
                             <strong>{formatDateStr((car.sold_at || '').split('T')[0])}</strong>
                         </div>
+                        {car.created_at && car.sold_at && (
+                            <div className="sold-card-detail">
+                                <small className="text-muted">Tempo de giro</small>
+                                {/* Quantos dias o carro ficou parado ate vender. E o
+                                    numero que diz se a compra foi boa - preco de venda
+                                    sozinho nao mostra capital parado. */}
+                                <strong>
+                                    {Math.max(0, Math.floor((new Date(car.sold_at) - new Date(car.created_at)) / 86400000))} dias
+                                </strong>
+                            </div>
+                        )}
                     </div>
                 ))}
                 {filtered.length === 0 && (
