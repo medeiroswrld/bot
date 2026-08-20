@@ -158,11 +158,28 @@ export const CAMPOS = [
 /** Troca os {{marcadores}} pelos valores. Marcador sem dado vira ____ em vez de
  *  sumir: espaço em branco num contrato é visível e se preenche à caneta;
  *  marcador apagado passa despercebido e vira cláusula sem sentido. */
-export const montarContrato = (modelo, dados) =>
-  String(modelo || MODELO_PADRAO).replace(/\{\{\s*(\w+)\s*\}\}/g, (_, campo) => {
+export const montarContrato = (modelo, dados) => {
+  const bruto = String(modelo || MODELO_PADRAO);
+
+  // A loja cola o contrato dela do Word — texto puro, sem tag nenhuma. Exigir
+  // HTML seria exigir que o dono da loja saiba HTML, o que na prática significa
+  // que ninguém usaria o campo. Se não parece HTML, converte: linha em branco
+  // separa parágrafo, quebra simples vira <br>.
+  const pareceHtml = /<\s*(p|div|h[1-6]|ul|ol|table|br|strong|em)\b/i.test(bruto);
+  const html = pareceHtml
+    ? bruto
+    : bruto
+        .split(/\n\s*\n/)
+        .map((par) => par.trim())
+        .filter(Boolean)
+        .map((par) => `<p>${par.replace(/\n/g, '<br>')}</p>`)
+        .join('\n');
+
+  return html.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, campo) => {
     const v = dados[campo];
     return v === undefined || v === null || v === '' ? '________' : String(v);
   });
+};
 
 /** Junta loja + veículo + comprador no formato dos marcadores. */
 export const dadosDoContrato = ({ loja, carro, venda }) => ({

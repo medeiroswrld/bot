@@ -271,6 +271,28 @@ const Settings = () => {
     const [savingCtr, setSavingCtr] = useState(false);
     const [savedCtr, setSavedCtr] = useState(false);
 
+    const contratoRef = useRef(null);
+
+    // Insere o marcador na posicao do cursor. Sem isso o lojista teria que
+    // digitar {{comprador_cpf}} a mao, errar uma chave e nao entender por que
+    // o campo nao preencheu.
+    const inserirCampo = (campo) => {
+        const el = contratoRef.current;
+        const marcador = `{{${campo}}}`;
+        if (!el) { setModeloContrato((t) => t + marcador); return; }
+        const ini = el.selectionStart ?? el.value.length;
+        const fim = el.selectionEnd ?? ini;
+        const novo = el.value.slice(0, ini) + marcador + el.value.slice(fim);
+        setModeloContrato(novo);
+        // Devolve o foco com o cursor depois do marcador, senao a cada clique
+        // ele volta pro fim do texto.
+        requestAnimationFrame(() => {
+            el.focus();
+            const pos = ini + marcador.length;
+            el.setSelectionRange(pos, pos);
+        });
+    };
+
     const saveContrato = async () => {
         if (!user?.id) return;
         setSavingCtr(true);
@@ -1095,13 +1117,14 @@ const Settings = () => {
                         <div className="form-group">
                             <label>Modelo do contrato</label>
                             <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: '0 0 8px', lineHeight: 1.5 }}>
-                                Deixe em branco para usar o modelo padrão. Aceita HTML simples
-                                (&lt;h2&gt;, &lt;p&gt;, &lt;ul&gt;, &lt;strong&gt;).
+                                Cole aqui o contrato da sua loja — pode ser texto simples, copiado
+                                direto do Word. Em branco, o sistema usa o modelo genérico.
                             </p>
                             <textarea
+                                ref={contratoRef}
                                 rows={14}
                                 value={modeloContrato}
-                                placeholder="Em branco = modelo padrão do sistema"
+                                placeholder="Cole o contrato da sua loja, ou deixe em branco para usar o genérico"
                                 onChange={e => setModeloContrato(e.target.value)}
                                 style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem', lineHeight: 1.55 }}
                             />
@@ -1115,16 +1138,19 @@ const Settings = () => {
                         <div className="form-group">
                             <label>Campos disponíveis</label>
                             <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: '0 0 8px' }}>
-                                Escreva no texto e o sistema preenche na hora da venda.
+                                Clique para inserir onde o cursor estiver. O sistema preenche na
+                                hora da venda.
                             </p>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                                 {CAMPOS.map(([campo, rotulo]) => (
-                                    <span key={campo} title={rotulo}
+                                    <button key={campo} type="button" title={`Inserir ${rotulo}`}
+                                        onClick={() => inserirCampo(campo)}
                                         style={{ fontSize: '0.72rem', fontFamily: 'ui-monospace, monospace',
-                                                 padding: '2px 7px', borderRadius: 5,
-                                                 background: 'var(--input-bg)', border: '1px solid var(--border)' }}>
+                                                 padding: '3px 8px', borderRadius: 5, cursor: 'pointer',
+                                                 background: 'var(--input-bg)', border: '1px solid var(--border)',
+                                                 color: 'var(--color-text)' }}>
                                         {`{{${campo}}}`}
-                                    </span>
+                                    </button>
                                 ))}
                             </div>
                         </div>
