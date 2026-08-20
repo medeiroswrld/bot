@@ -390,11 +390,35 @@ serve(async (req) => {
   }
 
   // 5. Resolve a concessionária pelo phone_number_id cadastrado
-  const { data: settings } = await supabase
+  //
+  // O erro do select é lido de propósito. Antes só o `data` era desestruturado,
+  // e uma coluna faltando (migration não aplicada) fazia o select inteiro falhar
+  // -> settings null -> o código concluía "número não cadastrado" e DESCARTAVA a
+  // mensagem do cliente, em silêncio. Aconteceu em 20/08 com bot_enabled.
+  // São duas situações opostas: número desconhecido é normal, select quebrado é
+  // incidente — e não podem terminar no mesmo lugar.
+  let { data: settings, error: settingsErr } = await supabase
     .from('company_settings')
     .select('user_id, bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso')
     .eq('whatsapp_phone_number_id', phoneNumberId)
     .maybeSingle();
+
+  if (settingsErr) {
+    console.error('[WH] select de company_settings falhou:', settingsErr.message);
+    // Reduz ao mínimo indispensável pra rotear. Perder recurso novo é ruim;
+    // perder a mensagem do cliente é inaceitável.
+    const retry = await supabase
+      .from('company_settings')
+      .select('user_id')
+      .eq('whatsapp_phone_number_id', phoneNumberId)
+      .maybeSingle();
+    if (retry.error) {
+      console.error('[WH] fallback tambem falhou:', retry.error.message);
+    } else if (retry.data?.user_id) {
+      console.warn('[WH] seguindo com defaults (schema desatualizado?)');
+      settings = retry.data as typeof settings;
+    }
+  }
 
   if (!settings?.user_id) {
     console.warn(`[WH] phone_number_id não cadastrado: ${phoneNumberId}`);
