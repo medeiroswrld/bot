@@ -85,6 +85,168 @@ const LoginAdmin = ({ onEntrou }) => {
   );
 };
 
+// ─── Mini dashboard de uma loja ──────────────────────────────────────────────
+const QUALIDADE = { GREEN: ['#052e16', '#4ade80', 'alta'], YELLOW: ['#2b2410', '#fbbf24', 'media'], RED: ['#2a1215', '#fca5a5', 'baixa'] };
+
+const DetalheLoja = ({ loja, dias, cotacao, chamar, onFechar }) => {
+  const [d, setD] = useState(null);
+  const [wa, setWa] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState('');
+
+  useEffect(() => {
+    let vivo = true;
+    setCarregando(true); setErro('');
+    chamar({ acao: 'detalhe', user_id: loja.user_id, dias })
+      .then((r) => { if (vivo) { setD(r.detalhe); setWa(r.whatsapp); } })
+      .catch((e) => { if (vivo) setErro(e.message); })
+      .finally(() => { if (vivo) setCarregando(false); });
+    return () => { vivo = false; };
+  }, [chamar, loja.user_id, dias]);
+
+  const serie = d?.serie ?? [];
+  // Escala pelo pico: barra relativa mostra a forma da curva, que e o que
+  // importa aqui. Numero absoluto fica no hover.
+  const pico = Math.max(1, ...serie.map((x) => num(x.conversas)));
+  const box = { background: '#15151c', border: '1px solid #26262f', borderRadius: 12, padding: '14px 16px' };
+  const rot = { margin: 0, fontSize: '0.72rem', color: '#8b8b96' };
+  const val = { margin: '2px 0 0', fontSize: '1.15rem', fontWeight: 700 };
+
+  const q = wa?.quality_rating ? (QUALIDADE[wa.quality_rating] ?? ['#18181b', '#a1a1aa', wa.quality_rating]) : null;
+
+  return (
+    <div onClick={onFechar}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', justifyContent: 'flex-end' }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ width: 'min(760px, 100%)', background: '#0b0b0f', borderLeft: '1px solid #26262f', overflowY: 'auto', padding: '22px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 18 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '1.1rem', color: '#f4f4f5' }}>{loja.empresa || 'Sem nome'}</h2>
+            <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: '#8b8b96' }}>{loja.email}</p>
+            <p style={{ margin: '2px 0 0', fontSize: '0.74rem', color: '#6b6b76' }}>
+              cliente desde {dataCurta(loja.criado_em)} · últimos {dias} dias
+            </p>
+          </div>
+          <button type="button" onClick={onFechar}
+            style={{ marginLeft: 'auto', padding: '5px 12px', borderRadius: 8, border: '1px solid #2c2c36', background: '#15151c', color: '#a1a1aa', cursor: 'pointer', fontSize: '0.8rem' }}>
+            Fechar
+          </button>
+        </div>
+
+        {erro && (
+          <div style={{ padding: '10px 14px', borderRadius: 8, background: '#2a1215', color: '#fca5a5', fontSize: '0.84rem', marginBottom: 14 }}>{erro}</div>
+        )}
+
+        {carregando ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
+            <Loader2 size={24} style={{ color: '#818cf8' }} />
+          </div>
+        ) : d ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 16 }}>
+              <div style={box}><p style={rot}>Custo no período</p><p style={val}>{brl(loja.custo_total_usd, cotacao)}</p></div>
+              <div style={box}><p style={rot}>Custo por lead</p><p style={val}>{brl(loja.custo_medio_usd, cotacao)}</p></div>
+              <div style={box}><p style={rot}>Lead completo (p90)</p><p style={val}>{brl(loja.custo_p90_usd, cotacao)}</p></div>
+              <div style={box}>
+                <p style={rot}>Margem no mês</p>
+                <p style={{ ...val, color: (num(loja.billing_amount) - num(loja.custo_total_usd) * cotacao) >= 0 ? '#4ade80' : '#fca5a5' }}>
+                  {brlDireto(num(loja.billing_amount) - num(loja.custo_total_usd) * cotacao)}
+                </p>
+                <p style={{ margin: 0, fontSize: '0.68rem', color: '#6b6b76' }}>
+                  cobra {brlDireto(loja.billing_amount)} · custa {brl(loja.custo_total_usd, cotacao)}
+                </p>
+              </div>
+            </div>
+
+            <div style={{ ...box, marginBottom: 16 }}>
+              <p style={{ ...rot, marginBottom: 10 }}>Conversas atendidas pelo bot, por dia</p>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 90 }}>
+                {serie.map((x) => (
+                  <div key={x.dia} title={`${new Date(x.dia + 'T12:00').toLocaleDateString('pt-BR')} · ${x.conversas} conversas · ${brl(x.custo_usd, cotacao)}`}
+                    style={{
+                      flex: 1, minWidth: 3, borderRadius: '3px 3px 0 0',
+                      height: `${Math.max(2, (num(x.conversas) / pico) * 100)}%`,
+                      background: num(x.conversas) ? '#4f46e5' : '#26262f',
+                    }} />
+                ))}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: '0.68rem', color: '#6b6b76' }}>
+                <span>{serie.length ? new Date(serie[0].dia + 'T12:00').toLocaleDateString('pt-BR') : ''}</span>
+                <span>pico de {pico}/dia</span>
+                <span>hoje</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 10, marginBottom: 16 }}>
+              <div style={box}>
+                <p style={{ ...rot, marginBottom: 8 }}>WhatsApp</p>
+                {wa?.erro ? (
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: '#fbbf24' }}>não consegui consultar: {wa.erro}</p>
+                ) : wa ? (
+                  <>
+                    <p style={{ margin: 0, fontSize: '0.85rem' }}>{wa.display_phone_number} · {wa.verified_name}</p>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                      {q && <span style={{ padding: '2px 9px', borderRadius: 999, fontSize: '0.7rem', fontWeight: 700, background: q[0], color: q[1] }}>qualidade {q[2]}</span>}
+                      <span style={{ padding: '2px 9px', borderRadius: 999, fontSize: '0.7rem', background: '#18181b', color: '#a1a1aa' }}>{wa.status}</span>
+                      {wa.messaging_limit_tier && <span style={{ padding: '2px 9px', borderRadius: 999, fontSize: '0.7rem', background: '#18181b', color: '#a1a1aa' }}>{String(wa.messaging_limit_tier).replace('TIER_', 'até ')}</span>}
+                    </div>
+                  </>
+                ) : (
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: '#6b6b76' }}>sem WhatsApp configurado</p>
+                )}
+              </div>
+
+              <div style={box}>
+                <p style={{ ...rot, marginBottom: 8 }}>Base da loja</p>
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: '0.82rem' }}>
+                  <span>{d.totais.leads} leads <span style={{ color: '#6b6b76' }}>({d.totais.leads_novos} novos)</span></span>
+                  <span>{d.totais.carros} carros</span>
+                  <span>{d.totais.conversas} conversas</span>
+                  <span>{d.totais.interesses} na espera</span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ ...box, marginBottom: 16 }}>
+              <p style={{ ...rot, marginBottom: 8 }}>Tokens no período</p>
+              <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: '0.82rem' }}>
+                <span>entrada <strong>{milhares(d.tokens.entrada)}</strong></span>
+                <span>saída <strong>{milhares(d.tokens.saida)}</strong></span>
+                <span>cache escrito <strong>{milhares(d.tokens.cache_w)}</strong></span>
+                <span>cache lido <strong>{milhares(d.tokens.cache_r)}</strong></span>
+              </div>
+              <p style={{ margin: '8px 0 0', fontSize: '0.7rem', color: '#6b6b76' }}>
+                Cache lido custa 1/10 da entrada — é o que segura o custo por lead.
+              </p>
+            </div>
+
+            <div style={box}>
+              <p style={{ ...rot, marginBottom: 8 }}>Disparos no período</p>
+              {(d.campanhas ?? []).length ? (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                  <tbody>
+                    {d.campanhas.map((c, i) => (
+                      <tr key={i} style={{ borderTop: i ? '1px solid #26262f' : 'none' }}>
+                        <td style={{ padding: '7px 0' }}>{c.nome}</td>
+                        <td style={{ padding: '7px 0', color: '#8b8b96' }}>{dataCurta(c.criada)}</td>
+                        <td style={{ padding: '7px 0', textAlign: 'right', color: '#8b8b96' }}>
+                          {c.enviados}/{c.destinatarios} enviados · {c.lidas} lidas
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p style={{ margin: 0, fontSize: '0.8rem', color: '#6b6b76' }}>Nenhum disparo no período.</p>
+              )}
+            </div>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+};
+
 // ─── Painel ───────────────────────────────────────────────────────────────────
 const Painel = ({ onSair }) => {
   const [dias, setDias]   = useState(30);
@@ -95,6 +257,7 @@ const Painel = ({ onSair }) => {
   // dependência externa quebraria o painel inteiro quando ela caísse.
   const [cotacao, setCotacao] = useState(5.4);
   const [salvandoId, setSalvandoId] = useState(null);
+  const [lojaAberta, setLojaAberta] = useState(null);
 
   const chamar = useCallback(async (body) => {
     const { data, error } = await supabaseAdmin.functions.invoke('admin-metrics', { body });
@@ -249,8 +412,9 @@ const Painel = ({ onSair }) => {
                   const atrasado = !l.pago_mes_atual && venc && venc < new Date();
                   return (
                     <tr key={l.user_id} style={{ borderTop: '1px solid #26262f' }}>
-                      <td style={td}>
-                        <div style={{ fontWeight: 600 }}>{l.empresa || 'Sem nome'}</div>
+                      <td style={{ ...td, cursor: 'pointer' }} onClick={() => setLojaAberta(l)}
+                          title="Abrir o detalhe desta loja">
+                        <div style={{ fontWeight: 600, color: '#a5b4fc' }}>{l.empresa || 'Sem nome'}</div>
                         <div style={{ fontSize: '0.72rem', color: '#8b8b96' }}>{l.email}</div>
                         <div style={{ fontSize: '0.7rem', color: '#6b6b76' }}>
                           desde {dataCurta(l.criado_em)}
@@ -327,6 +491,16 @@ const Painel = ({ onSair }) => {
               </tbody>
             </table>
           </div>
+
+          {lojaAberta && (
+            <DetalheLoja
+              loja={lojaAberta}
+              dias={dias}
+              cotacao={cotacao}
+              chamar={chamar}
+              onFechar={() => setLojaAberta(null)}
+            />
+          )}
 
           <p style={{ marginTop: 14, fontSize: '0.76rem', color: '#6b6b76', lineHeight: 1.6, maxWidth: 780 }}>
             Custo calculado sobre os tokens reais, com os preços do claude-sonnet-4-6:

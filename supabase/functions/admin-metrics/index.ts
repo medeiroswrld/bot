@@ -98,6 +98,52 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
+  // ── Detalhe de uma loja ────────────────────────────────────────────────────
+  if (acao === 'detalhe') {
+    const { user_id } = body as { user_id?: string };
+    if (!user_id) return json({ error: 'user_id obrigatório' }, 400);
+
+    let d = 30;
+    const nd = Number(body?.dias);
+    if (Number.isFinite(nd) && nd > 0 && nd <= 365) d = Math.floor(nd);
+    const desdeDet = new Date(Date.now() - d * 86400000).toISOString();
+
+    const { data: det, error: detErr } = await admin.rpc('admin_detalhe_loja', {
+      p_user_id: user_id, p_desde: desdeDet,
+    });
+    if (detErr) return json({ error: `Falha ao carregar detalhe: ${detErr.message}` }, 500);
+
+    // Qualidade do número direto na Meta. NÃO pode derrubar a tela: se a Meta
+    // estiver fora, ou o token da loja vencido, o resto do detalhe continua
+    // valendo — por isso vai em try isolado e devolve null.
+    let whatsapp: unknown = null;
+    try {
+      const { data: cfg } = await admin
+        .from('company_settings')
+        .select('whatsapp_business_account_id')
+        .eq('user_id', user_id)
+        .maybeSingle();
+      const waba = String(cfg?.whatsapp_business_account_id ?? '');
+      if (waba) {
+        const { data: tok } = await admin.rpc('get_whatsapp_token', { p_user_id: user_id });
+        const token = String(tok ?? '') || (Deno.env.get('WHATSAPP_TOKEN') ?? '');
+        if (token) {
+          const r = await fetch(
+            `https://graph.facebook.com/v20.0/${waba}/phone_numbers` +
+            '?fields=display_phone_number,verified_name,quality_rating,status,messaging_limit_tier',
+            { headers: { Authorization: `Bearer ${token}` } },
+          );
+          const j = await r.json();
+          whatsapp = r.ok ? (j?.data?.[0] ?? null) : { erro: j?.error?.message ?? `HTTP ${r.status}` };
+        }
+      }
+    } catch (e) {
+      console.warn('[admin-metrics] qualidade Meta indisponível:', (e as Error)?.message);
+    }
+
+    return json({ dias: d, detalhe: det, whatsapp });
+  }
+
   // ── Métricas (padrão) ──────────────────────────────────────────────────────
   let dias = 30;
   const d = Number(body?.dias);
