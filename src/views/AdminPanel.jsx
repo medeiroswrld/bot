@@ -278,6 +278,104 @@ const DetalheLoja = ({ loja, dias, cotacao, chamar, onFechar }) => {
   );
 };
 
+// ─── Créditos por plataforma ─────────────────────────────────────────────────
+// Não há API pública confiável de saldo (o endpoint de créditos da OpenAI foi
+// descontinuado para chave comum). Então o saldo é registrado à mão e o painel
+// desconta o consumo a partir da data do registro. Responde melhor a pergunta
+// real — "está perto de acabar?" — do que um número que não dá pra buscar.
+const Creditos = ({ chamar, cotacao }) => {
+  const [dados, setDados] = useState(null);
+  const [editando, setEditando] = useState(null);
+  const [valor, setValor] = useState('');
+  const [erro, setErro] = useState('');
+
+  const carregar = useCallback(() => {
+    chamar({ acao: 'creditos' }).then(setDados).catch((e) => setErro(e.message));
+  }, [chamar]);
+
+  useEffect(() => { carregar(); }, [carregar]);
+
+  const salvar = async (plataforma) => {
+    try {
+      await chamar({ acao: 'salvar_credito', plataforma, saldo_usd: Number(valor) || 0 });
+      setEditando(null); setValor('');
+      carregar();
+    } catch (e) { setErro(e.message); }
+  };
+
+  if (!dados) return null;
+  const semPreco = (dados.precos ?? []).filter((p) => !num(p.entrada_usd) && !num(p.saida_usd));
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <p style={{ margin: '0 0 8px', fontSize: '0.78rem', color: '#8b8b96' }}>Créditos nas plataformas</p>
+      {erro && <p style={{ fontSize: '0.8rem', color: '#fca5a5' }}>{erro}</p>}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        {(dados.creditos ?? []).map((c) => {
+          const restante = num(c.saldo_atual);
+          const dias = c.dias_restantes;
+          // Alerta por DIAS restantes, não por valor: US$ 20 é muito pra quem
+          // gasta 1/dia e pouco pra quem gasta 15.
+          const cor = dias == null ? '#a1a1aa' : dias <= 7 ? '#fca5a5' : dias <= 20 ? '#fbbf24' : '#4ade80';
+          return (
+            <div key={c.plataforma}
+              style={{ background: '#15151c', border: '1px solid #26262f', borderRadius: 12, padding: '13px 16px', flex: '1 1 230px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <p style={{ margin: 0, fontSize: '0.72rem', color: '#8b8b96', textTransform: 'capitalize' }}>{c.plataforma}</p>
+                <button type="button"
+                  onClick={() => { setEditando(c.plataforma); setValor(String(c.saldo_usd)); }}
+                  style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#6b6b76', cursor: 'pointer', fontSize: '0.7rem' }}>
+                  atualizar
+                </button>
+              </div>
+
+              {editando === c.plataforma ? (
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#6b6b76' }}>US$</span>
+                  <input type="number" step="0.01" value={valor} autoFocus
+                    onChange={(e) => setValor(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') salvar(c.plataforma); }}
+                    style={{ width: 90, padding: '4px 7px', borderRadius: 6, border: '1px solid #2c2c36', background: '#0f0f14', color: '#e4e4e7', fontSize: '0.8rem' }} />
+                  <button type="button" onClick={() => salvar(c.plataforma)}
+                    style={{ padding: '4px 10px', borderRadius: 6, border: 'none', background: '#4f46e5', color: '#fff', cursor: 'pointer', fontSize: '0.75rem' }}>
+                    salvar
+                  </button>
+                  <button type="button" onClick={() => setEditando(null)}
+                    style={{ background: 'none', border: 'none', color: '#6b6b76', cursor: 'pointer', fontSize: '0.75rem' }}>
+                    cancelar
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <p style={{ margin: '2px 0 0', fontSize: '1.25rem', fontWeight: 700, color: cor }}>
+                    US$ {restante.toFixed(2)}
+                  </p>
+                  <p style={{ margin: 0, fontSize: '0.7rem', color: '#6b6b76' }}>
+                    {brlDireto(restante * cotacao)} · gasta US$ {num(c.por_dia).toFixed(2)}/dia
+                  </p>
+                  <p style={{ margin: '3px 0 0', fontSize: '0.72rem', color: cor, fontWeight: 600 }}>
+                    {dias == null ? 'sem consumo no período' : `~${dias} dias restantes`}
+                  </p>
+                  <p style={{ margin: '3px 0 0', fontSize: '0.66rem', color: '#4b4b55' }}>
+                    registrado US$ {num(c.saldo_usd).toFixed(2)} em {dataCurta(c.registrado_em)} · usou US$ {num(c.gasto_desde).toFixed(2)}
+                  </p>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {semPreco.length > 0 && (
+        <p style={{ margin: '8px 0 0', fontSize: '0.72rem', color: '#fbbf24' }}>
+          Sem preço cadastrado: {semPreco.map((p) => p.prefixo).join(', ')} — essas chamadas
+          somam zero no custo. Preencha em model_pricing pra a conta ficar completa.
+        </p>
+      )}
+    </div>
+  );
+};
+
 // ─── Painel ───────────────────────────────────────────────────────────────────
 const Painel = ({ onSair }) => {
   const [dias, setDias]   = useState(30);
@@ -399,6 +497,8 @@ const Painel = ({ onSair }) => {
         </div>
       ) : dados ? (
         <>
+          <Creditos chamar={chamar} cotacao={cotacao} />
+
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
             <div style={card}>
               <p style={{ margin: 0, fontSize: '0.72rem', color: '#8b8b96' }}>Custo do período</p>

@@ -98,6 +98,52 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
+  // ── Saldo de creditos por plataforma ───────────────────────────────────────
+  if (acao === 'creditos') {
+    const { data, error } = await admin.rpc('admin_creditos');
+    if (error) return json({ error: `Falha ao ler créditos: ${error.message}` }, 500);
+    const { data: precos } = await admin
+      .from('model_pricing')
+      .select('prefixo, plataforma, entrada_usd, saida_usd, cache_write_usd, cache_read_usd')
+      .order('plataforma');
+    return json({ creditos: data ?? [], precos: precos ?? [] });
+  }
+
+  // Registrar o saldo conferido no site do provedor. E a partir DESTA data que
+  // o consumo passa a ser descontado — por isso registrado_em e sempre now(),
+  // nunca a data antiga.
+  if (acao === 'salvar_credito') {
+    const { plataforma, saldo_usd } = body as { plataforma?: string; saldo_usd?: number };
+    if (!plataforma) return json({ error: 'plataforma obrigatória' }, 400);
+    const { error } = await admin
+      .from('platform_credits')
+      .upsert({
+        plataforma,
+        saldo_usd: Number(saldo_usd ?? 0),
+        registrado_em: new Date().toISOString(),
+      }, { onConflict: 'plataforma' });
+    if (error) return json({ error: `Falha ao salvar saldo: ${error.message}` }, 500);
+    return json({ ok: true });
+  }
+
+  if (acao === 'salvar_preco') {
+    const { prefixo, plataforma, entrada_usd, saida_usd, cache_write_usd, cache_read_usd } = body as Record<string, unknown>;
+    if (!prefixo) return json({ error: 'prefixo obrigatório' }, 400);
+    const { error } = await admin
+      .from('model_pricing')
+      .upsert({
+        prefixo: String(prefixo),
+        plataforma: String(plataforma ?? 'outro'),
+        entrada_usd: Number(entrada_usd ?? 0),
+        saida_usd: Number(saida_usd ?? 0),
+        cache_write_usd: Number(cache_write_usd ?? 0),
+        cache_read_usd: Number(cache_read_usd ?? 0),
+        atualizado_em: new Date().toISOString(),
+      }, { onConflict: 'prefixo' });
+    if (error) return json({ error: `Falha ao salvar preço: ${error.message}` }, 500);
+    return json({ ok: true });
+  }
+
   // ── Detalhe de uma loja ────────────────────────────────────────────────────
   if (acao === 'detalhe') {
     const { user_id } = body as { user_id?: string };
