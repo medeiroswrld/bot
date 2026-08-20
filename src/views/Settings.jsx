@@ -264,6 +264,30 @@ const Settings = () => {
         setTimeout(() => setSavedPay(false), 2000);
     };
 
+    // ── Funcionamento do bot (liga/desliga + janela de horario) ────────────────
+    const [botCfg, setBotCfg] = useState({ enabled: true, agendado: false, inicio: '08:00', fim: '18:00' });
+    const [savingBot, setSavingBot] = useState(false);
+    const [savedBot,  setSavedBot]  = useState(false);
+
+    const saveBotCfg = async () => {
+        if (!user?.id) return;
+        setSavingBot(true);
+        await supabase
+            .from('company_settings')
+            .update({
+                bot_enabled: botCfg.enabled,
+                bot_schedule_enabled: botCfg.agendado,
+                bot_start: botCfg.inicio,
+                bot_end: botCfg.fim,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', user.id);
+        await refreshCompanySettings();
+        setSavingBot(false);
+        setSavedBot(true);
+        setTimeout(() => setSavedBot(false), 2000);
+    };
+
     // ── Equipe e contatos de outros setores ───────────────────────────────────
     // Duas listas curtas que o bot passa a conhecer: quem trabalha na loja (pra
     // confirmar quando o cliente cita um nome) e o telefone de cada setor (pra
@@ -379,6 +403,14 @@ const Settings = () => {
         const pay = Array.isArray(s.payment_methods) ? s.payment_methods : [];
         setPayMethods(pay.filter(m => PAYMENT_OPTIONS.includes(m)));
         setPayOther(pay.filter(m => !PAYMENT_OPTIONS.includes(m)).join(', '));
+        // Funcionamento do bot
+        setBotCfg({
+            enabled:  s.bot_enabled !== false,
+            agendado: s.bot_schedule_enabled === true,
+            // Postgres devolve time como "08:00:00"; o input type=time quer HH:MM.
+            inicio: String(s.bot_start ?? '08:00').slice(0, 5),
+            fim:    String(s.bot_end   ?? '18:00').slice(0, 5),
+        });
         // Equipe e contatos por setor
         setEquipe(Array.isArray(s.team_members) ? s.team_members : []);
         setContatos(Array.isArray(s.department_contacts) ? s.department_contacts : []);
@@ -986,6 +1018,81 @@ const Settings = () => {
                                 ? <><CheckCircle size={18} /> Salvo!</>
                                 : savingPay ? 'Salvando...'
                                 : <><Save size={18} /> Salvar Formas de Pagamento</>}
+                        </button>
+                    </div>
+                </section>
+            </div>
+
+            {/* ── Funcionamento do Bot ───────────────────────────────────────── */}
+            <div style={{ marginTop: '2rem' }}>
+                <section className="settings-section card">
+                    <div className="section-title">
+                        <Bot size={20} />
+                        <h2>Funcionamento do Bot</h2>
+                    </div>
+                    <div className="settings-form">
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14 }}>
+                            <button type="button" onClick={() => setBotCfg(b => ({ ...b, enabled: !b.enabled }))}
+                                title={botCfg.enabled ? 'Desativar' : 'Ativar'}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, color: botCfg.enabled ? '#10b981' : '#94a3b8' }}>
+                                {botCfg.enabled ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
+                            </button>
+                            <div>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Bot ativo</span>
+                                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                                    Desligado, ele nao responde nunca. As mensagens continuam chegando e a
+                                    conversa fica marcada como pendente pra equipe ver.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10, opacity: botCfg.enabled ? 1 : 0.45 }}>
+                            <button type="button" disabled={!botCfg.enabled}
+                                onClick={() => setBotCfg(b => ({ ...b, agendado: !b.agendado }))}
+                                title={botCfg.agendado ? 'Desativar' : 'Ativar'}
+                                style={{ background: 'none', border: 'none', cursor: botCfg.enabled ? 'pointer' : 'not-allowed', padding: 0, flexShrink: 0, color: botCfg.agendado ? '#10b981' : '#94a3b8' }}>
+                                {botCfg.agendado ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
+                            </button>
+                            <div>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>Responder so em determinado horario</span>
+                                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                                    Fora da janela o bot fica calado e a conversa vai pra pendente.
+                                </p>
+                            </div>
+                        </div>
+
+                        {botCfg.enabled && botCfg.agendado && (
+                            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 10 }}>
+                                <div className="form-group" style={{ flex: '1 1 140px' }}>
+                                    <label>Comeca as</label>
+                                    <input type="time" value={botCfg.inicio}
+                                        onChange={e => setBotCfg(b => ({ ...b, inicio: e.target.value }))} />
+                                </div>
+                                <div className="form-group" style={{ flex: '1 1 140px' }}>
+                                    <label>Para as</label>
+                                    <input type="time" value={botCfg.fim}
+                                        onChange={e => setBotCfg(b => ({ ...b, fim: e.target.value }))} />
+                                </div>
+                            </div>
+                        )}
+
+                        {botCfg.enabled && botCfg.agendado && botCfg.inicio > botCfg.fim && (
+                            <p style={{ fontSize: '0.8rem', color: '#0369a1', background: '#e0f2fe', padding: '8px 12px', borderRadius: 8, lineHeight: 1.5 }}>
+                                Essa janela atravessa a meia-noite: o bot responde das {botCfg.inicio} ate a
+                                meia-noite e da meia-noite ate as {botCfg.fim} do dia seguinte.
+                            </p>
+                        )}
+
+                        <button
+                            className="btn-primary"
+                            onClick={saveBotCfg}
+                            disabled={savingBot}
+                            style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                            {savedBot
+                                ? <><CheckCircle size={18} /> Salvo!</>
+                                : savingBot ? 'Salvando...'
+                                : <><Save size={18} /> Salvar Funcionamento</>}
                         </button>
                     </div>
                 </section>

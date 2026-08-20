@@ -66,6 +66,36 @@ function avisarNoCelular(userId: string, nome: string, texto: string, convId: st
   }
 }
 
+// O bot deve responder agora?
+//
+// Duas travas independentes: a chave mestra (bot_enabled) e a janela de
+// horario. Roda AQUI, no webhook, e nao no prompt — fora do horario nem
+// existe chamada de modelo, entao nao ha custo nem risco de o modelo
+// "decidir" responder assim mesmo.
+function botPodeResponder(s: {
+  bot_enabled?: boolean | null;
+  bot_schedule_enabled?: boolean | null;
+  bot_start?: string | null;
+  bot_end?: string | null;
+}): boolean {
+  if (s?.bot_enabled === false) return false;
+  if (s?.bot_schedule_enabled !== true) return true;
+
+  const agora = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date());
+
+  // O Postgres devolve time como "18:00:00"; comparamos so HH:MM.
+  const ini = String(s.bot_start ?? '00:00').slice(0, 5);
+  const fim = String(s.bot_end   ?? '23:59').slice(0, 5);
+  if (ini === fim) return true;              // janela degenerada: nao cala o bot
+
+  // Janela que ATRAVESSA A MEIA-NOITE (ex: 18:00 as 08:00) e o caso comum aqui
+  // — loja com equipe de dia querendo o bot so a noite. Tratar como intervalo
+  // simples deixaria o bot mudo 24h.
+  return ini < fim ? (agora >= ini && agora < fim) : (agora >= ini || agora < fim);
+}
+
 // Extensão por mime. Nota de voz do WhatsApp chega como 'audio/ogg; codecs=opus',
 // por isso o mime é cortado no ';' antes de consultar aqui.
 const EXTENSAO: Record<string, string> = {
@@ -357,7 +387,7 @@ serve(async (req) => {
   // 5. Resolve a concessionária pelo phone_number_id cadastrado
   const { data: settings } = await supabase
     .from('company_settings')
-    .select('user_id')
+    .select('user_id, bot_enabled, bot_schedule_enabled, bot_start, bot_end')
     .eq('whatsapp_phone_number_id', phoneNumberId)
     .maybeSingle();
 
@@ -498,6 +528,19 @@ ${legendaEco}` : `${marcador} ${url}`;
       return ok();
     }
     avisarNoCelular(userId, senderName || upsertedConv.customer_name || '', text, upsertedConv.id);
+
+    // Bot desligado ou fora da janela: a mensagem JA foi salva acima e a
+    // conversa vai pra 'pendente'. Ficar so em silencio perderia o
+    // atendimento — alguem precisa ver que o cliente escreveu.
+    if (!botPodeResponder(settings)) {
+      await supabase.from('conversations')
+        .update({ status: 'pending' })
+        .eq('id', upsertedConv.id)
+        .neq('status', 'human');   // ja assumida por alguem: nao mexe
+      console.log(`[WH] bot fora do horario/desligado — conversa marcada como pendente (${maskPhone(from)})`);
+      return ok();
+    }
+
     if (upsertedConv.status !== 'human') fireProcess(upsertedConv.id);
     return ok();
   }
