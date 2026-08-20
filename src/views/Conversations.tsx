@@ -465,15 +465,31 @@ export default function Conversations() {
   const [buscaCarro, setBuscaCarro] = useState('');
   const [enviandoCarro, setEnviandoCarro] = useState<string | null>(null);
 
+  const [erroCarros, setErroCarros] = useState('');
+
   useEffect(() => {
     if (!showCarros || carros.length || !user?.id) return;
+    let vivo = true;
+    setErroCarros('');
     supabaseTyped
       .from('cars')
+      // Sem filtro de status na query: carro cadastrado antes da coluna existir
+      // fica com status NULL, e `eq('status','available')` o descarta em
+      // silêncio — a lista vinha vazia e a tela dizia "carregando" pra sempre.
+      // O filtro vai abaixo, no cliente, tratando NULL como disponível.
       .select('id, brand, model, version, year, km, price, status')
       .eq('user_id', user.id)
-      .eq('status', 'available')
       .order('created_at', { ascending: false })
-      .then(({ data }) => setCarros((data ?? []) as Array<Record<string, unknown>>));
+      .then(({ data, error }) => {
+        if (!vivo) return;
+        // O erro precisa aparecer: engoli-lo foi o que transformou uma falha de
+        // consulta em spinner eterno.
+        if (error) { setErroCarros(error.message); setCarros([]); return; }
+        const lista = (data ?? []).filter((c) => (c as { status?: string }).status !== 'sold');
+        setCarros(lista as Array<Record<string, unknown>>);
+        if (!lista.length) setErroCarros('Nenhum veículo disponível no estoque.');
+      });
+    return () => { vivo = false; };
   }, [showCarros, carros.length, user?.id]);
 
   const enviarCarro = async (carId: string) => {
@@ -1105,8 +1121,8 @@ export default function Conversations() {
                         </button>
                       ))}
                     {!carros.length && (
-                      <p style={{ margin: 0, padding: 10, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                        Carregando estoque...
+                      <p style={{ margin: 0, padding: 10, fontSize: '0.8rem', color: erroCarros ? '#dc2626' : 'var(--text-secondary)' }}>
+                        {erroCarros || 'Carregando estoque...'}
                       </p>
                     )}
                     <p style={{ margin: '6px 0 0', padding: '0 4px', fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
