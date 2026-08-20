@@ -10,7 +10,7 @@ import './App.css';
 import { AppProvider, useAppContext } from './context/AppContext.jsx';
 
 const Dashboard    = lazy(() => import('./views/Dashboard.jsx'));
-const Admin        = lazy(() => import('./views/Admin.jsx'));
+const AdminPanel   = lazy(() => import('./views/AdminPanel.jsx'));
 const Inventory    = lazy(() => import('./views/Inventory.jsx'));
 const Leads        = lazy(() => import('./views/Leads.jsx'));
 const Agenda       = lazy(() => import('./views/Agenda.jsx'));
@@ -253,10 +253,6 @@ const AuthenticatedApp = () => {
               <Route path="/campanhas/:id" element={<CampaignDetails />} />
               <Route path="/assistente"    element={<BotSettings />} />
               <Route path="/configuracoes" element={<SettingsView />} />
-              {/* Painel do dono do sistema. A rota nao tem privilegio: quem
-                  manda e a edge function, que confere o e-mail e devolve 403
-                  pra qualquer outro. Aqui e so a tela. */}
-              <Route path="/admin"         element={<Admin />} />
             </Routes>
           </div>
         </Suspense>
@@ -292,6 +288,19 @@ const AppContent = () => {
 };
 
 function App() {
+  // O painel do administrador e um app A PARTE: nao passa pelo AppProvider nem
+  // pelo shell do CRM, e usa sessao propria (storageKey diferente, ver
+  // supabaseAdmin.js). Assim da pra estar logado como lojista no CRM e como
+  // administrador no /admin ao mesmo tempo, no mesmo navegador — antes um
+  // derrubava o outro, e o painel abria logado com a conta errada.
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <AdminPanel />
+      </Suspense>
+    );
+  }
+
   return (
     <AppProvider>
       <AppContent />
