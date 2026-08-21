@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
+import { enviarSocial, enviarImagemSocial } from '../_shared/social.ts';
 import { buildCors } from '../_shared/cors.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
@@ -58,7 +59,7 @@ serve(async (req) => {
   // ── valida que o usuário é dono da conversa (via RLS) ──────────────────────
   const { data: conv, error: convErr } = await userClient
     .from('conversations')
-    .select('id, user_id, customer_phone, status')
+    .select('id, user_id, customer_phone, status, channel')
     .eq('id', conversation_id)
     .single();
 
@@ -67,6 +68,47 @@ serve(async (req) => {
   }
 
   const now = new Date().toISOString();
+
+  // Canal da conversa. Sem isto o CRM mandava tudo pro Graph do WhatsApp — e
+  // numa conversa de Instagram o "telefone" e na verdade um PSID, entao a
+  // mensagem sumia: o vendedor via enviada no CRM e o cliente nao recebia nada.
+  const canal = String((conv as { channel?: string }).channel ?? 'whatsapp');
+  const ehSocial = canal === 'instagram' || canal === 'messenger';
+
+  // Credenciais resolvidas uma vez: buscar por mensagem faria uma consulta ao
+  // Vault a cada foto enviada.
+  let contaSocial = '';
+  let tokenSocial = '';
+  if (ehSocial) {
+    const { data: cfgSocial } = await adminClient
+      .from('company_settings')
+      .select('ig_user_id, fb_page_id')
+      .eq('user_id', conv.user_id)
+      .single();
+    contaSocial = String(
+      (canal === 'instagram' ? cfgSocial?.ig_user_id : cfgSocial?.fb_page_id) ?? '',
+    );
+    const { data: tk } = await adminClient.rpc('get_meta_page_token', {
+      p_user_id: conv.user_id, p_canal: canal,
+    });
+    tokenSocial = String(tk ?? '');
+  }
+
+  /** Envia texto no canal certo. */
+  const enviarTexto = async (destino: string, texto: string, pid: string, tokenWa: string) => {
+    if (!ehSocial) return await sendMessage(destino, texto, pid || undefined, tokenWa);
+    const r = await enviarSocial(contaSocial, destino, texto, tokenSocial, canal as 'instagram' | 'messenger');
+    if (!r.ok) console.error('[SAM] falha no envio social:', r.erro);
+    return r.ok;
+  };
+
+  /** Envia imagem no canal certo. */
+  const enviarFoto = async (destino: string, url: string, pid: string, tokenWa: string) => {
+    if (!ehSocial) return await sendImage(destino, url, pid || undefined, tokenWa);
+    const r = await enviarImagemSocial(contaSocial, destino, url, tokenSocial, canal as 'instagram' | 'messenger');
+    if (!r.ok) console.error('[SAM] falha ao enviar foto social:', r.erro);
+    return r.ok;
+  };
 
   // ── ENVIO DE VEÍCULO ───────────────────────────────────────────────────────
   // Quando o vendedor assume a conversa ele perdia a ferramenta que o bot tem:
@@ -101,7 +143,7 @@ serve(async (req) => {
     ].filter(Boolean);
     const ficha = linhas.join('\n');
 
-    await sendMessage(fone, ficha, pid || undefined, tk);
+    await enviarTexto(fone, ficha, pid, tk);
     await userClient.from('messages').insert({ conversation_id, role: 'agent', content: ficha });
 
     // Galeria: specs primeiro (quando existe), depois as fotos na ordem da loja.
@@ -124,7 +166,7 @@ serve(async (req) => {
       // Atencao a assinatura: sendImage e (to, url, phoneNumberId, token) — NAO
       // tem legenda. Ja sendVideo tem, numa posicao diferente. Passar na ordem
       // errada nao quebra o build, so falha em runtime.
-      const ok = await sendImage(fone, url, pid || undefined, tk);
+      const ok = await enviarFoto(fone, url, pid, tk);
       if (ok) {
         enviadas++;
         // Mesmo formato do bot: o CRM renderiza como imagem, não como URL crua.
@@ -133,7 +175,12 @@ serve(async (req) => {
     }
 
     if (carro.video_url) {
-      const ok = await sendVideo(fone, String(carro.video_url), pid || undefined, undefined, tk);
+      // Video so no WhatsApp: os canais sociais aceitam video, mas por URL
+      // remota o comportamento varia e nao testei. Melhor nao mandar do que
+      // mandar quebrado.
+      const ok = ehSocial
+        ? false
+        : await sendVideo(fone, String(carro.video_url), pid || undefined, undefined, tk);
       if (ok) await userClient.from('messages').insert({ conversation_id, role: 'agent', content: `[vídeo] ${carro.video_url}` });
     }
 
@@ -169,7 +216,7 @@ serve(async (req) => {
   const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
   const token = await resolveWhatsAppToken(adminClient, conv.user_id);
 
-  const sent = await sendMessage(conv.customer_phone as string, text.trim(), phoneNumberId || undefined, token);
+  const sent = await enviarTexto(conv.customer_phone as string, text.trim(), phoneNumberId, token);
   if (!sent) {
     console.error(`[SAM] Falha ao enviar WhatsApp para ${maskPhone(conv.customer_phone as string)} — mensagem salva no banco`);
   }
