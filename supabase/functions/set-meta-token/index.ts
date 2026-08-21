@@ -4,12 +4,15 @@
 // para o navegador. Token de página permite responder como a marca, então tem
 // o mesmo peso do token do WhatsApp.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { corsHeaders as CORS } from '../_shared/cors.ts';
-
-const json = (d: unknown, s = 200) =>
-  new Response(JSON.stringify(d), { status: s, headers: { 'Content-Type': 'application/json', ...CORS } });
+import { buildCors } from '../_shared/cors.ts';
 
 Deno.serve(async (req) => {
+  // CORS por requisicao: o modulo compartilhado usa allowlist de origem, entao
+  // depende do header Origin. Nao da pra montar fora do handler.
+  const CORS = buildCors(req);
+  const json = (d: unknown, s = 200) =>
+    new Response(JSON.stringify(d), { status: s, headers: { 'Content-Type': 'application/json', ...CORS } });
+
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST')    return json({ error: 'Method Not Allowed' }, 405);
 
