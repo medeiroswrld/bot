@@ -2662,7 +2662,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   let tokenSocial = '';
   if (canal !== 'whatsapp') {
     contaIdSocial = String((canal === 'instagram' ? settings?.ig_user_id : settings?.fb_page_id) ?? '');
-    const { data: tp } = await supabase.rpc('get_meta_page_token', { p_user_id: userId });
+    const { data: tp } = await supabase.rpc('get_meta_page_token', { p_user_id: userId, p_canal: canal });
     tokenSocial = String(tp ?? '');
   }
 
@@ -3119,7 +3119,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     const contaId = String(
       (canal === 'instagram' ? settings?.ig_user_id : settings?.fb_page_id) ?? '',
     );
-    const { data: tokenPagina } = await supabase.rpc('get_meta_page_token', { p_user_id: userId });
+    const { data: tokenPagina } = await supabase.rpc('get_meta_page_token', { p_user_id: userId, p_canal: canal });
     const r = await enviarSocial(contaId, customerPhone, finalText, String(tokenPagina ?? ''));
     sent = r.ok;
     if (!r.ok) log.error('falha ao enviar no canal social', { action: 'send_final', canal, erro: r.erro });

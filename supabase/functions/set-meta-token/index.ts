@@ -28,11 +28,18 @@ Deno.serve(async (req) => {
   const { data: { user }, error: userErr } = await userClient.auth.getUser();
   if (userErr || !user) return json({ error: 'Não autenticado' }, 401);
 
-  let body: { token?: string; remove?: boolean };
+  let body: { token?: string; remove?: boolean; canal?: string };
   try { body = await req.json(); } catch { return json({ error: 'JSON inválido' }, 400); }
 
   const remove = body?.remove === true;
   const token  = typeof body?.token === 'string' ? body.token.trim() : '';
+  const canal  = String(body?.canal ?? '').toLowerCase();
+
+  // Canal explicito e obrigatorio: sem ele o token iria pro lugar errado e o
+  // sintoma seria "conectei o Instagram e o bot nao responde", sem erro nenhum.
+  if (canal !== 'instagram' && canal !== 'messenger') {
+    return json({ error: 'canal deve ser instagram ou messenger' }, 400);
+  }
 
   if (!remove) {
     if (!token)            return json({ error: 'Token vazio.' }, 400);
@@ -43,6 +50,7 @@ Deno.serve(async (req) => {
   const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
   const { error: rpcErr } = await admin.rpc('set_meta_page_token', {
     p_user_id: user.id,
+    p_canal:   canal,
     p_token:   remove ? '' : token,
   });
 

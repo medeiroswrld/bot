@@ -132,7 +132,7 @@ serve(async (req) => {
     // não muda.
     let nome = '';
     try {
-      const { data: tok } = await supabase.rpc('get_meta_page_token', { p_user_id: userId });
+      const { data: tok } = await supabase.rpc('get_meta_page_token', { p_user_id: userId, p_canal: msg.canal });
       if (tok) nome = await nomeDoUsuarioSocial(msg.de, String(tok));
     } catch (e) {
       console.warn('[SW] não consegui o nome do usuário:', (e as Error)?.message);
