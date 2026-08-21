@@ -42,9 +42,13 @@ serve(async (req) => {
     const modo = url.searchParams.get('hub.mode');
     const token = url.searchParams.get('hub.verify_token');
     const challenge = url.searchParams.get('hub.challenge');
-    // Reaproveita o mesmo verify token do WhatsApp: é a mesma app da Meta, e
-    // um segundo segredo só daria mais uma coisa para configurar errado.
-    const esperado = Deno.env.get('WHATSAPP_VERIFY_TOKEN') ?? '';
+    // Token próprio, com o do WhatsApp como reserva. Separado de propósito: o
+    // do WhatsApp já está em uso e ninguém lembra o valor (a Meta não mostra
+    // depois de salvo), então trocá-lo arriscaria a verificação de um canal
+    // que está funcionando.
+    const esperado = Deno.env.get('SOCIAL_VERIFY_TOKEN')
+      || Deno.env.get('WHATSAPP_VERIFY_TOKEN')
+      || '';
     if (modo === 'subscribe' && token === esperado && challenge) {
       return new Response(challenge, { status: 200 });
     }
