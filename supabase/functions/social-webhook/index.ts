@@ -34,6 +34,55 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   return dif === 0;
 }
 
+const EXTENSAO: Record<string, string> = {
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic',
+};
+
+/**
+ * Copia a mídia da Meta pro nosso Storage e devolve a URL pública.
+ *
+ * Necessário por dois motivos, e o segundo só apareceu no teste real:
+ *  1. a URL da Meta expira — sem copiar, o lojista abre a conversa depois e não
+ *     vê nada;
+ *  2. ela é assinada e NÃO é buscável por terceiros. Quando o Claude tentava ler
+ *     a imagem do story direto dessa URL, falhava — e o bot respondia "tive um
+ *     probleminha". Foi o que aconteceu em 21/08, nos dois testes.
+ *
+ * Devolve também o tipo, que é como se descobre se o story era foto ou vídeo:
+ * a URL da CDN não tem extensão, então adivinhar pelo nome não funciona.
+ */
+async function copiarMidia(
+  supabase: ReturnType<typeof initAdmin>,
+  userId: string,
+  convId: string,
+  url: string,
+): Promise<{ url: string; tipo: string } | null> {
+  try {
+    const dl = await fetch(url);
+    if (!dl.ok) { console.error('[SW] download da mídia falhou:', dl.status); return null; }
+
+    const tipo = (dl.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    // Vídeo não é copiado: o bucket só aceita imagem, e o modelo não lê vídeo
+    // mesmo. Devolver o tipo permite ao chamador dar a resposta certa.
+    if (!tipo.startsWith('image/')) return { url: '', tipo };
+
+    const bytes = new Uint8Array(await dl.arrayBuffer());
+    const ext = EXTENSAO[tipo] ?? 'jpg';
+    const caminho = `${userId}/${convId}/${Date.now()}.${ext}`;
+
+    const { error: upErr } = await supabase.storage
+      .from('chat-media')
+      .upload(caminho, bytes, { contentType: tipo, upsert: false });
+    if (upErr) { console.error('[SW] upload falhou:', upErr.message); return null; }
+
+    const { data: pub } = supabase.storage.from('chat-media').getPublicUrl(caminho);
+    return { url: String(pub?.publicUrl ?? ''), tipo };
+  } catch (e) {
+    console.error('[SW] erro ao copiar mídia:', (e as Error)?.message);
+    return null;
+  }
+}
+
 serve(async (req) => {
   const url = new URL(req.url);
 
@@ -218,27 +267,80 @@ serve(async (req) => {
   // estoque, então a imagem do story dá a ele exatamente o contexto que falta.
   // A legenda diz que é story pra ele não confundir com uma foto que o próprio
   // cliente tirou (o que mudaria a resposta — seria carro de troca, não de venda).
-  // Story pode ser FOTO ou VÍDEO, e a diferença importa: como imagem, o bot
-  // consegue ver o carro; como vídeo, não — a leitura de imagem rejeita a URL e
-  // o bot cai na mensagem de erro, que foi o que aconteceu no teste de 21/08.
-  // Detecta pelo caminho da URL, ignorando os parâmetros da CDN.
-  const caminhoStory = String(msg.storyUrl ?? '').split('?')[0].toLowerCase();
-  const storyEhVideo = /\.(mp4|mov|m4v|webm)$/.test(caminhoStory);
+  // ── Mídia: copia antes de mostrar ao bot ───────────────────────────────────
+  // A URL da Meta é assinada e temporária: o Claude não consegue buscá-la, e o
+  // lojista deixaria de ver a imagem depois. Então grava um marcador, copia em
+  // segundo plano (pra Meta receber o 200 na hora) e só então acorda o bot.
+  const urlOriginal = msg.storyUrl || msg.anexoUrl || '';
 
-  const conteudo = msg.storyUrl
-    ? (storyEhVideo
-        // Sem imagem para ler: entrega o contexto em texto e instrui a
-        // perguntar, em vez de deixar o bot adivinhar ou errar o carro.
-        ? `(sistema: o cliente respondeu a um story EM VÍDEO da loja${msg.texto ? `, escrevendo: "${msg.texto}"` : ', sem escrever nada'}. Você não consegue ver o vídeo. Pergunte de forma natural qual carro ele viu — não invente nem chute o modelo.)`
-        : `[imagem] ${msg.storyUrl}\n(o cliente respondeu a ESTE story da loja${msg.texto ? `, escrevendo: "${msg.texto}"` : ', sem escrever nada'})`)
-    : msg.anexoUrl
-      ? `[imagem] ${msg.anexoUrl}${msg.texto ? `\n${msg.texto}` : ''}`
-      : msg.texto;
+  if (urlOriginal) {
+    const ehStory = Boolean(msg.storyUrl);
+    const { data: reservada, error: reservaErr } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: convId,
+        role: 'customer',
+        content: ehStory ? '📷 Resposta a story, carregando…' : '📷 Imagem recebida…',
+        wa_message_id: msg.mid || null,
+      })
+      .select('id')
+      .single();
 
+    if (reservaErr || !reservada) {
+      console.warn('[SW] claim de mídia falhou (duplicada?):', reservaErr?.message);
+      return ok();
+    }
+
+    await supabase.from('conversations').update({ last_message_at: agora }).eq('id', convId);
+
+    const convFinal = convId as string;
+    const legenda = msg.texto;
+    const statusAtual = conv?.status;
+
+    // @ts-ignore — EdgeRuntime é global nas Supabase Edge Functions
+    EdgeRuntime.waitUntil((async () => {
+      const copia = await copiarMidia(supabase, userId, convFinal, urlOriginal);
+
+      let conteudoFinal: string;
+      if (copia?.url) {
+        conteudoFinal = ehStory
+          ? `[imagem] ${copia.url}\n(o cliente respondeu a ESTE story da loja${legenda ? `, escrevendo: "${legenda}"` : ', sem escrever nada'})`
+          : `[imagem] ${copia.url}${legenda ? `\n${legenda}` : ''}`;
+      } else if (copia && !copia.tipo.startsWith('image/')) {
+        // Vídeo: não há imagem pra ler. Entrega o contexto em texto e manda
+        // perguntar, em vez de deixar o bot chutar o modelo do carro.
+        conteudoFinal = ehStory
+          ? `(sistema: o cliente respondeu a um story EM VÍDEO da loja${legenda ? `, escrevendo: "${legenda}"` : ', sem escrever nada'}. Você NÃO consegue ver o vídeo. Pergunte de forma natural qual carro ele viu — não invente nem chute o modelo.)`
+          : `(sistema: o cliente mandou um vídeo, que você não consegue ver${legenda ? `, escrevendo: "${legenda}"` : ''}. Peça pra ele descrever ou mandar foto.)`;
+      } else {
+        conteudoFinal = `(sistema: chegou uma mídia que não consegui abrir${legenda ? `, com o texto: "${legenda}"` : ''}. Peça pro cliente mandar de novo ou descrever.)`;
+      }
+
+      await supabase.from('messages').update({ content: conteudoFinal }).eq('id', reservada.id);
+
+      // Bot só depois do conteúdo pronto: acordar antes faria ele ler o
+      // marcador de carregamento e responder sobre nada.
+      if (statusAtual !== 'human') {
+        fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/process-conversation`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+          },
+          body: JSON.stringify({ conversation_id: convFinal }),
+        }).catch((e) => console.error('[SW] falha ao acordar o bot:', e));
+      }
+    })());
+
+    console.log(`[SW] ${msg.canal}: mídia recebida (conversa ${convId})`);
+    return ok();
+  }
+
+  // ── Mensagem de texto ──────────────────────────────────────────────────────
   const { error: msgErr } = await supabase.from('messages').insert({
     conversation_id: convId,
     role: 'customer',
-    content: conteudo,
+    content: msg.texto,
     wa_message_id: msg.mid || null,
   });
   if (msgErr) {
