@@ -1600,7 +1600,7 @@ async function executeTool(
 
 interface Faq { question: string; answer: string }
 
-function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger, canal = 'whatsapp'): string {
+function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger, canal = 'whatsapp', falouDePagamento = true): string {
   const company = String(settings.company_name        ?? 'nossa concessionária');
   const address = String(settings.address             ?? 'não informado');
   const phone   = String(settings.phone_number        ?? 'não informado');
@@ -1651,7 +1651,14 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
   // ford null (coluna ford_qualification / migração 021 não configurada) → assume
   // tudo ON (igual ao default da migração e ao trade-in); evita o bot deixar de
   // qualificar só porque o SQL não rodou. Se a coluna existir, respeita os toggles.
-  const fordKeys = (['family', 'occupation', 'recreation', 'financial'] as const).filter((k) => ford ? ford[k] === true : true);
+  const fordKeys = (['family', 'occupation', 'recreation', 'financial'] as const)
+    .filter((k) => (ford ? ford[k] === true : true))
+    // Nos canais sociais, a pergunta de pagamento SÓ entra depois que o cliente
+    // tocar no assunto. Pedir "não fale de financiamento" numa nota solta não
+    // vence esta seção, que traz a frase pronta — a única forma de o bot não
+    // perguntar é a instrução não existir. Quem responde um story querendo
+    // saber o preço não está pronto pra falar de entrada e parcela.
+    .filter((k) => k !== 'financial' || canal === 'whatsapp' || falouDePagamento);
   const fordBlock = fordKeys.length > 0
     ? `\n\n## Qualificação natural do cliente (FORD)\n\nFORD é técnica de qualificação E rapport: descubra quem é o cliente pra recomendar o carro certo e criar conexão. Não é formulário — é conversa. Descubra naturalmente, SEM interrogatório, diluído ao longo do papo:\n\n${fordKeys.map((k) => FORD_LINES[k]).join('\n\n')}\n\n- **D = Desejos/Objetivo** → o gatilho emocional da compra (use pra RECOMENDAR e conectar): "O que é mais importante pra você num carro: economia, conforto, potência ou visual?", "Tem algum carro que sempre foi seu sonho?", "O que te faria bater o martelo?". Use isso pra apontar o carro certo do estoque. (Não há campo próprio — serve pra recomendação.)\n\nComo aplicar: ENCAIXE no contexto em vez de recitar (falou que viaja → puxa Recreação; falou dos filhos → cobre Família), e COMENTE a resposta antes de seguir, pra mostrar que ouviu: "Boa! Então espaço e segurança vão importar, já entendi." Uma pergunta de cada vez, sempre reagindo à anterior.`
     : '';
@@ -2666,6 +2673,10 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     customerName,
     log,
     canal,
+    // O cliente já falou de pagamento? Só o que ELE escreveu conta: se olhasse
+    // as falas do bot, a primeira menção dele reabriria o assunto sozinha.
+    /\b(financ|parcel|entrada|cons[óo]rcio|troca|boleto|cart[ãa]o|pag(ar|amento)|[àa] vista)/i
+      .test(orderedMessages.filter((m) => m.role === 'customer').map((m) => String(m.content)).join(' ')),
   ) + leadBlock;
 
   // ── 6. Monta histórico para o modelo ──────────────────────────────────────
