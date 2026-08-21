@@ -2847,7 +2847,20 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
         // Repetiu o que já mandou? Devolve pro modelo UMA vez, dizendo o que
         // fazer — o cliente já leu essa mensagem e não respondeu o que ele
         // esperava, então insistir na mesma frase é o pior caminho.
-        if (finalText && !reformulou && ehRepeticao(finalText, botAnteriores)) {
+        // Exceção: se o cliente ACABOU DE PEDIR a informação, repetir é a
+        // resposta certa, não um vício. Sem isto o bot dava o preço, o cliente
+        // dizia "quero sim", a trava classificava como repetição e o modelo
+        // mudava de assunto — deixando a pergunta sem resposta. Visto em
+        // conversa real em 21/08.
+        // ultimaDoCliente so e definida bem mais abaixo; aqui a ultima fala do
+        // cliente vem direto das mensagens ordenadas, que ja estao em maos.
+        const falaDoCliente = String(
+          [...orderedMessages].reverse().find((m) => m.role === 'customer')?.content ?? '',
+        ).trim();
+        const pedidoExplicito = /^\s*(sim|isso|quero|pode|manda|claro|com certeza|por favor|quanto|qual)\b/i
+          .test(falaDoCliente) || falaDoCliente.length <= 20;
+
+        if (finalText && !reformulou && !pedidoExplicito && ehRepeticao(finalText, botAnteriores)) {
           log.warn('resposta repetida — pedindo reformulação', {
             action: 'claude_loop', iteration, trecho: finalText.slice(0, 120),
           });
