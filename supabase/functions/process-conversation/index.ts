@@ -2470,7 +2470,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   if (isFirstMessage) {
     const { data: wSettings } = await supabase
       .from('company_settings')
-      .select('company_name, whatsapp_phone_number_id')
+      .select('company_name, whatsapp_phone_number_id, ig_user_id, fb_page_id')
       .eq('user_id', userId)
       .single();
 
@@ -2483,10 +2483,30 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
 
     // Envia ANTES de gravar: o wamid só existe depois da resposta da Meta, e é
     // ele que liga esta mensagem aos webhooks de entregue/lido.
-    const { ok: wSent, wamid: wWamid } =
-      await sendMessageComId(customerPhone, welcomeText, wPid || undefined, wToken, log);
-    if (wSent) log.info('boas-vindas enviadas', { action: 'welcome', wamid: wWamid });
-    else log.error('falha ao enviar boas-vindas', { action: 'welcome', phone: customerPhone });
+    //
+    // Este caminho é separado do envio final (seção 8) e precisa da mesma
+    // escolha de canal. Sem ela, a boas-vindas do Instagram ia pro WhatsApp com
+    // o IGSID no lugar do telefone — e o pior: a API do WhatsApp ACEITA um
+    // número longo qualquer e devolve wamid, então o log dizia "enviadas" e só
+    // o webhook de status revelava a falha, já com o "!" na tela do lojista.
+    let wSent = false;
+    let wWamid: string | null = null;
+
+    if (canal === 'whatsapp') {
+      const r = await sendMessageComId(customerPhone, welcomeText, wPid || undefined, wToken, log);
+      wSent = r.ok; wWamid = r.wamid;
+    } else {
+      const contaW = String(
+        (canal === 'instagram' ? wSettings?.ig_user_id : wSettings?.fb_page_id) ?? '',
+      );
+      const { data: tokW } = await supabase.rpc('get_meta_page_token', { p_user_id: userId, p_canal: canal });
+      const r = await enviarSocial(contaW, customerPhone, welcomeText, String(tokW ?? ''), canal as 'instagram' | 'messenger');
+      wSent = r.ok;
+      if (!r.ok) log.error('falha ao enviar boas-vindas no canal social', { action: 'welcome', canal, erro: r.erro });
+    }
+
+    if (wSent) log.info('boas-vindas enviadas', { action: 'welcome', canal, wamid: wWamid });
+    else log.error('falha ao enviar boas-vindas', { action: 'welcome', canal });
 
     const now = new Date().toISOString();
     await supabase.from('messages').insert({
