@@ -185,6 +185,31 @@ serve(async (req) => {
     convId = nova.id;
   }
 
+  // ── Eco: a loja respondeu pelo app do celular ──────────────────────────────
+  // Grava como atendente e passa a conversa para 'human'. Sem isso o vendedor
+  // responde pelo Instagram, o CRM não fica sabendo, e o bot continua
+  // atendendo em paralelo — dois interlocutores no mesmo cliente.
+  if (msg.isEco) {
+    const textoEco = msg.anexoUrl
+      ? `[imagem] ${msg.anexoUrl}${msg.texto ? `\n${msg.texto}` : ''}`
+      : msg.texto;
+
+    const { error: ecoErr } = await supabase.from('messages').insert({
+      conversation_id: convId,
+      role: 'agent',
+      content: textoEco,
+      wa_message_id: msg.mid || null,
+    });
+    if (ecoErr) console.error('[SW] falha ao salvar eco:', ecoErr.message);
+
+    await supabase.from('conversations')
+      .update({ status: 'human', last_message_at: agora })
+      .eq('id', convId);
+
+    console.log(`[SW] ${msg.canal}: resposta da loja pelo app (eco) — bot silenciado`);
+    return ok();
+  }
+
   // ── Salva a mensagem ───────────────────────────────────────────────────────
   // Foto vira o mesmo formato dos outros canais ([imagem] url), pro CRM
   // renderizar igual. A URL da Meta expira, então isso é provisório até a

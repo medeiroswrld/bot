@@ -41,6 +41,8 @@ export type MensagemSocial = {
   anexoUrl?: string;
   /** Resposta a story: a imagem do story que o cliente estava vendo. */
   storyUrl?: string;
+  /** true = a própria loja escreveu, pelo app do celular (coexistência). */
+  isEco?: boolean;
 };
 
 /**
@@ -65,9 +67,18 @@ export function parseSocial(payload: unknown): MensagemSocial | null {
 
     const msg = evento.message as Record<string, unknown> | undefined;
     if (!msg) return null;                 // curtida, leitura, entrega: não é mensagem
-    if (msg.is_echo === true) return null; // resposta da própria página
 
-    const de = String((evento.sender as Record<string, string>)?.id ?? '');
+    // Eco = a própria loja respondeu pelo app do celular. Descartar aqui (o que
+    // eu fazia antes) evita o bot responder a si mesmo, mas custa caro: a
+    // resposta do vendedor não entra no CRM e o bot continua atendendo por cima
+    // dele. É o mesmo problema que o smb_message_echoes resolveu no WhatsApp.
+    const isEco = msg.is_echo === true;
+
+    // Nos papéis: no eco quem interessa é o DESTINATÁRIO (o cliente); na
+    // mensagem normal, o remetente.
+    const remetente = String((evento.sender as Record<string, string>)?.id ?? '');
+    const destino   = String((evento.recipient as Record<string, string>)?.id ?? '');
+    const de = isEco ? destino : remetente;
     if (!de || de === contaId) return null;
 
     const texto = String(msg.text ?? '').trim();
@@ -93,7 +104,7 @@ export function parseSocial(payload: unknown): MensagemSocial | null {
 
     if (!texto && !anexoUrl && !storyUrl) return null;
 
-    return { canal, contaId, de, texto, mid: String(msg.mid ?? ''), anexoUrl, storyUrl };
+    return { canal, contaId, de, texto, mid: String(msg.mid ?? ''), anexoUrl, storyUrl, isEco };
   } catch {
     return null;
   }
