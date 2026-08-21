@@ -12,7 +12,20 @@
 //  - o endpoint de envio é o do remetente (page id / ig user id), com o
 //    destinatário no corpo.
 
-const GRAPH = 'https://graph.facebook.com/v20.0';
+// Dois hosts, e qual vale depende de COMO o canal foi conectado:
+//  - Instagram com login do Instagram  -> graph.instagram.com
+//  - Instagram com login do Facebook   -> graph.facebook.com
+//  - Messenger (sempre pela página)    -> graph.facebook.com
+//
+// Como o CRM atende várias lojas e cada uma pode ter sido conectada de um
+// jeito, tenta o host provável primeiro e cai no outro se falhar. O custo é uma
+// chamada extra só quando a primeira dá errado — bem melhor que exigir que o
+// lojista saiba qual fluxo usou.
+const HOST_IG = 'https://graph.instagram.com/v21.0';
+const HOST_FB = 'https://graph.facebook.com/v20.0';
+
+const hostsPara = (canal: CanalSocial): string[] =>
+  canal === 'instagram' ? [HOST_IG, HOST_FB] : [HOST_FB];
 
 export type CanalSocial = 'instagram' | 'messenger';
 
@@ -87,28 +100,31 @@ export async function enviarSocial(
   para: string,
   texto: string,
   token: string,
+  canal: CanalSocial = 'instagram',
 ): Promise<{ ok: boolean; erro?: string }> {
   if (!contaId || !para || !token) {
     return { ok: false, erro: 'contaId, destinatário e token são obrigatórios' };
   }
 
-  const res = await fetch(`${GRAPH}/${contaId}/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      recipient: { id: para },
-      message: { text: texto },
-      // RESPONSE mantém a janela de 24h. Sem a tag, mensagem fora da janela é
-      // recusada — e é o caso mais comum quando o cliente demora a voltar.
-      messaging_type: 'RESPONSE',
-    }),
+  const corpo = JSON.stringify({
+    recipient: { id: para },
+    message: { text: texto },
+    // RESPONSE mantém a janela de 24h. Sem a tag, mensagem fora da janela é
+    // recusada — e é o caso mais comum quando o cliente demora a voltar.
+    messaging_type: 'RESPONSE',
   });
 
-  if (!res.ok) {
-    const corpo = await res.text();
-    return { ok: false, erro: `HTTP ${res.status}: ${corpo.slice(0, 300)}` };
+  let ultimoErro = '';
+  for (const host of hostsPara(canal)) {
+    const res = await fetch(`${host}/${contaId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: corpo,
+    });
+    if (res.ok) return { ok: true };
+    ultimoErro = `HTTP ${res.status} em ${host}: ${(await res.text()).slice(0, 250)}`;
   }
-  return { ok: true };
+  return { ok: false, erro: ultimoErro };
 }
 
 /** Envia uma imagem por URL. */
@@ -117,21 +133,25 @@ export async function enviarImagemSocial(
   para: string,
   url: string,
   token: string,
+  canal: CanalSocial = 'instagram',
 ): Promise<{ ok: boolean; erro?: string }> {
-  const res = await fetch(`${GRAPH}/${contaId}/messages`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      recipient: { id: para },
-      message: { attachment: { type: 'image', payload: { url, is_reusable: true } } },
-      messaging_type: 'RESPONSE',
-    }),
+  const corpo = JSON.stringify({
+    recipient: { id: para },
+    message: { attachment: { type: 'image', payload: { url, is_reusable: true } } },
+    messaging_type: 'RESPONSE',
   });
-  if (!res.ok) {
-    const corpo = await res.text();
-    return { ok: false, erro: `HTTP ${res.status}: ${corpo.slice(0, 300)}` };
+
+  let ultimoErro = '';
+  for (const host of hostsPara(canal)) {
+    const res = await fetch(`${host}/${contaId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: corpo,
+    });
+    if (res.ok) return { ok: true };
+    ultimoErro = `HTTP ${res.status} em ${host}: ${(await res.text()).slice(0, 250)}`;
   }
-  return { ok: true };
+  return { ok: false, erro: ultimoErro };
 }
 
 /**
@@ -144,15 +164,21 @@ export async function enviarImagemSocial(
 export async function nomeDoUsuarioSocial(
   psid: string,
   token: string,
+  canal: CanalSocial = 'instagram',
 ): Promise<string> {
-  try {
-    const res = await fetch(`${GRAPH}/${psid}?fields=name,username`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) return '';
-    const j = await res.json() as { name?: string; username?: string };
-    return String(j?.name ?? j?.username ?? '').trim();
-  } catch {
-    return '';
+  for (const host of hostsPara(canal)) {
+    try {
+      const res = await fetch(`${host}/${psid}?fields=name,username`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      const j = await res.json() as { name?: string; username?: string };
+      const nome = String(j?.name ?? j?.username ?? '').trim();
+      if (nome) return nome;
+    } catch {
+      // host errado ou perfil sem nome público: tenta o próximo e, no fim,
+      // devolve vazio. Conversa sem nome é melhor que mensagem perdida.
+    }
   }
+  return '';
 }

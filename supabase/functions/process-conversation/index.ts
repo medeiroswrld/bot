@@ -1343,7 +1343,7 @@ async function executeTool(
         if (ctxCanal === 'whatsapp') {
           ok = await sendImage(customerPhone, url, pid, token, log);
         } else {
-          const r = await enviarImagemSocial(ctxContaId, customerPhone, url, ctxTokenSocial);
+          const r = await enviarImagemSocial(ctxContaId, customerPhone, url, ctxTokenSocial, ctxCanal as 'instagram' | 'messenger');
           ok = r.ok;
           if (!r.ok) log.error('falha ao enviar foto no canal social', { action: 'enviar_midia_carro', erro: r.erro });
         }
@@ -3120,7 +3120,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
       (canal === 'instagram' ? settings?.ig_user_id : settings?.fb_page_id) ?? '',
     );
     const { data: tokenPagina } = await supabase.rpc('get_meta_page_token', { p_user_id: userId, p_canal: canal });
-    const r = await enviarSocial(contaId, customerPhone, finalText, String(tokenPagina ?? ''));
+    const r = await enviarSocial(contaId, customerPhone, finalText, String(tokenPagina ?? ''), canal as 'instagram' | 'messenger');
     sent = r.ok;
     if (!r.ok) log.error('falha ao enviar no canal social', { action: 'send_final', canal, erro: r.erro });
   }
