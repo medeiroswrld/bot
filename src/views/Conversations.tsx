@@ -221,7 +221,11 @@ const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; cam
   // e "[imagem] url" com legenda na linha seguinte (enviada pelo cliente).
   // Antes o CRM mostrava a URL crua e o lojista tinha que copiar e colar no
   // navegador pra ver o que o cliente mandou.
-  const mMidia = String(msg.content ?? '').match(/^\[(foto|imagem|audio)\]\s*(https?:\/\/\S+)([\s\S]*)$/i);
+  // Instruções internas pro modelo (blocos "(sistema: ...)") não são conversa —
+  // são orientação nossa. Apareciam na tela do lojista, e chegaram a entrar num
+  // vídeo enviado à Meta. O modelo continua recebendo: o corte é só na exibição.
+  const semSistema = String(msg.content ?? '').replace(/\n?\(sistema:[\s\S]*?\)\s*$/i, '').trim();
+  const mMidia = semSistema.match(/^\[(foto|imagem|audio)\]\s*(https?:\/\/\S+)([\s\S]*)$/i);
   const midia = mMidia
     ? {
         ehAudio: mMidia[1].toLowerCase() === 'audio',
@@ -299,7 +303,7 @@ const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; cam
               <Mic size={13} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 4, opacity: 0.6 }} />
             </span>
           )}
-          {msg.content}
+          {semSistema || msg.content}
         </p>
         )}
         <p style={{ margin: '4px 0 0', fontSize: '0.65rem', color: timeColor, textAlign: 'right' }}>

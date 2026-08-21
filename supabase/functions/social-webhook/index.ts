@@ -330,7 +330,7 @@ serve(async (req) => {
       let conteudoFinal: string;
       if (copia?.url) {
         conteudoFinal = ehStory
-          ? `[imagem] ${copia.url}\n(sistema: o cliente respondeu a um story DA PRÓPRIA LOJA. O carro da imagem é do estoque de vocês. Identifique-o com consultar_estoque e responda direto o que ele perguntou. NÃO descreva a imagem, NÃO diga que está vendo uma foto e NÃO peça confirmação do modelo — a loja publicou esse story, então estranharia não reconhecer o próprio carro. Se ficar entre dois modelos parecidos, veja qual existe no estoque e siga com esse.${legenda ? ` Ele escreveu: "${legenda}".` : ''})`
+          ? `[imagem] ${copia.url}${legenda ? `\n${legenda}` : ''}\n(sistema: o cliente respondeu a um story DA PRÓPRIA LOJA. O carro da imagem é do estoque de vocês. Identifique-o com consultar_estoque e responda direto o que ele perguntou. NÃO descreva a imagem, NÃO diga que está vendo uma foto e NÃO peça confirmação do modelo: a loja publicou esse story, então estranharia não reconhecer o próprio carro. Se ficar entre dois modelos parecidos, veja qual existe no estoque e siga com esse.)`
           : `[imagem] ${copia.url}${legenda ? `\n${legenda}` : ''}`;
       } else if (copia && !copia.tipo.startsWith('image/') && ehStory && msg.storyId) {
         // Story em vídeo: o webhook manda a URL do vídeo, que o modelo não lê.
@@ -344,7 +344,7 @@ serve(async (req) => {
           if (thumb) {
             const copiaThumb = await copiarMidia(supabase, userId, convFinal, thumb);
             if (copiaThumb?.url) {
-              conteudoThumb = `[imagem] ${copiaThumb.url}\n(sistema: o cliente respondeu a um story DA PRÓPRIA LOJA (a imagem é um quadro do vídeo). O carro da imagem é do estoque de vocês. Identifique-o com consultar_estoque e responda direto o que ele perguntou. NÃO descreva a imagem, NÃO diga que está vendo uma foto e NÃO peça confirmação do modelo — a loja publicou esse story, então estranharia não reconhecer o próprio carro. Se ficar entre dois modelos parecidos, veja qual existe no estoque e siga com esse.${legenda ? ` Ele escreveu: "${legenda}".` : ''})`;
+              conteudoThumb = `[imagem] ${copiaThumb.url}${legenda ? `\n${legenda}` : ''}\n(sistema: o cliente respondeu a um story DA PRÓPRIA LOJA — a imagem é um quadro do vídeo. O carro da imagem é do estoque de vocês. Identifique-o com consultar_estoque e responda direto o que ele perguntou. NÃO descreva a imagem, NÃO diga que está vendo uma foto e NÃO peça confirmação do modelo: a loja publicou esse story, então estranharia não reconhecer o próprio carro. Se ficar entre dois modelos parecidos, veja qual existe no estoque e siga com esse.)`;
             }
           }
         } catch (e) {
