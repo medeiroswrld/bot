@@ -265,6 +265,48 @@ const Settings = () => {
         setTimeout(() => setSavedPay(false), 2000);
     };
 
+    // ── Instagram e Messenger ─────────────────────────────────────────────────
+    const [fbPageId, setFbPageId] = useState('');
+    const [igUserId, setIgUserId] = useState('');
+    const [metaTokenSet, setMetaTokenSet] = useState(false);
+    const [metaToken, setMetaToken] = useState('');
+    const [savingSocial, setSavingSocial] = useState(false);
+    const [socialMsg, setSocialMsg] = useState('');
+
+    const saveSocialIds = async () => {
+        if (!user?.id) return;
+        setSavingSocial(true); setSocialMsg('');
+        const { error } = await supabase
+            .from('company_settings')
+            .update({
+                // Vazio grava NULL, nao string vazia: o webhook procura a loja
+                // por esse ID, e string vazia casaria com qualquer coisa vazia.
+                fb_page_id: fbPageId.trim() || null,
+                ig_user_id: igUserId.trim() || null,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', user.id);
+        setSavingSocial(false);
+        setSocialMsg(error ? (error.message || 'Erro ao salvar.') : 'IDs salvos ✓');
+        if (!error) await refreshCompanySettings();
+    };
+
+    const saveMetaToken = async (remover = false) => {
+        if (!user?.id) return;
+        setSavingSocial(true); setSocialMsg('');
+        const corpo = remover ? { remove: true } : { token: metaToken.trim() };
+        const { data, error } = await supabase.functions.invoke('set-meta-token', { body: corpo });
+        setSavingSocial(false);
+        if (error || data?.error) {
+            setSocialMsg(await mensagemDoErro(error, data, 'Erro ao salvar token.'));
+            return;
+        }
+        setMetaToken('');
+        setMetaTokenSet(!remover);
+        setSocialMsg(remover ? 'Token removido.' : 'Token cadastrado ✓');
+        await refreshCompanySettings();
+    };
+
     // ── Contrato de venda ─────────────────────────────────────────────────────
     const [cnpj, setCnpj] = useState('');
     const [modeloContrato, setModeloContrato] = useState('');
@@ -472,6 +514,10 @@ const Settings = () => {
         const pay = Array.isArray(s.payment_methods) ? s.payment_methods : [];
         setPayMethods(pay.filter(m => PAYMENT_OPTIONS.includes(m)));
         setPayOther(pay.filter(m => !PAYMENT_OPTIONS.includes(m)).join(', '));
+        // Instagram / Messenger
+        setFbPageId(s.fb_page_id ?? '');
+        setIgUserId(s.ig_user_id ?? '');
+        setMetaTokenSet(s.meta_token_set === true);
         // Contrato
         setCnpj(s.cnpj ?? '');
         setModeloContrato(s.contract_template ?? '');
@@ -1091,6 +1137,97 @@ const Settings = () => {
                                 : savingPay ? 'Salvando...'
                                 : <><Save size={18} /> Salvar Formas de Pagamento</>}
                         </button>
+                    </div>
+                </section>
+            </div>
+
+            {/* -- Instagram e Messenger ---------------------------------------- */}
+            <div style={{ marginTop: '2rem' }}>
+                <section className="settings-section card">
+                    <div className="section-title">
+                        <MessageSquare size={20} />
+                        <h2>Instagram e Messenger</h2>
+                    </div>
+                    <div className="settings-form">
+                        <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
+                            O mesmo bot atende também no Direct do Instagram e no Messenger.
+                            Preencha só os canais que a loja usa — em branco, o canal fica desligado.
+                        </p>
+
+                        <div className="form-group">
+                            <label>ID da conta do Instagram</label>
+                            <input type="text" value={igUserId} placeholder="Ex: 17841400000000000"
+                                onChange={e => setIgUserId(e.target.value)} />
+                            <p style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
+                                É o ID da conta comercial ligada à página, não o @ do perfil.
+                            </p>
+                        </div>
+
+                        <div className="form-group">
+                            <label>ID da página do Facebook</label>
+                            <input type="text" value={fbPageId} placeholder="Ex: 100000000000000"
+                                onChange={e => setFbPageId(e.target.value)} />
+                        </div>
+
+                        <button className="btn-secondary" onClick={saveSocialIds} disabled={savingSocial}
+                            style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                            <Save size={16} /> Salvar IDs
+                        </button>
+
+                        <div className="form-group">
+                            <label>Token da página</label>
+                            {metaTokenSet && (
+                                <p style={{ fontSize: '0.8rem', color: '#15803d', display: 'flex', alignItems: 'center', gap: 5, margin: '0 0 6px' }}>
+                                    <CheckCircle size={14} /> Token cadastrado
+                                </p>
+                            )}
+                            <input type="password" value={metaToken} autoComplete="new-password"
+                                placeholder={metaTokenSet ? 'Deixe em branco para manter o atual' : 'Cole o token da página'}
+                                onChange={e => setMetaToken(e.target.value)} />
+                            <p style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)', marginTop: 4 }}>
+                                É o mesmo token para os dois canais — o Instagram responde pelo token
+                                da página à qual a conta está ligada. Fica criptografado e nunca é exibido de volta.
+                            </p>
+                        </div>
+
+                        {socialMsg && (
+                            <p style={{ fontSize: '0.82rem', color: socialMsg.includes('✓') ? '#15803d' : '#dc2626' }}>
+                                {socialMsg}
+                            </p>
+                        )}
+
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            <button className="btn-primary" onClick={() => saveMetaToken(false)}
+                                disabled={savingSocial || !metaToken.trim()}
+                                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <Save size={18} /> Salvar token
+                            </button>
+                            {metaTokenSet && (
+                                <button className="btn-secondary" onClick={() => saveMetaToken(true)}
+                                    disabled={savingSocial} style={{ color: '#dc2626' }}>
+                                    Remover token
+                                </button>
+                            )}
+                        </div>
+
+                        <div style={{ marginTop: '1.25rem', padding: '10px 12px', borderRadius: 8,
+                                      background: 'var(--input-bg)', border: '1px solid var(--border)' }}>
+                            <p style={{ margin: '0 0 6px', fontSize: '0.8rem', fontWeight: 600 }}>
+                                Falta configurar na Meta
+                            </p>
+                            <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                                No app da Meta, adicione os produtos <strong>Messenger</strong> e{' '}
+                                <strong>Instagram</strong> e aponte o webhook dos dois para:
+                            </p>
+                            <code style={{ display: 'block', marginTop: 6, fontSize: '0.72rem', wordBreak: 'break-all',
+                                           padding: '6px 8px', borderRadius: 6, background: 'var(--bg-main)' }}>
+                                {import.meta.env.VITE_SUPABASE_URL}/functions/v1/social-webhook
+                            </code>
+                            <p style={{ margin: '6px 0 0', fontSize: '0.76rem', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                                O token de verificação é o mesmo já usado no WhatsApp. Assine o campo{' '}
+                                <strong>messages</strong> nos dois produtos.
+                            </p>
+                        </div>
                     </div>
                 </section>
             </div>

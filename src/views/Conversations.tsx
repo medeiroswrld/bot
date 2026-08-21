@@ -113,6 +113,7 @@ const ConvItem = React.memo(function ConvItem({
           <span style={{ fontWeight: 600, fontSize: '0.875rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {conv.customer_name ?? conv.customer_phone}
           </span>
+          <CanalBadge canal={(conv as { channel?: string }).channel} />
           <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', flexShrink: 0 }}>
             {relativeTime(conv.last_message_at)}
           </span>
@@ -159,6 +160,29 @@ export type CampanhaInfo = { nome: string; template: string };
  * antiga, ou envio pelo provider que não devolve id) não mostra nada, em vez de
  * mostrar um estado falso.
  */
+// Canal de origem. Só aparece quando NÃO é WhatsApp: marcar o canal
+// majoritário em toda linha seria ruído — o que informa é a exceção.
+const CANAIS: Record<string, { rotulo: string; cor: string; fundo: string }> = {
+  instagram: { rotulo: 'Instagram', cor: '#c2410c', fundo: '#ffedd5' },
+  messenger: { rotulo: 'Messenger', cor: '#1d4ed8', fundo: '#dbeafe' },
+};
+
+const CanalBadge = ({ canal }: { canal?: string | null }) => {
+  const c = CANAIS[String(canal ?? '')];
+  if (!c) return null;
+  return (
+    <span
+      title={`Conversa veio do ${c.rotulo}`}
+      style={{
+        fontSize: '0.62rem', fontWeight: 700, padding: '1px 6px', borderRadius: 999,
+        background: c.fundo, color: c.cor, flexShrink: 0,
+      }}
+    >
+      {c.rotulo}
+    </span>
+  );
+};
+
 const VistoWhats = ({ status, erro }: { status: string | null; erro?: string | null }) => {
   if (!status) return null;
 
@@ -1019,8 +1043,15 @@ export default function Conversations() {
               </div>
               <div>
                 <p style={{ margin: 0, fontWeight: 600, fontSize: '0.9rem' }}>{selectedConv.customer_name ?? 'Sem nome'}</p>
-                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  <PhoneCall size={11} style={{ marginRight: 3 }} />{selectedConv.customer_phone}
+                <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  {/* Nos canais sociais customer_phone guarda o ID interno do
+                      usuário, não um telefone — mostrar aquilo como "telefone"
+                      confundiria o vendedor. */}
+                  {CANAIS[String((selectedConv as { channel?: string }).channel ?? '')] ? (
+                    <CanalBadge canal={(selectedConv as { channel?: string }).channel} />
+                  ) : (
+                    <><PhoneCall size={11} />{selectedConv.customer_phone}</>
+                  )}
                 </p>
               </div>
               <StatusBadge status={selectedConv.status} />
