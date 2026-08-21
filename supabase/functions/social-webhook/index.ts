@@ -60,17 +60,30 @@ serve(async (req) => {
   const rawBody = await req.text();
 
   // ── Assinatura HMAC ────────────────────────────────────────────────────────
-  const appSecret = Deno.env.get('WHATSAPP_APP_SECRET') ?? '';
-  if (!appSecret) {
-    console.error('[SW] WHATSAPP_APP_SECRET não configurado');
+  // Aceita mais de um segredo: o app do Instagram tem chave secreta PRÓPRIA,
+  // separada da do app do Facebook. Qual deles assina depende de como o canal
+  // foi configurado, e conferir só um recusaria tudo — com 401 e sem pista.
+  const segredos = [
+    Deno.env.get('INSTAGRAM_APP_SECRET') ?? '',
+    Deno.env.get('WHATSAPP_APP_SECRET') ?? '',
+  ].filter(Boolean);
+
+  if (!segredos.length) {
+    console.error('[SW] nenhum app secret configurado');
     return err(500, 'Webhook não configurado');
   }
+
   const sig = req.headers.get('x-hub-signature-256') ?? '';
-  const esperado = 'sha256=' + (await computeHmac(appSecret, rawBody));
-  const a = new TextEncoder().encode(sig);
-  const b = new TextEncoder().encode(esperado);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) {
-    console.warn('[SW] assinatura inválida');
+  const recebida = new TextEncoder().encode(sig);
+  let confere = false;
+  for (const seg of segredos) {
+    const esp = new TextEncoder().encode('sha256=' + (await computeHmac(seg, rawBody)));
+    if (recebida.length === esp.length && timingSafeEqual(recebida, esp)) { confere = true; break; }
+  }
+  if (!confere) {
+    // Diz quantos segredos foram testados: "inválida" com um segredo só e
+    // "inválida" com dois são diagnósticos diferentes.
+    console.warn(`[SW] assinatura inválida (testados ${segredos.length} segredo(s))`);
     return err(401, 'Unauthorized');
   }
 
