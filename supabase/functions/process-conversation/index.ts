@@ -1689,7 +1689,13 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
     : null;
   // cfg null (coluna nunca configurada) → tudo ON, igual ao default da migration.
   const tradeInKeys = (['modelo', 'ano', 'km', 'tempo_dono', 'nota', 'pagamento'] as const)
-    .filter((k) => tradeInCfg ? tradeInCfg[k] !== false : true);
+    .filter((k) => tradeInCfg ? tradeInCfg[k] !== false : true)
+    // Mesma regra do FORD financeiro: nos canais sociais a pergunta de pagamento
+    // só entra depois que o cliente tocar no assunto. Eu havia travado só o FORD
+    // e esta escapou — ela traz "quer trocar diretinho ou pagar uma diferença?"
+    // e "à vista ou financiar?", que é exatamente o que não pode aparecer na
+    // primeira resposta de quem só perguntou o preço.
+    .filter((k) => k !== 'pagamento' || canal === 'whatsapp' || falouDePagamento);
   const tradeInPerguntas = tradeInKeys
     .map((k, i) => `${i + 1}. ${TRADE_IN_LINES[k]}`)
     .join('\n');
