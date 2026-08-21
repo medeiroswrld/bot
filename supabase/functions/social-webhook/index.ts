@@ -144,16 +144,27 @@ serve(async (req) => {
   const agora = new Date().toISOString();
   let convId = conv?.id as string | undefined;
 
-  if (!convId) {
-    // Nome só na criação: uma consulta por mensagem seria desperdício, e o nome
-    // não muda.
-    let nome = '';
+  // Busca o nome quando ele FALTA — na criação, ou numa conversa antiga que
+  // ficou sem. Antes só tentava ao criar: se a primeira tentativa falhasse (foi
+  // o caso, com o host errado), a conversa ficava para sempre exibindo o ID
+  // numérico. Como só dispara quando o nome está vazio, não vira consulta por
+  // mensagem.
+  const precisaNome = !convId || !conv?.customer_name;
+  let nome = '';
+  if (precisaNome) {
     try {
       const { data: tok } = await supabase.rpc('get_meta_page_token', { p_user_id: userId, p_canal: msg.canal });
       if (tok) nome = await nomeDoUsuarioSocial(msg.de, String(tok), msg.canal);
     } catch (e) {
       console.warn('[SW] não consegui o nome do usuário:', (e as Error)?.message);
     }
+  }
+
+  if (convId && nome && !conv?.customer_name) {
+    await supabase.from('conversations').update({ customer_name: nome }).eq('id', convId);
+  }
+
+  if (!convId) {
 
     const { data: nova, error: novaErr } = await supabase
       .from('conversations')
