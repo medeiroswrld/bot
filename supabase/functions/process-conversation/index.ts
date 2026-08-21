@@ -1723,7 +1723,21 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
         : (whatsappDaLoja
             ? `\n- Se o cliente pedir o WhatsApp, passe **${whatsappDaLoja}** — é o número de vendas da loja.`
               + `\n- Convide para continuar por lá quando fizer sentido (mandar fotos, simulação, agendar), mas só depois de já ter ajudado aqui. Não empurre logo na primeira mensagem.`
-            : `\n- O WhatsApp da loja não está cadastrado no sistema. Se o cliente pedir, diga que vai confirmar com a equipe e chame chamar_atendente. NÃO invente número.`));
+            : `\n- O WhatsApp da loja não está cadastrado no sistema. Se o cliente pedir, diga que vai confirmar com a equipe e chame chamar_atendente. NÃO invente número.`))
+    // Ritmo do canal. Quem chega pelo Direct vem de story ou anúncio, com uma
+    // pergunta curta e específica — é contato mais frio que o do WhatsApp.
+    // Abrir com financiamento nesse ponto queima o lead, que foi o que
+    // aconteceu no teste de 21/08.
+    + (canal === 'whatsapp' ? '' : `
+
+### Ritmo neste canal
+
+Quem chega por aqui costuma vir de um story ou anúncio e faz uma pergunta curta e específica — "quanto?", "tem esse?". É um contato mais frio e mais curto que o do WhatsApp.
+
+- **RESPONDA A PERGUNTA PRIMEIRO.** Preço, disponibilidade, ano, km: o que ele pediu, direto, antes de qualquer pergunta sua.
+- Depois de responder, faça **no máximo UMA** pergunta, e leve. Ex.: "tá procurando pra uso na cidade ou pra estrada?"
+- **NÃO fale de financiamento, entrada, parcela nem troca na primeira resposta.** Isso vem depois, e só se ele demonstrar interesse real no carro. Puxar pagamento logo de cara faz o cliente sumir.
+- Mensagens mais curtas que no WhatsApp: duas ou três linhas bastam.`);
 
   const equipeBlock = (equipe.length || contatosSetor.length)
     ? `\n\n## Equipe da loja e outros setores`
