@@ -8,7 +8,7 @@
 // Mesma app da Meta, mesmo app secret — só muda o produto e a URL de callback.
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { parseSocial, nomeDoUsuarioSocial } from '../_shared/social.ts';
+import { parseSocial, nomeDoUsuarioSocial, miniaturaDoStory } from '../_shared/social.ts';
 
 const ok  = () => new Response('EVENT_RECEIVED', { status: 200 });
 const err = (s: number, m: string) => new Response(m, { status: s });
@@ -306,6 +306,28 @@ serve(async (req) => {
         conteudoFinal = ehStory
           ? `[imagem] ${copia.url}\n(o cliente respondeu a ESTE story da loja${legenda ? `, escrevendo: "${legenda}"` : ', sem escrever nada'})`
           : `[imagem] ${copia.url}${legenda ? `\n${legenda}` : ''}`;
+      } else if (copia && !copia.tipo.startsWith('image/') && ehStory && msg.storyId) {
+        // Story em vídeo: o webhook manda a URL do vídeo, que o modelo não lê.
+        // Mas o objeto do story tem a MINIATURA — o mesmo quadro que aparece na
+        // conversa quando alguém responde um story em vídeo. Com ela o bot volta
+        // a enxergar o carro, em vez de ter que perguntar.
+        let conteudoThumb = '';
+        try {
+          const { data: tokT } = await supabase.rpc('get_meta_page_token', { p_user_id: userId, p_canal: msg.canal });
+          const thumb = tokT ? await miniaturaDoStory(String(msg.storyId), String(tokT), msg.canal) : '';
+          if (thumb) {
+            const copiaThumb = await copiarMidia(supabase, userId, convFinal, thumb);
+            if (copiaThumb?.url) {
+              conteudoThumb = `[imagem] ${copiaThumb.url}\n(o cliente respondeu a ESTE story da loja — a imagem é um quadro do vídeo${legenda ? `, e ele escreveu: "${legenda}"` : ''})`;
+            }
+          }
+        } catch (e) {
+          console.warn('[SW] miniatura do story indisponível:', (e as Error)?.message);
+        }
+
+        // Sem miniatura, cai no texto: melhor perguntar que chutar o carro.
+        conteudoFinal = conteudoThumb
+          || `(sistema: o cliente respondeu a um story EM VÍDEO da loja${legenda ? `, escrevendo: "${legenda}"` : ', sem escrever nada'}. Você NÃO consegue ver o vídeo. Pergunte de forma natural qual carro ele viu — não invente nem chute o modelo.)`;
       } else if (copia && !copia.tipo.startsWith('image/')) {
         // Vídeo: não há imagem pra ler. Entrega o contexto em texto e manda
         // perguntar, em vez de deixar o bot chutar o modelo do carro.

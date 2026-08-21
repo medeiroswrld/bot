@@ -2518,6 +2518,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
       const { data: tokW } = await supabase.rpc('get_meta_page_token', { p_user_id: userId, p_canal: canal });
       const r = await enviarSocial(contaW, customerPhone, welcomeText, String(tokW ?? ''), canal as 'instagram' | 'messenger');
       wSent = r.ok;
+      wWamid = r.mid ?? null;
       if (!r.ok) log.error('falha ao enviar boas-vindas no canal social', { action: 'welcome', canal, erro: r.erro });
     }
 
@@ -3159,6 +3160,10 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     const { data: tokenPagina } = await supabase.rpc('get_meta_page_token', { p_user_id: userId, p_canal: canal });
     const r = await enviarSocial(contaId, customerPhone, finalText, String(tokenPagina ?? ''), canal as 'instagram' | 'messenger');
     sent = r.ok;
+    // Guarda o id da mensagem enviada: e o que faz o webhook reconhecer o eco
+    // como sendo NOSSO e descartar. Sem isso o bot se marca como atendente e a
+    // conversa vai pra 'humano' — ele se cala depois de cada resposta.
+    wamid = r.mid ?? null;
     if (!r.ok) log.error('falha ao enviar no canal social', { action: 'send_final', canal, erro: r.erro });
   }
 

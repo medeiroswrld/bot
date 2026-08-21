@@ -41,6 +41,8 @@ export type MensagemSocial = {
   anexoUrl?: string;
   /** Resposta a story: a imagem do story que o cliente estava vendo. */
   storyUrl?: string;
+  /** ID do story respondido — é por ele que se pede a miniatura, quando é vídeo. */
+  storyId?: string;
   /** true = a própria loja escreveu, pelo app do celular (coexistência). */
   isEco?: boolean;
 };
@@ -100,11 +102,13 @@ export function parseSocial(payload: unknown): MensagemSocial | null {
     let storyUrl: string | undefined;
     const respostaA = msg.reply_to as Record<string, unknown> | undefined;
     const story = respostaA?.story as Record<string, string> | undefined;
+    let storyId: string | undefined;
     if (story?.url) storyUrl = story.url;
+    if (story?.id) storyId = String(story.id);
 
     if (!texto && !anexoUrl && !storyUrl) return null;
 
-    return { canal, contaId, de, texto, mid: String(msg.mid ?? ''), anexoUrl, storyUrl, isEco };
+    return { canal, contaId, de, texto, mid: String(msg.mid ?? ''), anexoUrl, storyUrl, storyId, isEco };
   } catch {
     return null;
   }
@@ -123,7 +127,7 @@ export async function enviarSocial(
   texto: string,
   token: string,
   canal: CanalSocial = 'instagram',
-): Promise<{ ok: boolean; erro?: string }> {
+): Promise<{ ok: boolean; erro?: string; mid?: string }> {
   if (!contaId || !para || !token) {
     return { ok: false, erro: 'contaId, destinatário e token são obrigatórios' };
   }
@@ -143,10 +147,47 @@ export async function enviarSocial(
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: corpo,
     });
-    if (res.ok) return { ok: true };
+    if (res.ok) {
+      // Guarda o message_id: e ele que permite reconhecer, la no webhook, que
+      // o eco que voltou e da NOSSA propria mensagem. Sem isso o bot marca a
+      // si mesmo como atendente e a conversa vai pra 'humano' — o bot se cala
+      // depois de cada resposta.
+      const j = await res.json().catch(() => ({})) as { message_id?: string };
+      return { ok: true, mid: j?.message_id };
+    }
     ultimoErro = `HTTP ${res.status} em ${host}: ${(await res.text()).slice(0, 250)}`;
   }
   return { ok: false, erro: ultimoErro };
+}
+
+/**
+ * Miniatura de um story em vídeo.
+ *
+ * O webhook manda a URL do VÍDEO, que o modelo não lê. Mas o objeto do story
+ * tem thumbnail_url — um quadro em JPEG, que é exatamente o que aparece na
+ * conversa quando alguém responde um story em vídeo. Com ela o bot volta a
+ * enxergar o carro.
+ */
+export async function miniaturaDoStory(
+  storyId: string,
+  token: string,
+  canal: CanalSocial = 'instagram',
+): Promise<string> {
+  for (const host of hostsPara(canal)) {
+    try {
+      const res = await fetch(`${host}/${storyId}?fields=media_type,media_url,thumbnail_url`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      const j = await res.json() as { media_type?: string; media_url?: string; thumbnail_url?: string };
+      // thumbnail_url só existe em vídeo; em foto o próprio media_url serve.
+      const url = j?.thumbnail_url || (j?.media_type === 'IMAGE' ? j?.media_url : '');
+      if (url) return String(url);
+    } catch {
+      // host errado ou story expirado: tenta o próximo e desiste em silêncio.
+    }
+  }
+  return '';
 }
 
 /** Envia uma imagem por URL. */
