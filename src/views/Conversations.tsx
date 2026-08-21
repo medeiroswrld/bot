@@ -347,6 +347,10 @@ export default function Conversations() {
   const [sending, setSending]             = useState(false);
   const [agentInput, setAgentInput]       = useState('');
   const [filter, setFilter]               = useState<FilterValue>('');
+  // Filtro de CANAL, separado do de status. Sao perguntas diferentes ("quem
+  // precisa de mim?" e "como esta o Instagram?") e juntar num controle so
+  // obrigaria a escolher entre elas.
+  const [filtroCanal, setFiltroCanal]     = useState<string>('todos');
   const [searchRaw, setSearchRaw]         = useState('');
   const [search, setSearch]               = useState('');
   const [alertConvIds, setAlertConvIds]   = useState<Set<string>>(new Set());
@@ -917,9 +921,20 @@ export default function Conversations() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAgentMessage(); }
   };
 
+  // Quantos canais a loja realmente usa. Mostrar o filtro numa loja que só tem
+  // WhatsApp seria oferecer uma escolha que não existe.
+  const temMaisDeUmCanal = new Set(
+    conversations.map((c) => String((c as { channel?: string }).channel ?? 'whatsapp')),
+  ).size > 1;
+
   // ── filtered list ─────────────────────────────────────────────────────────
 
   const filtered = conversations.filter((c) => {
+    if (filtroCanal !== 'todos') {
+      // Conversa antiga pode nao ter canal gravado; nesses casos e WhatsApp.
+      const canalDaConversa = String((c as { channel?: string }).channel ?? 'whatsapp');
+      if (canalDaConversa !== filtroCanal) return false;
+    }
     if (filter && c.status !== filter) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -999,6 +1014,24 @@ export default function Conversations() {
               </button>
             ))}
           </div>
+
+          {/* Canais. Só aparece quando a loja tem mais de um — numa loja só de
+              WhatsApp, o filtro seria um controle inútil ocupando espaço. */}
+          {temMaisDeUmCanal && (
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+              {[
+                { v: 'todos',     l: 'Todos os canais' },
+                { v: 'whatsapp',  l: 'WhatsApp' },
+                { v: 'instagram', l: 'Instagram' },
+                { v: 'messenger', l: 'Messenger' },
+              ].map((opt) => (
+                <button key={opt.v} type="button" onClick={() => setFiltroCanal(opt.v)}
+                  style={{ padding: '3px 8px', fontSize: '0.7rem', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--border)', background: filtroCanal === opt.v ? 'var(--primary)' : 'transparent', color: filtroCanal === opt.v ? '#fff' : 'var(--text-secondary)', fontWeight: filtroCanal === opt.v ? 600 : 400 }}>
+                  {opt.l}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {filtered.length === 0

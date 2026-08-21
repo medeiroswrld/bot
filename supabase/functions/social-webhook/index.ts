@@ -218,8 +218,19 @@ serve(async (req) => {
   // estoque, então a imagem do story dá a ele exatamente o contexto que falta.
   // A legenda diz que é story pra ele não confundir com uma foto que o próprio
   // cliente tirou (o que mudaria a resposta — seria carro de troca, não de venda).
+  // Story pode ser FOTO ou VÍDEO, e a diferença importa: como imagem, o bot
+  // consegue ver o carro; como vídeo, não — a leitura de imagem rejeita a URL e
+  // o bot cai na mensagem de erro, que foi o que aconteceu no teste de 21/08.
+  // Detecta pelo caminho da URL, ignorando os parâmetros da CDN.
+  const caminhoStory = String(msg.storyUrl ?? '').split('?')[0].toLowerCase();
+  const storyEhVideo = /\.(mp4|mov|m4v|webm)$/.test(caminhoStory);
+
   const conteudo = msg.storyUrl
-    ? `[imagem] ${msg.storyUrl}\n(o cliente respondeu a ESTE story da loja${msg.texto ? `, escrevendo: "${msg.texto}"` : ', sem escrever nada'})`
+    ? (storyEhVideo
+        // Sem imagem para ler: entrega o contexto em texto e instrui a
+        // perguntar, em vez de deixar o bot adivinhar ou errar o carro.
+        ? `(sistema: o cliente respondeu a um story EM VÍDEO da loja${msg.texto ? `, escrevendo: "${msg.texto}"` : ', sem escrever nada'}. Você não consegue ver o vídeo. Pergunte de forma natural qual carro ele viu — não invente nem chute o modelo.)`
+        : `[imagem] ${msg.storyUrl}\n(o cliente respondeu a ESTE story da loja${msg.texto ? `, escrevendo: "${msg.texto}"` : ', sem escrever nada'})`)
     : msg.anexoUrl
       ? `[imagem] ${msg.anexoUrl}${msg.texto ? `\n${msg.texto}` : ''}`
       : msg.texto;
