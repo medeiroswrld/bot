@@ -243,6 +243,32 @@ serve(async (req) => {
       ? `[imagem] ${msg.anexoUrl}${msg.texto ? `\n${msg.texto}` : ''}`
       : msg.texto;
 
+    // Segunda trava, por CONTEÚDO. A primeira (dedup pelo mid) só funciona se
+    // todo caminho de envio lembrar de guardar o id — e já esqueci uma vez, o
+    // das fotos: 7 ecos não reconhecidos entregaram a conversa pro atendente
+    // sozinha. Aqui não depende de lembrar: se nós mandamos o mesmo texto há
+    // pouco, o eco é nosso.
+    //
+    // Janela curta de propósito: se o vendedor repetir a mesma frase horas
+    // depois, aí é mensagem de verdade e deve marcar a conversa.
+    if (textoEco) {
+      const doisMinAtras = new Date(Date.now() - 120000).toISOString();
+      const { data: nossa } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', convId)
+        .in('role', ['bot', 'agent'])
+        .eq('content', textoEco)
+        .gte('created_at', doisMinAtras)
+        .limit(1)
+        .maybeSingle();
+
+      if (nossa) {
+        console.log('[SW] eco da propria mensagem — ignorado');
+        return ok();
+      }
+    }
+
     const { error: ecoErr } = await supabase.from('messages').insert({
       conversation_id: convId,
       role: 'agent',

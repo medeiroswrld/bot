@@ -1340,17 +1340,22 @@ async function executeTool(
         // no lugar do telefone: falharia calado e o cliente ficaria sem a foto
         // depois de o bot dizer que ia mandar.
         let ok: boolean;
+        let midFoto: string | null = null;
         if (ctxCanal === 'whatsapp') {
           ok = await sendImage(customerPhone, url, pid, token, log);
         } else {
           const r = await enviarImagemSocial(ctxContaId, customerPhone, url, ctxTokenSocial, ctxCanal as 'instagram' | 'messenger');
           ok = r.ok;
+          // Guarda o id: o eco de cada foto volta e, sem reconhecer, marca a
+          // conversa como humana — o bot se entregava sozinho ao mandar galeria.
+          midFoto = r.mid ?? null;
           if (!r.ok) log.error('falha ao enviar foto no canal social', { action: 'enviar_midia_carro', erro: r.erro });
         }
         if (ok) {
           fotosEnviadas++;
           await supabase.from('messages').insert({
             conversation_id: conversationId, role: 'bot', content: `[foto] ${url}`,
+            ...(midFoto ? { wa_message_id: midFoto } : {}),
           });
           // Pausa curta pra chegarem na ordem certa no aparelho do cliente.
           await new Promise((r) => setTimeout(r, 700));

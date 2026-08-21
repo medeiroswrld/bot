@@ -268,6 +268,10 @@ async function acharOuCriarConversa(
       .from('conversations')
       .select('*')
       .eq('user_id', userId)
+      // Filtra o canal: depois do multicanal, um PSID de Instagram tambem e um
+      // numero longo, e sem isto uma mensagem de WhatsApp poderia se agarrar
+      // numa conversa de outro canal.
+      .eq('channel', 'whatsapp')
       .in('customer_phone', variantes)
       .order('last_message_at', { ascending: false, nullsFirst: false })
       .limit(1)
@@ -295,8 +299,20 @@ async function acharOuCriarConversa(
   const { data: nova, error } = await supabase
     .from('conversations')
     .upsert(
-      { user_id: userId, customer_phone: from, customer_name: senderName || null, last_message_at: now },
-      { onConflict: 'user_id,customer_phone' },
+      // channel explicito: a migration 037 trocou a chave unica de
+      // (user_id, customer_phone) para (user_id, channel, customer_phone), pra
+      // o mesmo telefone poder existir em canais diferentes. Sem incluir o
+      // canal aqui, o ON CONFLICT nao acha constraint nenhuma (42P10), o upsert
+      // falha e a mensagem do cliente e DESCARTADA — foi o que derrubou o
+      // WhatsApp em 21/08, no instante em que a 037 rodou.
+      {
+        user_id: userId,
+        channel: 'whatsapp',
+        customer_phone: from,
+        customer_name: senderName || null,
+        last_message_at: now,
+      },
+      { onConflict: 'user_id,channel,customer_phone' },
     )
     .select()
     .single();

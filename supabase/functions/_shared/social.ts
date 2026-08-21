@@ -197,7 +197,7 @@ export async function enviarImagemSocial(
   url: string,
   token: string,
   canal: CanalSocial = 'instagram',
-): Promise<{ ok: boolean; erro?: string }> {
+): Promise<{ ok: boolean; erro?: string; mid?: string }> {
   const corpo = JSON.stringify({
     recipient: { id: para },
     message: { attachment: { type: 'image', payload: { url, is_reusable: true } } },
@@ -211,7 +211,13 @@ export async function enviarImagemSocial(
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: corpo,
     });
-    if (res.ok) return { ok: true };
+    if (res.ok) {
+      // O mid tambem e necessario aqui, nao so no texto: cada foto enviada gera
+      // um eco, e eco nao reconhecido marca a conversa como humana. Com 7 fotos,
+      // o bot se entregava pro atendente sozinho.
+      const j = await res.json().catch(() => ({})) as { message_id?: string };
+      return { ok: true, mid: j?.message_id };
+    }
     ultimoErro = `HTTP ${res.status} em ${host}: ${(await res.text()).slice(0, 250)}`;
   }
   return { ok: false, erro: ultimoErro };
