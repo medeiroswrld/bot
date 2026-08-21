@@ -39,6 +39,8 @@ export type MensagemSocial = {
   mid: string;
   /** Anexo (foto) quando houver — a URL da Meta expira, então é copiada depois. */
   anexoUrl?: string;
+  /** Resposta a story: a imagem do story que o cliente estava vendo. */
+  storyUrl?: string;
 };
 
 /**
@@ -80,9 +82,18 @@ export function parseSocial(payload: unknown): MensagemSocial | null {
       if (payloadAnexo?.url) anexoUrl = payloadAnexo.url;
     }
 
-    if (!texto && !anexoUrl) return null;
+    // Resposta a STORY. Vem com a referência ao story respondido, e a imagem
+    // dele é justamente o carro que o cliente está vendo. Sem isso o bot recebe
+    // só "quanto?" e não tem como saber de qual veículo — que é a pergunta mais
+    // comum vinda de story.
+    let storyUrl: string | undefined;
+    const respostaA = msg.reply_to as Record<string, unknown> | undefined;
+    const story = respostaA?.story as Record<string, string> | undefined;
+    if (story?.url) storyUrl = story.url;
 
-    return { canal, contaId, de, texto, mid: String(msg.mid ?? ''), anexoUrl };
+    if (!texto && !anexoUrl && !storyUrl) return null;
+
+    return { canal, contaId, de, texto, mid: String(msg.mid ?? ''), anexoUrl, storyUrl };
   } catch {
     return null;
   }

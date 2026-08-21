@@ -189,9 +189,15 @@ serve(async (req) => {
   // Foto vira o mesmo formato dos outros canais ([imagem] url), pro CRM
   // renderizar igual. A URL da Meta expira, então isso é provisório até a
   // cópia pro Storage — que fica para a próxima etapa.
-  const conteudo = msg.anexoUrl
-    ? `[imagem] ${msg.anexoUrl}${msg.texto ? `\n${msg.texto}` : ''}`
-    : msg.texto;
+  // Resposta a story entra como IMAGEM: o bot já sabe ler foto e cruzar com o
+  // estoque, então a imagem do story dá a ele exatamente o contexto que falta.
+  // A legenda diz que é story pra ele não confundir com uma foto que o próprio
+  // cliente tirou (o que mudaria a resposta — seria carro de troca, não de venda).
+  const conteudo = msg.storyUrl
+    ? `[imagem] ${msg.storyUrl}\n(o cliente respondeu a ESTE story da loja${msg.texto ? `, escrevendo: "${msg.texto}"` : ', sem escrever nada'})`
+    : msg.anexoUrl
+      ? `[imagem] ${msg.anexoUrl}${msg.texto ? `\n${msg.texto}` : ''}`
+      : msg.texto;
 
   const { error: msgErr } = await supabase.from('messages').insert({
     conversation_id: convId,

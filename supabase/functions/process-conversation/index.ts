@@ -1600,7 +1600,7 @@ async function executeTool(
 
 interface Faq { question: string; answer: string }
 
-function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger): string {
+function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger, canal = 'whatsapp'): string {
   const company = String(settings.company_name        ?? 'nossa concessionária');
   const address = String(settings.address             ?? 'não informado');
   const phone   = String(settings.phone_number        ?? 'não informado');
@@ -1708,6 +1708,22 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
     .map((c) => `- ${String(c.setor ?? 'Setor').trim()}: ${String(c.telefone).trim()}`
       + (c.quando_usar ? ` — encaminhe quando: ${String(c.quando_usar).trim()}` : ''))
     .join('\n');
+
+  // Em que canal esta conversa acontece. Sem isto o bot respondia "esse aqui e
+  // o WhatsApp de vendas" DENTRO do Instagram — afirmacao falsa, e o cliente
+  // que pediu o WhatsApp continuava sem o numero.
+  const whatsappDaLoja = String(settings.whatsapp_number ?? '').trim();
+  const NOME_CANAL: Record<string, string> = {
+    whatsapp: 'WhatsApp', instagram: 'Direct do Instagram', messenger: 'Messenger',
+  };
+  const canalBlock = `\n\n## Onde esta conversa esta acontecendo\n\n`
+    + `Você está atendendo pelo **${NOME_CANAL[canal] ?? 'WhatsApp'}**. Nunca diga que está em outro canal.`
+    + (canal === 'whatsapp'
+        ? `\n- Se o cliente pedir "o WhatsApp de vocês", ele JÁ está falando com você por aqui. Diga isso, sem passar outro número de vendas.`
+        : (whatsappDaLoja
+            ? `\n- Se o cliente pedir o WhatsApp, passe **${whatsappDaLoja}** — é o número de vendas da loja.`
+              + `\n- Convide para continuar por lá quando fizer sentido (mandar fotos, simulação, agendar), mas só depois de já ter ajudado aqui. Não empurre logo na primeira mensagem.`
+            : `\n- O WhatsApp da loja não está cadastrado no sistema. Se o cliente pedir, diga que vai confirmar com a equipe e chame chamar_atendente. NÃO invente número.`));
 
   const equipeBlock = (equipe.length || contatosSetor.length)
     ? `\n\n## Equipe da loja e outros setores`
@@ -1966,7 +1982,7 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
     faqs.length > 0
       ? `\n\n## Perguntas frequentes — use estas respostas quando o cliente perguntar algo relacionado\n\n${faqs.map((f) => `P: ${f.question}\nR: ${f.answer}`).join('\n\n')}`
       : ''
-  }${paymentBlock}${fordBlock}${tradeInBlock}${equipeBlock}${visitReminderBlock}`;
+  }${canalBlock}${paymentBlock}${fordBlock}${tradeInBlock}${equipeBlock}${visitReminderBlock}`;
 }
 
 // ─── chamada à API do Claude ──────────────────────────────────────────────────
@@ -2634,6 +2650,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     faqRows ?? [],
     customerName,
     log,
+    canal,
   ) + leadBlock;
 
   // ── 6. Monta histórico para o modelo ──────────────────────────────────────
