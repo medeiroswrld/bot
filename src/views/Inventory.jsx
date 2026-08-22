@@ -70,7 +70,20 @@ const ConsultaPlacaModal = ({ onClose, onAdicionar }) => {
         } finally { setBuscando(false); }
     };
 
-    const LINHAS = [['Marca', 'marca'], ['Modelo', 'modelo'], ['Ano', 'ano'], ['Cor', 'cor'], ['Combustível', 'combustivel']];
+    // Só aparece o que a consulta devolveu — fornecedor que não manda o campo
+    // some da lista em vez de mostrar linha vazia.
+    const LINHAS = [
+        ['Marca', 'marca'],
+        ['Modelo', 'modelo'],
+        ['Ano fabricação', 'ano'],
+        ['Ano modelo', 'ano_modelo'],
+        ['Cor', 'cor'],
+        ['Combustível', 'combustivel'],
+        ['Cilindradas', 'cilindradas'],
+        ['Categoria', 'sub_segmento'],
+        ['Emplacado em', 'emplacadoEm'],
+        ['Chassi', 'chassi'],
+    ];
 
     return (
         <div className="modal-overlay" onClick={onClose}>
@@ -100,10 +113,14 @@ const ConsultaPlacaModal = ({ onClose, onAdicionar }) => {
 
                     {dados && (
                         <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
-                            {LINHAS.map(([rotulo, campo]) => dados[campo] && (
+                            {LINHAS.map(([rotulo, campo]) => (campo === 'emplacadoEm'
+                                ? [dados.municipio, dados.uf].filter(Boolean).join(' / ')
+                                : dados[campo]) && (
                                 <div key={campo} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: '0.88rem' }}>
                                     <span style={{ color: 'var(--text-secondary)' }}>{rotulo}</span>
-                                    <strong>{dados[campo]}</strong>
+                                    <strong>{campo === 'emplacadoEm'
+                                        ? [dados.municipio, dados.uf].filter(Boolean).join(' / ')
+                                        : dados[campo]}</strong>
                                 </div>
                             ))}
                             {dados.cache && (

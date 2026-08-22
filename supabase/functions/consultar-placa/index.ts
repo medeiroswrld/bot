@@ -68,25 +68,49 @@ function normalizar(payload: Json): Record<string, string> {
   };
 
   // Nomes em pt-BR (fornecedores nacionais) e em inglês (RegCheck/PlacaAPI).
-  const anoBruto = primeiro(
-    'anomodelo', 'ano', 'anofabricacao', 'anofabricacaomodelo',
+  //
+  // Fabricação e modelo vinham colapsados num campo só, com `anomodelo` na
+  // frente. A Placa Fipe manda os dois separados e a Webmotors exige os dois
+  // separados (AnoFabricacao e AnoDoModelo), então agora cada um tem o seu.
+  // Quem só devolve um ano continua funcionando: cada lado cai no outro.
+  const soAno = (v: string) => (v.match(/\d{4}/) ?? [''])[0];
+  const anoFab = primeiro(
+    'ano', 'anofabricacao', 'anofabricacaomodelo',
     'year', 'registrationyear', 'manufactureyearfrom',
   );
+  const anoMod = primeiro('anomodelo', 'modelyear');
   const marca  = primeiro('marca', 'brand', 'fabricante', 'carmake', 'makedescription');
   const modelo = primeiro('modelo', 'model', 'submodelo', 'carmodel', 'modeldescription');
   const desc   = primeiro('description', 'descricao');
+  // A Placa Fipe nao manda `description`, mas classifica o veiculo em
+  // `segmento`/`sub_segmento` ("MOTO", "AU - SEDAN PEQUENO"). E sinal melhor
+  // que adivinhar pelo nome do modelo.
+  const classificacao = `${primeiro('segmento')} ${primeiro('subsegmento')}`;
 
   return {
     marca,
     modelo,
-    ano:         (anoBruto.match(/\d{4}/) ?? [''])[0],
-    cor:         primeiro('cor', 'color', 'corveiculo', 'colour'),
-    combustivel: primeiro('combustivel', 'fuel', 'tipocombustivel', 'fueltype'),
+    ano:          soAno(anoFab || anoMod),
+    ano_modelo:   soAno(anoMod || anoFab),
+    cor:          primeiro('cor', 'color', 'corveiculo', 'colour'),
+    combustivel:  primeiro('combustivel', 'fuel', 'tipocombustivel', 'fueltype'),
+    // Campos que a consulta já traz e que antes eram jogados fora. Nenhum é
+    // obrigatório: fornecedor que não mandar simplesmente devolve vazio, e a
+    // tela só mostra o que veio.
+    municipio:    primeiro('municipio', 'cidade', 'city'),
+    uf:           primeiro('uf', 'estado', 'state'),
+    cilindradas:  primeiro('cilindradas', 'cilindrada', 'enginesize'),
+    segmento:     primeiro('segmento'),
+    sub_segmento: primeiro('subsegmento'),
+    // Vem mascarado (******6889). Serve de conferência visual, mas NÃO é
+    // gravado no veículo: o contrato de venda precisa do chassi inteiro, e
+    // preencher com máscara colocaria um dado falso no documento.
+    chassi:       primeiro('chassi', 'chassis', 'vin'),
     // Moto já entra marcada como moto. O fornecedor não devolve o tipo, mas o
     // nome entrega ("HONDA MOTO CG 160") — e sem isso o lojista teria que
     // lembrar de trocar o campo toda vez, ou a moto entraria como carro no
     // estoque e apareceria em busca de carro no bot.
-    tipo: /\bmoto|motocicl|scooter|tricicl/i.test(`${desc} ${modelo}`) ? 'moto' : 'carro',
+    tipo: /\bmoto|motocicl|scooter|tricicl/i.test(`${classificacao} ${desc} ${modelo}`) ? 'moto' : 'carro',
   };
 }
 
@@ -229,6 +253,24 @@ serve(async (req) => {
       return json({ error: 'Resposta do serviço de consulta em formato inesperado.' }, 502);
     }
 
+    // A Placa Fipe responde 200 mesmo quando da errado, com o motivo em
+    // `codigo`/`msg` (e alguns fornecedores usam `erro`). Sem tratar aqui, cota
+    // estourada passaria batido e cairia no "nao consegui ler os dados" la
+    // embaixo — a mesma mensagem enganosa que ja custou meia hora de caca ao
+    // problema errado com o fornecedor anterior.
+    const raiz = (payload ?? {}) as Record<string, unknown>;
+    const codigo = Number(raiz.codigo ?? NaN);
+    const msg = String(raiz.msg ?? raiz.erro ?? '').trim();
+    if ((Number.isFinite(codigo) && codigo !== 1) || raiz.erro) {
+      console.error('[placa] fornecedor recusou', { codigo, msg });
+      const cota = /limite|cota|excedid/i.test(msg);
+      return json({
+        error: cota
+          ? 'O limite diario de consultas por placa acabou. Ele volta a valer amanha — por enquanto preencha os dados manualmente.'
+          : msg || 'A consulta nao retornou dados para essa placa.',
+      }, cota ? 429 : 404);
+    }
+
     const dados = normalizar(payload);
     if (!dados.marca && !dados.modelo) {
       // Loga só as CHAVES, nunca os valores: ajuda a calibrar o mapeamento sem
@@ -239,10 +281,18 @@ serve(async (req) => {
       return json({ error: 'Não consegui ler os dados desse veículo. A placa existe, mas o formato da resposta é diferente do esperado.' }, 422);
     }
 
-    await admin.from('plate_lookups').upsert(
-      { plate: placa, dados, consulted_by: user.id },
-      { onConflict: 'plate' },
-    );
+    // Guarda também a resposta crua (migration 058). O retry sem `bruto` existe
+    // porque function e migration não sobem juntas: se o deploy chegar antes do
+    // SQL, a coluna não existe e o upsert inteiro falharia calado — a placa
+    // sairia do cache e seria cobrada de novo na próxima consulta. Já aconteceu
+    // três vezes neste projeto, sempre em silêncio.
+    const linha = { plate: placa, dados, consulted_by: user.id };
+    const { error: erroCache } = await admin
+      .from('plate_lookups').upsert({ ...linha, bruto: payload }, { onConflict: 'plate' });
+    if (erroCache) {
+      console.warn('[placa] cache sem o bruto:', erroCache.message);
+      await admin.from('plate_lookups').upsert(linha, { onConflict: 'plate' });
+    }
 
     console.log('[placa] consultado', placa, dados.marca, dados.modelo);
     return json({ ...dados, placa, cache: false });
