@@ -7,6 +7,135 @@ import {
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
 import { MODELO_PADRAO, CAMPOS, formatarCNPJ } from '../lib/contrato.js';
+import { detectar, aplicar } from '../lib/marcadores.js';
+
+// ─── Assistente de marcadores ────────────────────────────────────────────────
+// A loja cola o contrato de uma venda real; aqui ela confirma o que virou campo.
+//
+// A revisão não é ritual. Formato rígido (CPF, placa, chassi) o sistema acerta,
+// mas nome e endereço são indistinguíveis entre si — aplicar sozinho produziria
+// contrato assinado com o nome no lugar errado. Por isso nada é trocado sem
+// alguém olhar.
+const AssistenteMarcadores = ({ texto, onAplicar, onFechar }) => {
+    const achados = detectar(texto);
+    const [escolhas, setEscolhas] = useState(
+        () => Object.fromEntries(achados.map((a) => [a.valor, a.campo])),
+    );
+
+    const marcados = Object.values(escolhas).filter(Boolean).length;
+    const todos = () => setEscolhas(Object.fromEntries(achados.map((a) => [a.valor, a.campo])));
+    const nenhum = () => setEscolhas(Object.fromEntries(achados.map((a) => [a.valor, null])));
+
+    return (
+        <div className="modal-overlay" onClick={onFechar}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()}
+                 style={{ maxWidth: 780 }}>
+                <div className="modal-header">
+                    <h2>Marcar campos automaticamente</h2>
+                    <button className="icon-btn" onClick={onFechar}>&times;</button>
+                </div>
+
+                <div style={{ padding: '1rem 1.5rem', maxHeight: '60vh', overflowY: 'auto' }}>
+                    {achados.length === 0 ? (
+                        <p style={{ fontSize: '0.86rem', color: 'var(--color-text-muted)' }}>
+                            Não reconheci nenhum campo. Isso acontece quando o contrato ainda
+                            está em branco — cole um contrato já preenchido de uma venda real,
+                            que aí dá pra identificar o que é dado e o que é texto fixo.
+                        </p>
+                    ) : (
+                        <>
+                            <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)',
+                                        margin: '0 0 4px', lineHeight: 1.5 }}>
+                                Encontrei <strong>{achados.length}</strong> campos. Confira cada um
+                                antes de aplicar — o que estiver errado aqui sai errado em todo
+                                contrato daqui pra frente.
+                            </p>
+                            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)',
+                                        margin: '0 0 12px' }}>
+                                Nome e endereço não aparecem aqui: não há como o sistema saber se
+                                um nome é do comprador ou de uma testemunha. Esses você marca
+                                selecionando o texto e clicando no campo, na tela anterior.
+                            </p>
+
+                            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                                <button type="button" className="btn-secondary"
+                                        style={{ fontSize: '0.76rem' }} onClick={todos}>
+                                    Marcar todos
+                                </button>
+                                <button type="button" className="btn-secondary"
+                                        style={{ fontSize: '0.76rem' }} onClick={nenhum}>
+                                    Nenhum
+                                </button>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                {achados.map((a) => {
+                                    // Sugestoes primeiro, resto da lista depois: o campo certo
+                                    // costuma ser um dos dois primeiros, e rolar 30 opcoes pra
+                                    // achar seria pior que digitar a mao.
+                                    const ordenados = [
+                                        ...a.alternativas,
+                                        ...CAMPOS.map(([c]) => c).filter((c) => !a.alternativas.includes(c)),
+                                    ];
+                                    return (
+                                        <div key={a.valor} style={{
+                                            border: '1px solid var(--border)', borderRadius: 8,
+                                            padding: '10px 12px',
+                                            opacity: escolhas[a.valor] ? 1 : 0.55,
+                                        }}>
+                                            <div style={{ display: 'flex', gap: 10, alignItems: 'center',
+                                                          flexWrap: 'wrap' }}>
+                                                <code style={{ fontSize: '0.82rem', fontWeight: 600,
+                                                               background: 'var(--input-bg)',
+                                                               padding: '2px 7px', borderRadius: 4 }}>
+                                                    {a.valor}
+                                                </code>
+                                                {a.ocorrencias > 1 && (
+                                                    <span style={{ fontSize: '0.72rem',
+                                                                   color: 'var(--color-text-muted)' }}>
+                                                        aparece {a.ocorrencias}x
+                                                    </span>
+                                                )}
+                                                <span style={{ marginLeft: 'auto' }} />
+                                                <select
+                                                    value={escolhas[a.valor] ?? ''}
+                                                    onChange={(e) => setEscolhas((x) => ({
+                                                        ...x, [a.valor]: e.target.value || null,
+                                                    }))}
+                                                    style={{ fontSize: '0.78rem', padding: '4px 6px',
+                                                             fontFamily: 'ui-monospace, monospace' }}>
+                                                    <option value="">não marcar</option>
+                                                    {ordenados.map((c) => (
+                                                        <option key={c} value={c}>{`{{${c}}}`}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                            {a.contexto && (
+                                                <p style={{ margin: '6px 0 0', fontSize: '0.74rem',
+                                                            color: 'var(--color-text-muted)',
+                                                            lineHeight: 1.45 }}>
+                                                    {a.contexto}
+                                                </p>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </>
+                    )}
+                </div>
+
+                <div className="modal-footer">
+                    <button className="btn-secondary" onClick={onFechar}>Cancelar</button>
+                    <button className="btn-primary" disabled={!marcados}
+                            onClick={() => onAplicar(aplicar(texto, escolhas))}>
+                        Aplicar {marcados > 0 ? `(${marcados})` : ''}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 import ConectarWhatsApp from './ConectarWhatsApp.jsx';
 
 const WEEK_DAYS = [
@@ -336,6 +465,7 @@ const Settings = () => {
     const [savedCtr, setSavedCtr] = useState(false);
 
     const contratoRef = useRef(null);
+    const [assistenteAberto, setAssistenteAberto] = useState(false);
 
     // Insere o marcador na posicao do cursor. Sem isso o lojista teria que
     // digitar {{comprador_cpf}} a mao, errar uma chave e nao entender por que
@@ -1313,11 +1443,32 @@ const Settings = () => {
                                 onChange={e => setModeloContrato(e.target.value)}
                                 style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem', lineHeight: 1.55 }}
                             />
-                            <button type="button" className="btn-secondary"
-                                style={{ marginTop: 8, fontSize: '0.8rem' }}
-                                onClick={() => setModeloContrato(MODELO_PADRAO)}>
-                                Carregar o modelo padrão para editar
-                            </button>
+                            <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                                <button type="button" className="btn-secondary"
+                                    style={{ fontSize: '0.8rem' }}
+                                    onClick={() => setModeloContrato(MODELO_PADRAO)}>
+                                    Carregar o modelo padrão para editar
+                                </button>
+                                <button type="button" className="btn-secondary"
+                                    style={{ fontSize: '0.8rem' }}
+                                    disabled={!modeloContrato.trim()}
+                                    title="Cole um contrato já preenchido e o sistema propõe os campos"
+                                    onClick={() => setAssistenteAberto(true)}>
+                                    Marcar campos automaticamente
+                                </button>
+                            </div>
+
+                            {assistenteAberto && (
+                                <AssistenteMarcadores
+                                    texto={modeloContrato}
+                                    onFechar={() => setAssistenteAberto(false)}
+                                    onAplicar={(novo) => {
+                                        setModeloContrato(novo);
+                                        setAssistenteAberto(false);
+                                        addToast('Campos marcados. Confira o texto antes de salvar.', 'success');
+                                    }}
+                                />
+                            )}
                         </div>
 
                         <div className="form-group">
