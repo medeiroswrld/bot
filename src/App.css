@@ -184,6 +184,7 @@
   font: inherit;
   transition: background var(--t-fast), color var(--t-fast);
   position: relative;
+  text-decoration: none;
 }
 .sidebar-footer-btn:hover {
   background: var(--sidebar-hover-bg);
@@ -193,6 +194,14 @@
 .sidebar-footer-btn.logout-btn:hover {
   color: #ef4444;
   background: rgba(239,68,68,0.1);
+}
+
+/* Suporte leva o verde do WhatsApp. Com a barra recolhida so o icone aparece,
+   entao a cor E o destaque — nao da pra contar com o rotulo. */
+.sidebar-footer-btn.suporte-btn { color: rgba(37,211,102,0.82); }
+.sidebar-footer-btn.suporte-btn:hover {
+  color: #25d366;
+  background: rgba(37,211,102,0.1);
 }
 
 /* ══════════════════════════════════════════

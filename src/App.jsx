@@ -3,7 +3,7 @@ import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, CarFront, Users, Calendar, Settings,
   Bell, LogOut, Loader2, MessageCircle, Bot,
-  Sun, Moon, Megaphone, Menu,
+  Sun, Moon, Megaphone, Menu, LifeBuoy,
 } from 'lucide-react';
 import './App.css';
 
@@ -63,7 +63,7 @@ const itemPaths = (item) => (item.tabs ? item.tabs.map((t) => t.path) : [item.pa
 
 const Sidebar = ({ aberta = false, onFechar = () => {} }) => {
   const location = useLocation();
-  const { logout, matchedCount } = useAppContext();
+  const { logout, matchedCount, company, profile } = useAppContext();
 
   const [isDark, setIsDark] = useState(
     () => document.documentElement.classList.contains('dark'),
@@ -75,6 +75,16 @@ const Sidebar = ({ aberta = false, onFechar = () => {} }) => {
     document.documentElement.classList.toggle('dark', next);
     localStorage.setItem('amply-theme', next ? 'dark' : 'light');
   };
+
+  // O suporte abre o WhatsApp com a loja JA identificada na mensagem. Sem isso
+  // chega um numero desconhecido e a primeira troca serve so pra descobrir quem
+  // esta falando — com varias lojas no mesmo sistema, isso custa caro.
+  const nomeDaLoja = profile?.company_name || company?.name || '';
+  const suporteHref = `https://wa.me/5515988372081?text=${encodeURIComponent(
+    nomeDaLoja
+      ? `Olá! Sou da ${nomeDaLoja} e preciso de ajuda com o Amply.`
+      : 'Olá! Preciso de ajuda com o Amply.',
+  )}`;
 
   // Item de grupo fica aceso quando QUALQUER uma das suas abas está aberta.
   const isActive = (item) =>
@@ -129,6 +139,17 @@ const Sidebar = ({ aberta = false, onFechar = () => {} }) => {
 
       {/* Footer */}
       <div className="sidebar-footer">
+        <a
+          className="sidebar-footer-btn suporte-btn"
+          href={suporteHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={onFechar}
+          data-tooltip="Suporte no WhatsApp"
+        >
+          <span className="sidebar-nav-icon"><LifeBuoy size={17} /></span>
+          <span className="sidebar-label">Suporte</span>
+        </a>
         <button
           className="sidebar-footer-btn"
           onClick={toggleTheme}
