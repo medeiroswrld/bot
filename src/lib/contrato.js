@@ -151,8 +151,18 @@ export const CAMPOS = [
   ['comprador_telefone', 'Telefone do comprador'],
   ['marca', 'Marca'], ['modelo', 'Modelo'], ['versao', 'Versão'], ['ano', 'Ano'],
   ['cor', 'Cor'], ['placa', 'Placa'], ['chassi', 'Chassi'], ['km', 'Quilometragem'],
+  ['renavam', 'Renavam'], ['ano_modelo', 'Ano do modelo'],
+  ['combustivel', 'Combustível'],
   ['valor', 'Valor'], ['valor_extenso', 'Valor por extenso'],
   ['forma_pagamento', 'Forma de pagamento'], ['vendedor', 'Vendedor'], ['data', 'Data da venda'],
+  // Veículo recebido em troca. O contrato de loja costuma ter cláusula inteira
+  // sobre ele — quem responde por multa até transferir, o que vale se aparecer
+  // vício oculto — e sem estes marcadores essas cláusulas saem em branco.
+  ['troca_placa', 'Troca: placa'], ['troca_marca', 'Troca: marca'],
+  ['troca_modelo', 'Troca: modelo'], ['troca_ano', 'Troca: ano'],
+  ['troca_cor', 'Troca: cor'], ['troca_chassi', 'Troca: chassi'],
+  ['troca_renavam', 'Troca: renavam'], ['troca_km', 'Troca: quilometragem'],
+  ['troca_valor', 'Troca: valor avaliado'], ['troca_valor_extenso', 'Troca: valor por extenso'],
 ];
 
 /** Troca os {{marcadores}} pelos valores. Marcador sem dado vira ____ em vez de
@@ -205,6 +215,22 @@ export const dadosDoContrato = ({ loja, carro, venda }) => ({
   placa: carro?.plate ?? '',
   chassi: carro?.chassi ?? '',
   km: carro?.mileage != null ? Number(carro.mileage).toLocaleString('pt-BR') : '',
+
+  renavam: carro?.renavam ?? '',
+  ano_modelo: carro?.model_year ?? '',
+  combustivel: carro?.fuel ?? '',
+
+  troca_placa:  venda?.trade_in_plate ?? '',
+  troca_marca:  venda?.trade_in_brand ?? '',
+  troca_modelo: venda?.trade_in_model ?? '',
+  troca_ano:    venda?.trade_in_year ?? '',
+  troca_cor:    venda?.trade_in_color ?? '',
+  troca_chassi: venda?.trade_in_chassi ?? '',
+  troca_renavam: venda?.trade_in_renavam ?? '',
+  troca_km: venda?.trade_in_km != null && venda.trade_in_km !== ''
+    ? Number(venda.trade_in_km).toLocaleString('pt-BR') : '',
+  troca_valor: venda?.trade_in_value ? dinheiro(venda.trade_in_value) : '',
+  troca_valor_extenso: venda?.trade_in_value ? porExtenso(venda.trade_in_value) : '',
 
   valor: dinheiro(venda?.salePrice),
   valor_extenso: porExtenso(venda?.salePrice),

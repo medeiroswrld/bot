@@ -730,6 +730,12 @@ export const AppProvider = ({ children }) => {
         color: car.color || '',
         vehicle_type: car.vehicle_type || 'carro',
         description: car.description || null,
+        // Documento do veiculo. Sem estes tres o contrato de venda sai com
+        // linha em branco justamente onde ele identifica o bem.
+        plate: car.plate || null,
+        chassi: car.chassi || null,
+        renavam: car.renavam || null,
+        model_year: car.model_year ? Number(car.model_year) : null,
         specs_image_url: specsImageUrl,
         video_url: videoUrl,
         status: 'available'
@@ -783,6 +789,10 @@ export const AppProvider = ({ children }) => {
         delete dbUpdates.km;
       }
       if (dbUpdates.year !== undefined) dbUpdates.year = Number(dbUpdates.year);
+      // Vazio precisa virar null, nao 0: ano do modelo em branco nao e ano zero.
+      if (dbUpdates.model_year !== undefined) {
+        dbUpdates.model_year = dbUpdates.model_year ? Number(dbUpdates.model_year) : null;
+      }
       if (dbUpdates.price !== undefined) dbUpdates.price = Number(dbUpdates.price);
       if (dbUpdates.status === 'disponivel') dbUpdates.status = 'available';
       if (dbUpdates.status === 'vendido') dbUpdates.status = 'sold';
@@ -856,6 +866,20 @@ export const AppProvider = ({ children }) => {
             buyer_address: comprador.buyer_address || null,
             buyer_phone: comprador.buyer_phone || null,
             payment_terms: comprador.payment_terms || null,
+          } : {}),
+          // Troca entra separada do comprador: existe venda com troca e sem
+          // dado de comprador preenchido, e o inverso tambem. Amarrar as duas
+          // faria uma apagar a outra.
+          ...(comprador?.trade_in_plate ? {
+            trade_in_plate:  String(comprador.trade_in_plate).toUpperCase().replace(/[^A-Z0-9]/g, '') || null,
+            trade_in_brand:  comprador.trade_in_brand || null,
+            trade_in_model:  comprador.trade_in_model || null,
+            trade_in_year:   comprador.trade_in_year || null,
+            trade_in_color:  comprador.trade_in_color || null,
+            trade_in_chassi: comprador.trade_in_chassi || null,
+            trade_in_renavam: comprador.trade_in_renavam || null,
+            trade_in_km:     comprador.trade_in_km ? Number(comprador.trade_in_km) : null,
+            trade_in_value:  comprador.trade_in_value ? Number(comprador.trade_in_value) : null,
           } : {}),
         })
         .eq('id', inventoryId)

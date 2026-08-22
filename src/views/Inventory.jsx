@@ -25,7 +25,7 @@ const StatusBadge = ({ status }) => {
     return <span className="inv-status-badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>;
 };
 
-const EMPTY_CAR = { brand: '', model: '', version: '', year: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', description: '', images: [], specsImage: null, video: null };
+const EMPTY_CAR = { brand: '', model: '', version: '', year: '', model_year: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', description: '', chassi: '', renavam: '', images: [], specsImage: null, video: null };
 
 // Parse preço no formato brasileiro ("198.000" ou "198.000,00" ou "198000") → número
 const parsePriceBR = (value) => {
@@ -146,6 +146,7 @@ const ConsultaPlacaModal = ({ onClose, onAdicionar }) => {
                             year: dados.ano || '', color: dados.cor || '',
                             fuel: dados.combustivel || 'Flex', placa: dados.placa,
                             vehicle_type: dados.tipo || 'carro',
+                            model_year: dados.ano_modelo || '', chassi: dados.chassi || '',
                         })}>
                             Adicionar ao estoque
                         </button>
@@ -264,6 +265,11 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
                 color: prev.color || dados.cor || '',
                 fuel:  dados.combustivel || prev.fuel,
                 vehicle_type: dados.tipo || prev.vehicle_type,
+                // Chassi e ano do modelo entram no cadastro porque o contrato de
+                // venda pede os dois. Antes a consulta trazia e a gente jogava
+                // fora, e o contrato saia com linha em branco.
+                model_year: prev.model_year || dados.ano_modelo || '',
+                chassi: prev.chassi || dados.chassi || '',
             }));
             addToast(dados.cache ? 'Dados preenchidos (já consultada antes).' : 'Dados do veículo preenchidos.', 'success');
         } catch (e) {
@@ -290,6 +296,9 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
         try {
             await onSave({
                 ...form,
+                // A caixa de consulta E o campo de placa: ter dois campos de placa
+                // na mesma tela seria pedir para divergirem.
+                plate: String(placa).toUpperCase().replace(/[^A-Z0-9]/g, '') || null,
                 price: parsePriceBR(form.price),
                 km:    parsePriceBR(form.km),
                 status: form.status || 'disponivel',
@@ -475,6 +484,13 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
                             </select>
                         </div>
                         <div className="form-group"><label>Cor</label><input type="text" value={form.color} onChange={e => handleChange('color', e.target.value)} placeholder="Prata" /></div>
+                        {/* Documento do veiculo: o contrato de venda pede chassi e
+                            renavam, e ate aqui nao havia onde guardar — os marcadores
+                            saiam em branco. A consulta por placa preenche chassi e ano
+                            do modelo; renavam nenhum fornecedor devolve. */}
+                        <div className="form-group"><label>Ano do modelo</label><input type="number" value={form.model_year} onChange={e => handleChange('model_year', e.target.value)} placeholder="2021" /></div>
+                        <div className="form-group"><label>Chassi</label><input type="text" value={form.chassi} onChange={e => handleChange('chassi', e.target.value.toUpperCase())} placeholder="Vem da consulta por placa" style={{ fontFamily: 'monospace' }} /></div>
+                        <div className="form-group"><label>Renavam</label><input type="text" value={form.renavam} onChange={e => handleChange('renavam', e.target.value)} placeholder="Preenchimento manual" /></div>
                     </div>
                     <div className="modal-footer" style={{ marginTop: '1rem' }}>
                         <button className="btn-secondary" onClick={onClose} disabled={saving}>Cancelar</button>
@@ -489,6 +505,22 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
     );
 };
 
+// Consulta de placa isolada: o SellModal é o terceiro lugar do arquivo que
+// precisa dela, e repetir o fetch pela terceira vez era pedir para um deles
+// ficar para trás numa mudança futura.
+const consultarPlacaApi = async (placa) => {
+    const limpa = String(placa).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const { data: { session } } = await supabase.auth.getSession();
+    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/consultar-placa`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+        body: JSON.stringify({ placa: limpa }),
+    });
+    const j = await res.json();
+    if (!res.ok) throw new Error(j.error || 'Não consegui consultar essa placa.');
+    return j;
+};
+
 const SellModal = ({ car, onClose, onConfirm }) => {
     const { addToast } = useAppContext();
     const [salePrice, setSalePrice] = useState(car ? car.price : 0);
@@ -500,12 +532,41 @@ const SellModal = ({ car, onClose, onConfirm }) => {
     const [comprador, setComprador] = useState({
         buyer_name: '', buyer_cpf: '', buyer_rg: '',
         buyer_address: '', buyer_phone: '', payment_terms: '',
+        trade_in_plate: '', trade_in_brand: '', trade_in_model: '', trade_in_year: '',
+        trade_in_color: '', trade_in_chassi: '', trade_in_renavam: '',
+        trade_in_km: '', trade_in_value: '',
     });
     const [erroCpf, setErroCpf] = useState('');
+    const [buscandoTroca, setBuscandoTroca] = useState(false);
+    const [erroTroca, setErroTroca] = useState('');
 
     if (!car) return null;
 
     const setC = (campo, valor) => setComprador(c => ({ ...c, [campo]: valor }));
+
+    // Puxa o veículo da troca pela placa. Não sobrescreve o que ja foi digitado:
+    // se o vendedor corrigiu o modelo a mao, a consulta nao pode desfazer.
+    const buscarTroca = async () => {
+        const limpa = String(comprador.trade_in_plate).replace(/[^A-Za-z0-9]/g, '');
+        if (limpa.length < 7) { setErroTroca('Placa incompleta.'); return; }
+        setBuscandoTroca(true); setErroTroca('');
+        try {
+            const d = await consultarPlacaApi(limpa);
+            setComprador(c => ({
+                ...c,
+                trade_in_brand:  c.trade_in_brand  || d.marca || '',
+                trade_in_model:  c.trade_in_model  || d.modelo || '',
+                trade_in_year:   c.trade_in_year   || d.ano_modelo || d.ano || '',
+                trade_in_color:  c.trade_in_color  || d.cor || '',
+                trade_in_chassi: c.trade_in_chassi || d.chassi || '',
+            }));
+            addToast(d.cache ? 'Dados da troca preenchidos (placa ja consultada).' : 'Dados da troca preenchidos.', 'success');
+        } catch (e) {
+            setErroTroca(e.message);
+        } finally {
+            setBuscandoTroca(false);
+        }
+    };
 
     const handleConfirm = () => {
         if (!sellerName.trim()) {
@@ -598,6 +659,78 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                                     value={comprador.payment_terms}
                                     onChange={e => setC('payment_terms', e.target.value)} />
                             </div>
+                        </div>
+
+                        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                            <p style={{ margin: '0 0 4px', fontWeight: 600, fontSize: '0.9rem' }}>Veículo na troca</p>
+                            <p style={{ margin: '0 0 10px', fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                                Opcional. Digite a placa e o resto vem sozinho.
+                            </p>
+
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                <div className="form-group" style={{ flex: '0 0 140px', marginBottom: 0 }}>
+                                    <label>Placa</label>
+                                    <input type="text" maxLength={8} placeholder="ABC1D23"
+                                        value={comprador.trade_in_plate}
+                                        onChange={e => setC('trade_in_plate', e.target.value.toUpperCase())}
+                                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); buscarTroca(); } }}
+                                        style={{ textTransform: 'uppercase', fontFamily: 'monospace' }} />
+                                </div>
+                                <button type="button" className="btn-secondary" onClick={buscarTroca}
+                                    disabled={buscandoTroca || comprador.trade_in_plate.replace(/[^A-Za-z0-9]/g, '').length < 7}
+                                    style={{ marginBottom: 2 }}>
+                                    {buscandoTroca ? 'Buscando…' : 'Buscar'}
+                                </button>
+                            </div>
+                            {erroTroca && <p className="error-message">{erroTroca}</p>}
+
+                            {comprador.trade_in_plate && (
+                                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+                                    <div className="form-group" style={{ flex: '1 1 130px' }}>
+                                        <label>Marca</label>
+                                        <input type="text" value={comprador.trade_in_brand}
+                                            onChange={e => setC('trade_in_brand', e.target.value)} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: '1 1 160px' }}>
+                                        <label>Modelo</label>
+                                        <input type="text" value={comprador.trade_in_model}
+                                            onChange={e => setC('trade_in_model', e.target.value)} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: '0 1 90px' }}>
+                                        <label>Ano</label>
+                                        <input type="text" value={comprador.trade_in_year}
+                                            onChange={e => setC('trade_in_year', e.target.value)} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: '0 1 110px' }}>
+                                        <label>Cor</label>
+                                        <input type="text" value={comprador.trade_in_color}
+                                            onChange={e => setC('trade_in_color', e.target.value)} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: '1 1 180px' }}>
+                                        <label>Chassi</label>
+                                        <input type="text" value={comprador.trade_in_chassi}
+                                            onChange={e => setC('trade_in_chassi', e.target.value)}
+                                            style={{ fontFamily: 'monospace' }} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: '1 1 140px' }}>
+                                        {/* Nenhuma consulta por placa devolve Renavam. Fica manual, e o
+                                            rotulo diz isso pra ninguem ficar esperando aparecer. */}
+                                        <label>Renavam (manual)</label>
+                                        <input type="text" value={comprador.trade_in_renavam}
+                                            onChange={e => setC('trade_in_renavam', e.target.value)} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: '0 1 110px' }}>
+                                        <label>Km</label>
+                                        <input type="number" value={comprador.trade_in_km}
+                                            onChange={e => setC('trade_in_km', e.target.value)} />
+                                    </div>
+                                    <div className="form-group" style={{ flex: '0 1 130px' }}>
+                                        <label>Valor avaliado</label>
+                                        <input type="number" step="0.01" value={comprador.trade_in_value}
+                                            onChange={e => setC('trade_in_value', e.target.value)} />
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
