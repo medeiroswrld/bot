@@ -187,7 +187,49 @@ Deno.serve(async (req) => {
       console.warn('[admin-metrics] qualidade Meta indisponível:', (e as Error)?.message);
     }
 
-    return json({ dias: d, detalhe: det, whatsapp });
+    // Instagram NAO tem nota de qualidade — a Meta nao expoe nada equivalente ao
+    // quality_rating do WhatsApp. O que da pra mostrar e se a conexao continua
+    // de pe: token valido e perfil respondendo. Quando o token cai, e aqui que
+    // aparece, em vez de a loja descobrir por mensagem nao respondida.
+    let instagram: unknown = null;
+    try {
+      const { data: cfgIg } = await admin
+        .from('company_settings')
+        .select('ig_user_id')
+        .eq('user_id', user_id)
+        .maybeSingle();
+      const ig = String(cfgIg?.ig_user_id ?? '');
+      if (ig) {
+        const { data: tokIg } = await admin.rpc('get_meta_page_token', {
+          p_user_id: user_id, p_canal: 'instagram',
+        });
+        const tokenIg = String(tokIg ?? '');
+        if (!tokenIg) {
+          instagram = { erro: 'sem token salvo' };
+        } else {
+          // Conta ligada por Instagram Login responde em graph.instagram.com;
+          // por Facebook Login, em graph.facebook.com. Tenta os dois — o mesmo
+          // motivo pelo qual `_shared/social.ts` tem `hostsPara()`.
+          for (const host of ['graph.instagram.com', 'graph.facebook.com']) {
+            try {
+              const r = await fetch(
+                `https://${host}/v20.0/${ig}?fields=id,username,account_type,media_count`,
+                { headers: { Authorization: `Bearer ${tokenIg}` } },
+              );
+              const j = await r.json();
+              if (r.ok && j?.id) { instagram = j; break; }
+              instagram = { erro: j?.error?.message ?? `HTTP ${r.status}` };
+            } catch (e) {
+              instagram = { erro: (e as Error)?.message ?? 'falha de rede' };
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[admin-metrics] perfil do Instagram indisponivel:', (e as Error)?.message);
+    }
+
+    return json({ dias: d, detalhe: det, whatsapp, instagram });
   }
 
   // ── Métricas (padrão) ──────────────────────────────────────────────────────
@@ -209,10 +251,49 @@ Deno.serve(async (req) => {
   const custoUsd  = soma((l) => l.custo_total_usd);
   const conversas = soma((l) => l.conversas_bot);
 
+  // Qualidade do numero em CADA linha, pra dar pra bater o olho na lista e ver
+  // qual esta degradado sem abrir loja por loja.
+  //
+  // Duas garantias aqui: cada consulta vai isolada (Meta fora do ar ou token
+  // vencido de UMA loja nao pode derrubar o painel), e o total e limitado —
+  // hoje sao poucas contas, mas isto e uma chamada externa por loja e nao pode
+  // virar espera de minutos quando forem cinquenta.
+  const qualidades = new Map<string, unknown>();
+  try {
+    const { data: cfgs } = await admin
+      .from('company_settings')
+      .select('user_id, whatsapp_business_account_id')
+      .not('whatsapp_business_account_id', 'is', null)
+      .limit(25);
+
+    await Promise.allSettled((cfgs ?? []).map(async (c) => {
+      const uid  = String(c.user_id ?? '');
+      const waba = String(c.whatsapp_business_account_id ?? '');
+      if (!uid || !waba) return;
+      const { data: tok } = await admin.rpc('get_whatsapp_token', { p_user_id: uid });
+      const token = String(tok ?? '') || (Deno.env.get('WHATSAPP_TOKEN') ?? '');
+      if (!token) return;
+      const r = await fetch(
+        `https://graph.facebook.com/v20.0/${waba}/phone_numbers` +
+        '?fields=display_phone_number,quality_rating,status,messaging_limit_tier',
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const j = await r.json();
+      if (r.ok && j?.data?.[0]) qualidades.set(uid, j.data[0]);
+    }));
+  } catch (e) {
+    console.warn('[admin-metrics] qualidades da lista indisponiveis:', (e as Error)?.message);
+  }
+
+  const lojasComQualidade = lojas.map((l) => ({
+    ...l,
+    qualidade: qualidades.get(String((l as unknown as { user_id: string }).user_id)) ?? null,
+  }));
+
   return json({
     dias,
     desde,
-    lojas,
+    lojas: lojasComQualidade,
     total: {
       lojas: lojas.length,
       custo_usd: Number(custoUsd.toFixed(4)),

@@ -87,10 +87,12 @@ const LoginAdmin = ({ onEntrou }) => {
 
 // ─── Mini dashboard de uma loja ──────────────────────────────────────────────
 const QUALIDADE = { GREEN: ['#052e16', '#4ade80', 'alta'], YELLOW: ['#2b2410', '#fbbf24', 'media'], RED: ['#2a1215', '#fca5a5', 'baixa'] };
+const CANAL = { whatsapp: 'WhatsApp', instagram: 'Instagram', messenger: 'Messenger' };
 
 const DetalheLoja = ({ loja, dias, cotacao, chamar, onFechar }) => {
   const [d, setD] = useState(null);
   const [wa, setWa] = useState(null);
+  const [ig, setIg] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState('');
 
@@ -98,7 +100,7 @@ const DetalheLoja = ({ loja, dias, cotacao, chamar, onFechar }) => {
     let vivo = true;
     setCarregando(true); setErro('');
     chamar({ acao: 'detalhe', user_id: loja.user_id, dias })
-      .then((r) => { if (vivo) { setD(r.detalhe); setWa(r.whatsapp); } })
+      .then((r) => { if (vivo) { setD(r.detalhe); setWa(r.whatsapp); setIg(r.instagram); } })
       .catch((e) => { if (vivo) setErro(e.message); })
       .finally(() => { if (vivo) setCarregando(false); });
     return () => { vivo = false; };
@@ -157,6 +159,38 @@ const DetalheLoja = ({ loja, dias, cotacao, chamar, onFechar }) => {
                 </p>
               </div>
             </div>
+
+            {(d.canais ?? []).length > 1 && (
+              <div style={{ ...box, marginBottom: 16 }}>
+                <p style={{ ...rot, marginBottom: 10 }}>Custo por canal</p>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                  <thead>
+                    <tr style={{ color: '#8b8b96', fontSize: '0.7rem', textAlign: 'right' }}>
+                      <th style={{ textAlign: 'left', fontWeight: 500, paddingBottom: 6 }}>Canal</th>
+                      <th style={{ fontWeight: 500, paddingBottom: 6 }}>Conversas</th>
+                      <th style={{ fontWeight: 500, paddingBottom: 6 }}>Custo</th>
+                      <th style={{ fontWeight: 500, paddingBottom: 6 }}>Por conversa</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.canais.map((c) => (
+                      <tr key={c.canal} style={{ borderTop: '1px solid #26262f', textAlign: 'right' }}>
+                        <td style={{ padding: '7px 0', textAlign: 'left' }}>{CANAL[c.canal] ?? c.canal}</td>
+                        <td style={{ padding: '7px 0' }}>{c.conversas}</td>
+                        <td style={{ padding: '7px 0' }}>{brl(c.custo_usd, cotacao)}</td>
+                        <td style={{ padding: '7px 0', fontWeight: 600 }}>
+                          {num(c.conversas) ? brl(num(c.custo_usd) / num(c.conversas), cotacao) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p style={{ margin: '10px 0 0', fontSize: '0.7rem', color: '#6b6b76' }}>
+                  O Instagram nao cobra por mensagem como o WhatsApp — o que aparece
+                  aqui e o custo de IA das conversas de cada canal.
+                </p>
+              </div>
+            )}
 
             <div style={{ ...box, marginBottom: 16 }}>
               <p style={{ ...rot, marginBottom: 10 }}>Leads atendidos e custo por janela</p>
@@ -224,6 +258,31 @@ const DetalheLoja = ({ loja, dias, cotacao, chamar, onFechar }) => {
                   </>
                 ) : (
                   <p style={{ margin: 0, fontSize: '0.78rem', color: '#6b6b76' }}>sem WhatsApp configurado</p>
+                )}
+              </div>
+
+              <div style={box}>
+                <p style={{ ...rot, marginBottom: 8 }}>Instagram</p>
+                {ig?.erro ? (
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: '#fbbf24' }}>conexao com problema: {ig.erro}</p>
+                ) : ig ? (
+                  <>
+                    <p style={{ margin: 0, fontSize: '0.85rem' }}>@{ig.username}</p>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                      <span style={{ padding: '2px 9px', borderRadius: 999, fontSize: '0.7rem', fontWeight: 700, background: '#052e16', color: '#4ade80' }}>conectado</span>
+                      {ig.account_type && <span style={{ padding: '2px 9px', borderRadius: 999, fontSize: '0.7rem', background: '#18181b', color: '#a1a1aa' }}>{String(ig.account_type).toLowerCase()}</span>}
+                      {ig.media_count != null && <span style={{ padding: '2px 9px', borderRadius: 999, fontSize: '0.7rem', background: '#18181b', color: '#a1a1aa' }}>{ig.media_count} publicacoes</span>}
+                    </div>
+                    {/* A Meta nao expoe nota de qualidade pra Instagram como faz
+                        pro numero de WhatsApp. O que da pra afirmar e se o token
+                        ainda responde — que e como a queda aparece antes de virar
+                        mensagem sem resposta. */}
+                    <p style={{ margin: '8px 0 0', fontSize: '0.68rem', color: '#6b6b76' }}>
+                      O Instagram nao tem nota de qualidade; o que vale acompanhar e se a conexao responde.
+                    </p>
+                  </>
+                ) : (
+                  <p style={{ margin: 0, fontSize: '0.78rem', color: '#6b6b76' }}>sem Instagram conectado</p>
                 )}
               </div>
 
@@ -565,17 +624,40 @@ const Painel = ({ onSair }) => {
                     <tr key={l.user_id} style={{ borderTop: '1px solid #26262f' }}>
                       <td style={{ ...td, cursor: 'pointer' }} onClick={() => setLojaAberta(l)}
                           title="Abrir o detalhe desta loja">
-                        <div style={{ fontWeight: 600, color: '#a5b4fc' }}>{l.empresa || 'Sem nome'}</div>
+                        <div style={{ fontWeight: 600, color: '#a5b4fc', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {l.empresa || 'Sem nome'}
+                          {/* Numero degradado precisa saltar da LISTA. Antes so
+                              aparecia abrindo a loja, o que significa descobrir
+                              tarde — e qualidade baixa vira bloqueio de envio. */}
+                          {(() => {
+                            const qq = l.qualidade?.quality_rating
+                              ? (QUALIDADE[l.qualidade.quality_rating] ?? ['#18181b', '#a1a1aa', l.qualidade.quality_rating])
+                              : null;
+                            return qq ? (
+                              <span title={`Qualidade do numero: ${qq[2]}${l.qualidade.status ? ` · ${l.qualidade.status}` : ''}`}
+                                style={{ width: 8, height: 8, borderRadius: '50%', background: qq[1], flex: 'none' }} />
+                            ) : null;
+                          })()}
+                        </div>
                         <div style={{ fontSize: '0.72rem', color: '#8b8b96' }}>{l.email}</div>
                         <div style={{ fontSize: '0.7rem', color: '#6b6b76' }}>
                           desde {dataCurta(l.criado_em)}
                           {!l.whatsapp_ativo && <span style={{ color: '#f59e0b' }}> · sem WhatsApp</span>}
+                          {l.instagram_ativo && <span style={{ color: '#8b8b96' }}> · Instagram</span>}
                         </div>
                       </td>
                       <td style={{ ...td, textAlign: 'right' }}>{l.conversas_bot}</td>
                       <td style={{ ...td, textAlign: 'right' }}>{milhares(l.respostas_bot)}</td>
                       <td style={{ ...td, textAlign: 'right', color: '#a1a1aa' }}>{milhares(l.tokens_total)}</td>
-                      <td style={{ ...td, textAlign: 'right' }}>{brl(l.custo_total_usd, cotacao)}</td>
+                      <td style={{ ...td, textAlign: 'right' }}>
+                        {brl(l.custo_total_usd, cotacao)}
+                        {num(l.custo_instagram_usd) > 0 && (
+                          <div style={{ fontSize: '0.68rem', color: '#8b8b96' }}
+                               title={`Instagram: ${l.conversas_instagram} conversas`}>
+                            insta {brl(l.custo_instagram_usd, cotacao)}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{brl(l.custo_p90_usd, cotacao)}</td>
                       <td style={{ ...td, fontSize: '0.76rem', color: '#8b8b96' }}>
                         {l.ultima_atividade ? new Date(l.ultima_atividade).toLocaleString('pt-BR') : 'nunca usou'}
