@@ -4,10 +4,13 @@
 // marcadores. NÃO aplica sozinho: cada proposta é confirmada.
 //
 // O motivo de exigir confirmação não é excesso de zelo. Formato rígido (CPF,
-// CNPJ, placa, chassi) o regex acerta; mas nome e endereço são indistinguíveis
-// entre si — olhando "Marcelo Costa Dos Santos" não há como saber se é o
-// comprador, o vendedor ou a testemunha. Chutar ali produziria um contrato
-// assinado com o nome no lugar errado.
+// CNPJ, placa, chassi) o regex acerta. Nome e endereço vêm do bloco de
+// qualificação, onde o contrato DECLARA quem é quem ("COMPRADOR(A): Sr(a).
+// Fulano,") — ali não é palpite.
+//
+// O que continua fora: nome solto no meio do texto, sem rótulo antes. Não há
+// como saber se é o comprador, o vendedor ou a testemunha, e chutar produziria
+// contrato assinado com o nome no lugar errado.
 
 /** Rótulos que a maioria dos contratos de loja usa em "CLÁUSULA – DO OBJETO".
  *  Este é o sinal mais confiável que existe: o próprio contrato diz o que é. */
@@ -26,6 +29,34 @@ const POR_ROTULO = [
   [/^\s*ano(\s+de)?(\s+fabrica[çc][ãa]o)?(\s*\/\s*modelo)?\s*:/i, 'ano'],
   [/^\s*e-?mail\s*:/i,                      'comprador_email'],
   [/^\s*telefone\s*\d*\s*(\([^)]*\))?\s*:/i, 'comprador_telefone'],
+];
+
+/**
+ * Blocos de qualificação das partes.
+ *
+ * Aqui o contrato DIZ quem é quem — "COMPRADOR(A): Sr(a). Fulano," — e isso
+ * muda tudo. Um nome solto no meio do texto é indistinguível entre comprador,
+ * vendedor e testemunha, e por isso não é detectado. Mas um nome logo depois do
+ * rótulo da parte não é palpite: é o próprio documento declarando.
+ *
+ * O grupo 1 de cada regex é o valor.
+ */
+const POR_CONTEXTO = [
+  { re: /COMPRADOR(?:\(A\)|A)?\s*:\s*(?:Sr\(a\)\.?|Sras?\.?|Sr\.?)?\s*([^,\n]{3,70})/gi,
+    campo: 'comprador_nome', o: ['comprador_nome'] },
+  { re: /VENDEDOR(?:\(A\)|A)?\s*:\s*([^,\n]{3,70})/gi,
+    campo: 'loja_nome', o: ['loja_nome', 'vendedor'] },
+  // Aceita nº. / no. / n. / nro — cada contrato escreve de um jeito, e foi por
+  // um 'o' no lugar do 'º' que o RG escapou no primeiro teste.
+  { re: /\b(?:IE\/)?RG\s*(?:n[ºo°.]*|nro\.?)?\s*([\dXx][\dXx.\-]{4,19})/gi,
+    campo: 'comprador_rg', o: ['comprador_rg'] },
+  // Endereço para no "telefone" quando ele vem logo depois; senão vai até o fim
+  // da linha. Endereço de contrato é longo e cheio de vírgula — cortar na
+  // primeira vírgula devolveria só o nome da rua.
+  { re: /com\s+endere[çc]o\s+n[ao]\s+([^\n]{5,180}?)(?=,\s*telefone|\n|$)/gi,
+    campo: 'comprador_endereco', o: ['comprador_endereco'] },
+  { re: /com\s+sede\s+n[ao]\s+([^\n]{5,180})/gi,
+    campo: 'loja_endereco', o: ['loja_endereco'] },
 ];
 
 /** Formatos que se reconhecem sozinhos, onde quer que apareçam. */
@@ -112,7 +143,21 @@ export function detectar(texto) {
     }
   }
 
-  // 2) Formatos reconhecíveis em qualquer lugar do texto.
+  // 2) Blocos de qualificação — o contrato declarando quem é quem.
+  for (const { re, campo, o } of POR_CONTEXTO) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(bruto)) !== null) {
+      // Tira ponto final e espaço que a captura leva junto quando vai até o
+      // fim da frase.
+      const valor = String(m[1] ?? '').replace(/[\s.]+$/, '').trim();
+      const ini = Math.max(0, m.index - 20);
+      const contexto = `…${bruto.slice(ini, m.index + m[0].length + 30).replace(/\s+/g, ' ').trim()}…`;
+      if (valor) registrar(valor, campo, o, contexto);
+    }
+  }
+
+  // 3) Formatos reconhecíveis em qualquer lugar do texto.
   for (const { re, campo, o } of POR_FORMATO) {
     re.lastIndex = 0;
     let m;
