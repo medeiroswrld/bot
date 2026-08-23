@@ -39,28 +39,41 @@ async function computeHmac(secret: string, data: string): Promise<string> {
 // ADICIONAL ao processamento de mensagens — não substitui nada.
 // Idempotente: só atualiza/incrementa se o status realmente mudou para aquele wamid.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-// Dispara a notificação no celular do lojista. Fire-and-forget de propósito:
-// push é acessório e NÃO pode atrasar nem derrubar o processamento da mensagem,
-// que é o caminho crítico. Por isso nem espera a resposta.
+// Dispara a notificação no celular do lojista. Ninguém espera a resposta: push
+// é acessório e NÃO pode atrasar nem derrubar o processamento da mensagem, que
+// é o caminho crítico. Mas a chamada precisa sobreviver ao fim do handler —
+// veja o waitUntil lá dentro.
 function avisarNoCelular(userId: string, nome: string, texto: string, convId: string): void {
   try {
     const corpo = texto.length > 120 ? `${texto.slice(0, 117)}...` : texto;
-    fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/send-push`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
-      },
-      body: JSON.stringify({
-        user_id: userId,
-        titulo: nome || 'Novo contato',
-        corpo,
-        url: '/conversas',
-        // Tag por conversa: cliente que manda cinco mensagens seguidas gera UMA
-        // notificação que se atualiza, em vez de cinco empilhadas na tela.
-        tag: `conversa-${convId}`,
-      }),
-    }).catch((e) => console.warn('[WH-push] falha ao disparar:', e));
+    // waitUntil, e NÃO fetch solto: no runtime das edge functions o trabalho
+    // assíncrono pendente é cancelado assim que o handler responde. Como este
+    // webhook devolve ok() logo em seguida, o fetch morria antes de conectar e
+    // a notificação nunca saía — sem erro em lugar nenhum, porque o .catch()
+    // também morria junto.
+    //
+    // O fireProcess logo abaixo já usava waitUntil pelo mesmo motivo; o push
+    // ficou de fora. Segue fire-and-forget do ponto de vista do fluxo: ninguém
+    // espera a resposta, mas o runtime deixa a chamada terminar.
+    // @ts-ignore — EdgeRuntime é global nas Supabase Edge Functions
+    EdgeRuntime.waitUntil(
+      fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/send-push`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          titulo: nome || 'Novo contato',
+          corpo,
+          url: '/conversas',
+          // Tag por conversa: cliente que manda cinco mensagens seguidas gera UMA
+          // notificação que se atualiza, em vez de cinco empilhadas na tela.
+          tag: `conversa-${convId}`,
+        }),
+      }).catch((e) => console.warn('[WH-push] falha ao disparar:', e)),
+    );
   } catch (e) {
     console.warn('[WH-push] erro inesperado:', e);
   }
