@@ -513,8 +513,11 @@
   border: none; cursor: pointer;
 }
 .inv-action-btn:hover { background: var(--border); color: var(--text-primary); }
-.inv-action-btn.sell { background: var(--pastel-green-bg); color: var(--pastel-green-text); font-weight: 600; }
-.inv-action-btn.sell:hover { background: #bbf7d0; }
+/* Laranja, nao verde. Verde e cor de ESTADO ("vendido", "disponivel") e o
+   botao ficava parecendo um selo dizendo que o carro ja tinha sido vendido —
+   exatamente o oposto do que ele faz. Laranja le como acao pendente. */
+.inv-action-btn.sell { background: var(--pastel-orange-bg); color: var(--pastel-orange-text); font-weight: 600; }
+.inv-action-btn.sell:hover { background: #fdba74; }
 .inv-action-btn.danger:hover { background: #fee2e2; color: var(--danger); }
 
 /* Sell modal */

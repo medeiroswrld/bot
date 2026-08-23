@@ -847,7 +847,7 @@ export const AppProvider = ({ children }) => {
     }
   };
 
-  const sellCar = async (inventoryId, salePrice, saleDate, sellerName, comprador = null) => {
+  const sellCar = async (inventoryId, salePrice, saleDate, sellerName, comprador = null, veiculo = null) => {
     if (!user?.id) return;
     try {
       const { data: updatedCar, error } = await supabase
@@ -866,6 +866,20 @@ export const AppProvider = ({ children }) => {
             buyer_address: comprador.buyer_address || null,
             buyer_phone: comprador.buyer_phone || null,
             payment_terms: comprador.payment_terms || null,
+            buyer_email: comprador.buyer_email || null,
+          } : {}),
+          // Correcoes feitas na tela de venda entram no cadastro do carro. A
+          // venda e o unico momento em que a loja tem o documento do veiculo na
+          // mao; o que for completado ali fica, em vez de valer so pra aquele
+          // contrato.
+          ...(veiculo ? {
+            version:    veiculo.version || null,
+            model_year: veiculo.model_year ? Number(veiculo.model_year) : null,
+            plate:      String(veiculo.plate ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '') || null,
+            renavam:    veiculo.renavam || null,
+            chassi:     veiculo.chassi || null,
+            color:      veiculo.color || null,
+            mileage:    veiculo.km !== '' && veiculo.km != null ? Number(veiculo.km) : undefined,
           } : {}),
           // Troca entra separada do comprador: existe venda com troca e sem
           // dado de comprador preenchido, e o inverso tambem. Amarrar as duas

@@ -148,7 +148,7 @@ export const CAMPOS = [
   ['loja_cidade', 'Cidade da loja'],
   ['comprador_nome', 'Nome do comprador'], ['comprador_cpf', 'CPF'],
   ['comprador_rg', 'RG'], ['comprador_endereco', 'Endereço do comprador'],
-  ['comprador_telefone', 'Telefone do comprador'],
+  ['comprador_telefone', 'Telefone do comprador'], ['comprador_email', 'E-mail do comprador'],
   ['marca', 'Marca'], ['modelo', 'Modelo'], ['versao', 'Versão'], ['ano', 'Ano'],
   ['cor', 'Cor'], ['placa', 'Placa'], ['chassi', 'Chassi'], ['km', 'Quilometragem'],
   ['renavam', 'Renavam'], ['ano_modelo', 'Ano do modelo'],
@@ -206,6 +206,7 @@ export const dadosDoContrato = ({ loja, carro, venda }) => ({
   comprador_rg: venda?.buyer_rg ?? '',
   comprador_endereco: venda?.buyer_address ?? '',
   comprador_telefone: venda?.buyer_phone ?? '',
+  comprador_email: venda?.buyer_email ?? '',
 
   marca: carro?.brand ?? '',
   modelo: carro?.model ?? '',

@@ -532,10 +532,28 @@ const SellModal = ({ car, onClose, onConfirm }) => {
     const [comprador, setComprador] = useState({
         buyer_name: '', buyer_cpf: '', buyer_rg: '',
         buyer_address: '', buyer_phone: '', payment_terms: '',
+        buyer_email: '',
         trade_in_plate: '', trade_in_brand: '', trade_in_model: '', trade_in_year: '',
         trade_in_color: '', trade_in_chassi: '', trade_in_renavam: '',
         trade_in_km: '', trade_in_value: '',
     });
+
+    // Dados do veiculo que o CONTRATO exige e o cadastro costuma nao ter.
+    // Aparecem aqui preenchidos com o que ja existe, editaveis, porque a venda e
+    // o momento em que a loja tem o documento do carro na mao. Pedir depois
+    // significa nao pedir — e o contrato sai com linha em branco onde identifica
+    // o bem.
+    const [veiculo, setVeiculo] = useState({
+        version:    car?.version ?? '',
+        model_year: car?.model_year ?? '',
+        plate:      car?.plate ?? '',
+        renavam:    car?.renavam ?? '',
+        chassi:     car?.chassi ?? '',
+        color:      car?.color ?? '',
+        km:         car?.km ?? car?.mileage ?? '',
+    });
+    const setV = (campo, valor) => setVeiculo((v) => ({ ...v, [campo]: valor }));
+    const faltando = Object.entries(veiculo).filter(([, v]) => !String(v ?? '').trim()).length;
     const [erroCpf, setErroCpf] = useState('');
     const [buscandoTroca, setBuscandoTroca] = useState(false);
     const [erroTroca, setErroTroca] = useState('');
@@ -581,7 +599,7 @@ const SellModal = ({ car, onClose, onConfirm }) => {
             addToast('CPF do comprador inválido.', 'error');
             return;
         }
-        onConfirm(car.id, salePrice, saleDate, sellerName, comprador);
+        onConfirm(car.id, salePrice, saleDate, sellerName, comprador, veiculo);
     };
 
     return (
@@ -653,11 +671,76 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                                 <input type="text" value={comprador.buyer_phone}
                                     onChange={e => setC('buyer_phone', e.target.value)} />
                             </div>
+                            <div className="form-group" style={{ flex: '1 1 200px' }}>
+                                <label>E-mail</label>
+                                <input type="email" placeholder="opcional"
+                                    value={comprador.buyer_email}
+                                    onChange={e => setC('buyer_email', e.target.value)} />
+                            </div>
                             <div className="form-group" style={{ flex: '1 1 170px' }}>
                                 <label>Forma de pagamento</label>
                                 <input type="text" placeholder="Ex: à vista, financiado em 48x"
                                     value={comprador.payment_terms}
                                     onChange={e => setC('payment_terms', e.target.value)} />
+                            </div>
+                        </div>
+
+                        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                            <p style={{ margin: '0 0 4px', fontWeight: 600, fontSize: '0.9rem' }}>
+                                Dados do veículo
+                                {faltando > 0 && (
+                                    <span style={{ marginLeft: 8, fontSize: '0.72rem', fontWeight: 600,
+                                                   color: '#b45309', background: '#fffbeb',
+                                                   border: '1px solid #fde68a', borderRadius: 999,
+                                                   padding: '1px 8px' }}>
+                                        {faltando} {faltando === 1 ? 'em branco' : 'em branco'}
+                                    </span>
+                                )}
+                            </p>
+                            <p style={{ margin: '0 0 10px', fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                                Confira antes de fechar. O que estiver em branco sai como linha
+                                vazia no contrato — e é aqui que identifica o carro.
+                            </p>
+
+                            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                                <div className="form-group" style={{ flex: '1 1 170px' }}>
+                                    <label>Versão</label>
+                                    <input type="text" value={veiculo.version}
+                                        placeholder="Ex: XEi 2.0 Flex"
+                                        onChange={e => setV('version', e.target.value)} />
+                                </div>
+                                <div className="form-group" style={{ flex: '0 1 110px' }}>
+                                    <label>Ano do modelo</label>
+                                    <input type="number" value={veiculo.model_year}
+                                        onChange={e => setV('model_year', e.target.value)} />
+                                </div>
+                                <div className="form-group" style={{ flex: '0 1 120px' }}>
+                                    <label>Placa</label>
+                                    <input type="text" maxLength={8} value={veiculo.plate}
+                                        onChange={e => setV('plate', e.target.value.toUpperCase())}
+                                        style={{ textTransform: 'uppercase', fontFamily: 'monospace' }} />
+                                </div>
+                                <div className="form-group" style={{ flex: '1 1 140px' }}>
+                                    <label>Renavam</label>
+                                    <input type="text" value={veiculo.renavam}
+                                        onChange={e => setV('renavam', e.target.value)} />
+                                </div>
+                                <div className="form-group" style={{ flex: '1 1 180px' }}>
+                                    <label>Chassi</label>
+                                    <input type="text" value={veiculo.chassi}
+                                        onChange={e => setV('chassi', e.target.value.toUpperCase())}
+                                        style={{ fontFamily: 'monospace' }} />
+                                </div>
+                                <div className="form-group" style={{ flex: '0 1 120px' }}>
+                                    <label>Cor</label>
+                                    <input type="text" value={veiculo.color}
+                                        onChange={e => setV('color', e.target.value)} />
+                                </div>
+                                <div className="form-group" style={{ flex: '0 1 110px' }}>
+                                    <label>Km</label>
+                                    <input type="number" value={veiculo.km}
+                                        onChange={e => setV('km', e.target.value)} />
+                                </div>
                             </div>
                         </div>
 
@@ -901,9 +984,12 @@ const Inventory = () => {
 
     const handleAddCar = async (carData) => { const car = await addInventoryCar(carData); await checkMatches(car); };
     const handleEditCar = async (carData) => { const car = await updateInventoryCar(editCar.id, carData); await checkMatches(car); };
-    const handleSell = async (carId, price, date, seller, comprador) => {
-        const carro = sellCarObj;
-        await sellCar(carId, price, date, seller, comprador);
+    const handleSell = async (carId, price, date, seller, comprador, veiculo) => {
+        // O que foi corrigido na tela de venda vale para o contrato desta venda,
+        // e nao so para o cadastro: sem o merge, o contrato sairia com o dado
+        // velho mesmo depois de a pessoa ter completado ali.
+        const carro = { ...sellCarObj, ...(veiculo ?? {}) };
+        await sellCar(carId, price, date, seller, comprador, veiculo);
         setSellCarObj(null);
         // Contrato so faz sentido com nome e CPF: sem isso sairia um documento
         // cheio de linha em branco, pior que nao oferecer.
@@ -993,8 +1079,8 @@ const Inventory = () => {
                                 );
                             })()}
                             <div className="inv-card-actions">
-                                <button className="inv-action-btn sell" onClick={() => setSellCarObj(car)} title="Finalizar venda">
-                                    <ShoppingCart size={16} /> Vendido
+                                <button className="inv-action-btn sell" onClick={() => setSellCarObj(car)} title="Registrar a venda deste veículo">
+                                    <ShoppingCart size={16} /> Vender
                                 </button>
                                 <button className="inv-action-btn" onClick={() => setViewCar(car)} title="Ver detalhes"><Eye size={16} /></button>
                                 <button className="inv-action-btn" onClick={() => setEditCar(car)} title="Editar"><Pencil size={16} /></button>
