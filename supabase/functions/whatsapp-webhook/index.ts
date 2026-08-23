@@ -72,7 +72,16 @@ function avisarNoCelular(userId: string, nome: string, texto: string, convId: st
           // notificação que se atualiza, em vez de cinco empilhadas na tela.
           tag: `conversa-${convId}`,
         }),
-      }).catch((e) => console.warn('[WH-push] falha ao disparar:', e)),
+      })
+        .then(async (r) => {
+          // Loga o VEREDITO do send-push aqui tambem. Quando a notificacao nao
+          // chega, cruzar os dois lados e o que separa "o webhook nao chamou" de
+          // "chamou e nao havia aparelho inscrito" — que exigem correcoes
+          // completamente diferentes.
+          const txt = await r.text().catch(() => '');
+          console.log(`[WH-push] alvo=${userId} http=${r.status} resposta=${txt.slice(0, 160)}`);
+        })
+        .catch((e) => console.warn('[WH-push] falha ao disparar:', e)),
     );
   } catch (e) {
     console.warn('[WH-push] erro inesperado:', e);

@@ -69,7 +69,14 @@ Deno.serve(async (req) => {
       .select('id, endpoint, p256dh, auth')
       .eq('user_id', user_id);
 
-    if (!inscricoes?.length) return json({ enviados: 0, motivo: 'nenhum aparelho inscrito' });
+    // Log com o user_id: quando a notificacao nao chega, a primeira duvida e
+    // sempre se o disparo mirou a conta certa. Sem isto so da pra adivinhar.
+    console.log(`[send-push] alvo=${user_id} papel=${papel || 'usuario'} inscricoes=${inscricoes?.length ?? 0}`);
+
+    if (!inscricoes?.length) {
+      console.warn(`[send-push] NENHUM aparelho inscrito para ${user_id}`);
+      return json({ enviados: 0, motivo: 'nenhum aparelho inscrito', alvo: user_id });
+    }
 
     const payload = JSON.stringify({
       titulo: titulo || 'Amply',
@@ -103,6 +110,7 @@ Deno.serve(async (req) => {
       console.log(`[send-push] ${mortas.length} inscrição(ões) morta(s) removida(s)`);
     }
 
+    console.log(`[send-push] resultado: enviados=${enviados} de ${inscricoes.length}, removidas=${mortas.length}`);
     return json({ enviados, removidas: mortas.length, total: inscricoes.length });
   } catch (e) {
     console.error('[send-push] exceção:', e);
