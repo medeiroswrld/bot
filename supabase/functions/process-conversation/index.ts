@@ -32,6 +32,44 @@ interface ClaudeResponse {
 
 // ─── Supabase admin ───────────────────────────────────────────────────────────
 
+/**
+ * Avisa o lojista no celular que uma conversa precisa de gente.
+ *
+ * Mensagem comum já notifica pelo whatsapp-webhook. ESTA é diferente: a
+ * conversa caiu para "pendente", ou seja, o bot parou e alguém tem que entrar.
+ * É o aviso que não pode ser perdido — cliente pedindo atendente e ninguém
+ * respondendo é pior do que não ter bot nenhum.
+ *
+ * waitUntil, e não fetch solto: trabalho assíncrono pendente é cancelado quando
+ * o handler responde. Foi exatamente esse detalhe que manteve o push do webhook
+ * quebrado por semanas.
+ */
+function avisarPendente(userId: string, nome: string, motivo: string, convId: string): void {
+  try {
+    // @ts-ignore — EdgeRuntime é global nas Supabase Edge Functions
+    EdgeRuntime.waitUntil(
+      fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/send-push`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          titulo: `${nome || 'Cliente'} precisa de atendimento`,
+          corpo: motivo,
+          url: '/conversas',
+          // Tag PRÓPRIA, diferente da mensagem comum: um pedido de atendente não
+          // pode ser substituído pela notificação da mensagem seguinte.
+          tag: `pendente-${convId}`,
+        }),
+      }).catch((e) => console.warn('[pendente-push] falha:', e)),
+    );
+  } catch (e) {
+    console.warn('[pendente-push] erro inesperado:', e);
+  }
+}
+
 function initAdmin() {
   const url = Deno.env.get('SUPABASE_URL') ?? '';
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
@@ -1207,6 +1245,10 @@ async function executeTool(
       .from('conversations')
       .update({ status: 'pending' })
       .eq('id', conversationId);
+
+    // O cliente PEDIU uma pessoa. Sem este aviso ele fica esperando alguem que
+    // nao sabe que foi chamado — o pior desfecho possivel pro bot.
+    avisarPendente(userId, customerName ?? '', 'Pediu para falar com um atendente.', conversationId);
 
     return { sucesso: true, mensagem: 'Atendente chamado. O cliente será notificado.' };
   }
@@ -3051,6 +3093,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
 
     if (jaFalhouAntes) {
       await supabase.from('conversations').update({ status: 'pending' }).eq('id', conversationId);
+      avisarPendente(userId, customerName ?? '', 'O bot falhou duas vezes seguidas e passou a conversa.', conversationId);
       log.warn('segunda falha do modelo na mesma conversa — handoff', { action: 'fallback', forcado: true });
     }
 
@@ -3183,6 +3226,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
 
   if (motivoResgate && !toolsUsadas.has('chamar_atendente')) {
     await supabase.from('conversations').update({ status: 'pending' }).eq('id', conversationId);
+    avisarPendente(userId, customerName ?? '', `O bot prometeu retorno da equipe (${motivoResgate}).`, conversationId);
     const nome = customerName ? `${String(customerName).split(' ')[0]}, ` : '';
 
     if (motivoResgate === 'cliente reclamou do atendimento') {
@@ -3272,6 +3316,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
       action: 'guard_telefone', quantidade: naoCadastrados.length,
     });
     await supabase.from('conversations').update({ status: 'pending' }).eq('id', conversationId);
+    avisarPendente(userId, customerName ?? '', 'O bot tentou passar um telefone fora do cadastro.', conversationId);
     const nomeG = customerName ? `${String(customerName).split(' ')[0]}, ` : '';
     finalText = `${nomeG}deixa eu confirmar esse contato certinho com a equipe pra nao te passar numero errado. Ja te respondem por aqui. 😊`;
   }
