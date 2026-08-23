@@ -31,11 +31,19 @@ Deno.serve(async (req) => {
     // `user_id` do corpo deixaria qualquer usuário autenticado disparar
     // notificação no celular de outra loja. Então: service_role manda no corpo,
     // usuário comum é forçado ao próprio id.
-    const token = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
-    let papel = '';
-    try {
-      papel = String(JSON.parse(atob(token.split('.')[1] ?? '')).role ?? '');
-    } catch { /* token ilegível: cai no caminho restrito abaixo */ }
+    // Compara com a CHAVE, não decodifica o token.
+    //
+    // A versão anterior lia o claim `role` de dentro do JWT — e derrubou o
+    // disparo do webhook por semanas sem deixar rastro. Este projeto usa o
+    // formato novo de chave do Supabase (`sb_secret_…`), que NÃO é JWT: o
+    // split('.') devolvia undefined, o atob estourava, e o webhook caía no
+    // caminho de usuário comum, onde não há usuário — 401, antes mesmo de
+    // registrar a tentativa.
+    //
+    // Igualdade com o secret funciona nos dois formatos, hoje e depois.
+    const token = (req.headers.get('Authorization') ?? '').replace('Bearer ', '').trim();
+    const chaveServico = (Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '').trim();
+    const papel = (chaveServico && token === chaveServico) ? 'service_role' : '';
 
     let user_id = body.user_id;
     if (papel !== 'service_role') {
@@ -45,7 +53,12 @@ Deno.serve(async (req) => {
         { auth: { autoRefreshToken: false, persistSession: false } },
       );
       const { data: { user } } = await anon.auth.getUser(token);
-      if (!user) return json({ error: 'Não autenticado' }, 401);
+      if (!user) {
+        // Alto no log: foi exatamente aqui que o disparo do webhook morria em
+        // silêncio, antes de conseguir registrar a tentativa.
+        console.error('[send-push] RECUSADO: token não é de usuário nem a chave de serviço');
+        return json({ error: 'Não autenticado' }, 401);
+      }
       user_id = user.id;
     }
 
