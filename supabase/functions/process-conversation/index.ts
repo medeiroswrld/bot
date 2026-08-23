@@ -1941,15 +1941,17 @@ Seu objetivo é entender o que o cliente procura, mostrar as opções que a conc
 
 ## Nome do cliente
 
-- **Se você ainda não souber o nome do cliente, pergunte ANTES de qualquer outra coisa.** Exemplo: "Pra começar, qual o seu nome?"
+- **Se você ainda não souber o nome do cliente, pergunte no começo da conversa.** Exemplo: "Pra começar, qual o seu nome?"
 - Quando o cliente informar o nome, chame imediatamente a ferramenta \`salvar_nome_cliente\`.
-- **SEMPRE chame o cliente pelo primeiro nome quando souber.** Use-o de forma natural na conversa.
+- **Use o primeiro nome com parcimônia.** No cumprimento e num momento ou outro que peça, nunca em toda mensagem. Ninguém repete o nome do interlocutor a cada frase — fazer isso é a marca registrada de robô, e o cliente sente na hora.
 
 ## Tom e estilo de conversa
 
 - Fale como um bom vendedor humano: cordial, prestativo, próximo, mas profissional.
 - Escreva como no WhatsApp: mensagens curtas e naturais. Nada de textão corporativo.
 - **NÃO monte listas com marcadores.** Vendedor não manda tópico com traço ou bolinha — ele escreve corrido. Em vez de listar preço, km, câmbio e cor em linhas separadas, diga numa frase: "É um Nivus Confortline 2023, azul, com 51 mil km, automático, por R\$ 104.900."
+- **Nunca use travessão nem hífen no meio da frase** (— ou –). Pessoa nenhuma escreve assim no WhatsApp; é marca de texto gerado. Use vírgula, ponto, ou reescreva a frase.
+- **Quebre a resposta em parágrafos curtos** quando houver mais de uma ideia — por exemplo, responder o preço e depois convidar pra ver o carro. Cada parágrafo é enviado como uma MENSAGEM SEPARADA, que é como gente escreve no WhatsApp. Dois parágrafos é o ideal; três é o máximo.
 - **Ponto de exclamação com parcimônia**: no máximo um por mensagem, e nem em toda mensagem. Várias exclamações seguidas soam artificiais, de robô animado demais.
 - **Emoji é raro**: no máximo um a cada várias mensagens, e só quando cabe de verdade. Mensagem sem emoji nenhum é o normal, não a exceção.
 - Não use formatação de markdown (como \`**\` ou \`##\`). Se precisar destacar algo, use o negrito do WhatsApp (\`*texto*\` com um asterisco só), com parcimônia.
@@ -2538,8 +2540,25 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     const wPid        = String(wSettings?.whatsapp_phone_number_id ?? '');
     const wToken      = await resolveWhatsAppToken(supabase, userId);
 
-    const welcomeText =
-      `Olá! 👋 Bem-vindo à ${companyName}.\n\nPra começar, qual o seu nome?`;
+    // No Instagram e no Messenger o nome vem no proprio webhook, do perfil da
+    // conta. Perguntar "qual o seu nome?" pra quem acabou de mandar mensagem
+    // com o nome estampado no topo da conversa era a coisa mais robotica que
+    // este bot fazia.
+    //
+    // No WhatsApp continua perguntando de proposito: la o nome de perfil e o
+    // que a pessoa escolheu ("Ju 💜", "Casa", "Oficina do Ze"), e tratar aquilo
+    // como nome proprio sai pior que perguntar.
+    const { data: convNome } = await supabase
+      .from('conversations').select('customer_name').eq('id', conversationId).maybeSingle();
+
+    const primeiroNome = String(convNome?.customer_name ?? '').trim().split(/\s+/)[0] ?? '';
+    const jaSeiONome = canal !== 'whatsapp'
+      && primeiroNome.length >= 2
+      && !/^\d+$/.test(primeiroNome);
+
+    const welcomeText = jaSeiONome
+      ? `Oi, ${primeiroNome}! Aqui é da ${companyName}. Em que posso ajudar?`
+      : `Olá! Bem-vindo à ${companyName}.\n\nPra começar, qual o seu nome?`;
 
     // Envia ANTES de gravar: o wamid só existe depois da resposta da Meta, e é
     // ele que liga esta mensagem aos webhooks de entregue/lido.
@@ -3116,7 +3135,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
 
     if (motivoResgate === 'cliente reclamou do atendimento') {
       // Substitui: o que o modelo ia mandar é mais do mesmo que gerou a queixa.
-      finalText = `${nome}me desculpa por isso. Vou chamar agora uma pessoa da equipe pra te atender — só um instante que já te respondem por aqui. 🙏`;
+      finalText = `${nome}me desculpa por isso. Vou chamar agora uma pessoa da equipe pra te atender. É rapidinho, já te respondem por aqui.`;
     } else if (motivoResgate === 'bot mandou o cliente pra outro canal') {
       // Substitui: o texto é ativamente nocivo (manda o cliente embora).
       finalText = `${nome}deixa eu confirmar isso certinho com a equipe pra não te passar informação errada. Já te respondem por aqui, é rapidinho. 😊`;
@@ -3128,7 +3147,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
       // ACRESCENTA: aqui o modelo costuma ter oferecido uma alternativa boa
       // (o Onix Plus no lugar do Prisma). Chamar gente não pode custar a
       // oferta — o cliente recebe as duas coisas.
-      finalText = `${finalText.trim()}\n\nE já pedi pra uma pessoa da equipe confirmar isso direitinho pra você — em instantes te respondem por aqui. 😊`;
+      finalText = `${finalText.trim()}\n\nE já pedi pra uma pessoa da equipe confirmar isso direitinho pra você. Em instantes te respondem por aqui.`;
     }
     log.warn('handoff de resgate', {
       action: 'chamar_atendente', forcado: true, motivo: motivoResgate, negativasAnteriores,
@@ -3206,41 +3225,74 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   }
 
   // ── 8. Envia resposta ao cliente, no canal de onde ele veio ────────────────
-  let sent = false;
-  let wamid: string | null = null;
+  //
+  // Resposta com mais de uma ideia vira mais de um balao, quebrando nos
+  // paragrafos que o proprio modelo escreveu. Isto NAO custa token nenhum a
+  // mais: o texto gerado e exatamente o mesmo, muda so quantas chamadas de
+  // envio a gente faz. Vendedor humano manda assim; bloco unico de seis linhas
+  // e a assinatura de robo.
+  const baloes = (() => {
+    const partes = finalText.split(/\n\s*\n/).map((t) => t.trim()).filter(Boolean);
+    if (partes.length <= 1) return [finalText.trim()];
+    // Acima de tres vira metralhadora e enche a tela do cliente; o excedente
+    // volta pro ultimo balao.
+    return partes.length > 3 ? [partes[0], partes[1], partes.slice(2).join('\n\n')] : partes;
+  })();
 
-  if (canal === 'whatsapp') {
-    const r = await sendMessageComId(customerPhone, finalText, phoneNumberId || undefined, waToken, log);
-    sent = r.ok; wamid = r.wamid;
-  } else {
-    // Instagram e Messenger: outro endpoint, outro token (o da pagina) e o
-    // remetente vai na URL. O destinatario e o PSID/IGSID.
-    const contaId = String(
-      (canal === 'instagram' ? settings?.ig_user_id : settings?.fb_page_id) ?? '',
-    );
-    const { data: tokenPagina } = await supabase.rpc('get_meta_page_token', { p_user_id: userId, p_canal: canal });
-    const r = await enviarSocial(contaId, customerPhone, finalText, String(tokenPagina ?? ''), canal as 'instagram' | 'messenger');
-    sent = r.ok;
-    // Guarda o id da mensagem enviada: e o que faz o webhook reconhecer o eco
-    // como sendo NOSSO e descartar. Sem isso o bot se marca como atendente e a
-    // conversa vai pra 'humano' — ele se cala depois de cada resposta.
-    wamid = r.mid ?? null;
-    if (!r.ok) log.error('falha ao enviar no canal social', { action: 'send_final', canal, erro: r.erro });
+  const contaId = canal === 'whatsapp' ? '' : String(
+    (canal === 'instagram' ? settings?.ig_user_id : settings?.fb_page_id) ?? '',
+  );
+  // Um token so pros tres envios: buscar de novo a cada balao seria uma ida ao
+  // Vault por mensagem.
+  const tokenPagina = canal === 'whatsapp' ? '' : String(
+    (await supabase.rpc('get_meta_page_token', { p_user_id: userId, p_canal: canal })).data ?? '',
+  );
+
+  let sent = false;
+  const enviados: Array<{ texto: string; wamid: string | null; ok: boolean }> = [];
+
+  for (let i = 0; i < baloes.length; i++) {
+    const parte = baloes[i];
+
+    // Pausa entre baloes: garante a ordem de chegada e da tempo de leitura.
+    // Sem ela os tres pipocam no mesmo segundo, que e justamente o que
+    // denuncia automacao.
+    if (i > 0) await new Promise((r) => setTimeout(r, 900));
+
+    if (canal === 'whatsapp') {
+      const r = await sendMessageComId(customerPhone, parte, phoneNumberId || undefined, waToken, log);
+      enviados.push({ texto: parte, wamid: r.wamid, ok: r.ok });
+    } else {
+      // Instagram e Messenger: outro endpoint, outro token (o da pagina) e o
+      // remetente vai na URL. O destinatario e o PSID/IGSID.
+      //
+      // Guarda o id de CADA balao: e o que faz o webhook reconhecer o eco como
+      // sendo nosso e descartar. Guardar so o do ultimo faria os anteriores
+      // voltarem como se fossem do atendente, e a conversa iria pra 'humano'.
+      const r = await enviarSocial(contaId, customerPhone, parte, tokenPagina, canal as 'instagram' | 'messenger');
+      enviados.push({ texto: parte, wamid: r.mid ?? null, ok: r.ok });
+      if (!r.ok) log.error('falha ao enviar no canal social', { action: 'send_final', canal, erro: r.erro, balao: i });
+    }
   }
 
+  sent = enviados.some((e) => e.ok);
+
   if (sent) {
-    log.info('resposta enviada', { action: 'send_final', canal, chars: finalText.length, wamid });
+    log.info('resposta enviada', { action: 'send_final', canal, chars: finalText.length, baloes: baloes.length });
   } else {
     log.error('falha ao enviar — mensagem salva no banco mesmo assim', { action: 'send_final', canal });
   }
 
   // ── 9. Salva resposta do bot e atualiza last_message_at ────────────────────
   const now = new Date().toISOString();
-  // O wamid é o que liga esta linha aos webhooks de status (entregue/lido).
-  await supabase.from('messages').insert({
-    conversation_id: conversationId, role: 'bot', content: finalText,
-    wa_message_id: wamid, wa_status: sent ? 'sent' : 'failed',
-  });
+  // Uma linha por balao, com o id de cada um: e assim que o cliente viu, e assim
+  // que o CRM mostra. O wa_message_id liga cada linha aos webhooks de status.
+  await supabase.from('messages').insert(
+    enviados.map((e) => ({
+      conversation_id: conversationId, role: 'bot', content: e.texto,
+      wa_message_id: e.wamid, wa_status: e.ok ? 'sent' : 'failed',
+    })),
+  );
   await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);
 
   return new Response('OK', { status: 200 });
