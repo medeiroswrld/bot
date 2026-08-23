@@ -21,7 +21,34 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
 
   try {
-    const { user_id, titulo, corpo, url, tag } = await req.json();
+    const body = await req.json();
+    const { titulo, corpo, url, tag } = body;
+
+    // Quem pode notificar QUEM.
+    //
+    // O webhook chama com a service_role e precisa notificar o dono da loja, que
+    // não é ele. Mas o CRM também chama daqui (botão de testar), e aí aceitar o
+    // `user_id` do corpo deixaria qualquer usuário autenticado disparar
+    // notificação no celular de outra loja. Então: service_role manda no corpo,
+    // usuário comum é forçado ao próprio id.
+    const token = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
+    let papel = '';
+    try {
+      papel = String(JSON.parse(atob(token.split('.')[1] ?? '')).role ?? '');
+    } catch { /* token ilegível: cai no caminho restrito abaixo */ }
+
+    let user_id = body.user_id;
+    if (papel !== 'service_role') {
+      const anon = createClient(
+        Deno.env.get('SUPABASE_URL') ?? '',
+        Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+        { auth: { autoRefreshToken: false, persistSession: false } },
+      );
+      const { data: { user } } = await anon.auth.getUser(token);
+      if (!user) return json({ error: 'Não autenticado' }, 401);
+      user_id = user.id;
+    }
+
     if (!user_id) return json({ error: 'user_id obrigatório' }, 400);
 
     const publica = Deno.env.get('VAPID_PUBLIC_KEY') ?? '';

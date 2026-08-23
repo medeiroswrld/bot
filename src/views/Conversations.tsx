@@ -362,6 +362,13 @@ export default function Conversations() {
   const [notifPerm,      setNotifPerm]      = useState<NotificationPermission>(
     'Notification' in window ? Notification.permission : 'denied',
   );
+  // Permissao do navegador e inscricao de push sao COISAS DIFERENTES, e tratar
+  // as duas como uma so foi o bug: quem concedeu permissao la atras, quando a
+  // notificacao ainda era so na aba aberta, via "Notificacoes ativas" para
+  // sempre e nunca chegava a se inscrever. O webhook disparava push para zero
+  // aparelhos, sem erro nenhum em lugar nenhum.
+  const [pushInscrito, setPushInscrito] = useState<boolean | null>(null);
+  const [testandoPush, setTestandoPush] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [showEmoji, setShowEmoji] = useState(false);
 
@@ -546,17 +553,12 @@ export default function Conversations() {
     }
   };
 
-  const requestNotifPermission = async () => {
-    if (!('Notification' in window)) return;
-    const perm = await Notification.requestPermission();
-    setNotifPerm(perm);
-    if (perm !== 'granted' || !user?.id) return;
-
-    // Inscricao de push. A Notification acima so dispara com a ABA ABERTA - ou
-    // seja, quando o lojista ja esta olhando a tela e nao precisa ser avisado.
-    // O push abaixo e o que chega com o CRM fechado.
+  // Registra ESTE aparelho para receber push. Idempotente: chamar de novo com o
+  // aparelho ja inscrito so revalida a linha.
+  const inscreverAparelho = useCallback(async (): Promise<boolean> => {
+    if (!user?.id) return false;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
     try {
-      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
       const reg = await navigator.serviceWorker.ready;
       const existente = await reg.pushManager.getSubscription();
       const sub = existente ?? await reg.pushManager.subscribe({
@@ -564,20 +566,80 @@ export default function Conversations() {
         applicationServerKey: base64UrlParaBytes(VAPID_PUBLIC),
       });
       const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } };
-      if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return;
+      if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) return false;
 
       // onConflict no endpoint: reinstalar ou reativar no mesmo aparelho
       // atualiza a linha em vez de criar outra e notificar em duplicidade.
-      await supabaseTyped.from('push_subscriptions').upsert({
+      const { error } = await supabaseTyped.from('push_subscriptions').upsert({
         user_id: user.id,
         endpoint: json.endpoint,
         p256dh: json.keys.p256dh,
         auth: json.keys.auth,
         user_agent: navigator.userAgent.slice(0, 200),
       } as never, { onConflict: 'endpoint' });
+
+      if (error) {
+        // Antes esse erro era engolido: o navegador ficava inscrito, o banco
+        // vazio, e a tela dizia que estava tudo certo.
+        console.warn('[push] o aparelho assinou mas o registro falhou:', error.message);
+        return false;
+      }
+      return true;
     } catch (e) {
       // Nao pode quebrar a tela: sem push o CRM segue funcionando normalmente.
       console.warn('[push] nao foi possivel inscrever este aparelho:', e);
+      return false;
+    }
+  }, [user?.id]);
+
+  const requestNotifPermission = async () => {
+    if (!('Notification' in window)) return;
+    const perm = await Notification.requestPermission();
+    setNotifPerm(perm);
+    if (perm !== 'granted') { setPushInscrito(false); return; }
+    setPushInscrito(await inscreverAparelho());
+  };
+
+  // Permissao ja concedida significa que o lojista JA disse sim. Registrar o
+  // aparelho sozinho e o que ele espera que aconteca — esperar um segundo
+  // clique num botao que diz "ativas" e esperar por algo que nunca vem.
+  useEffect(() => {
+    if (!user?.id || notifPerm !== 'granted') { setPushInscrito(false); return; }
+    let vivo = true;
+    inscreverAparelho().then((ok) => { if (vivo) setPushInscrito(ok); });
+    return () => { vivo = false; };
+  }, [user?.id, notifPerm, inscreverAparelho]);
+
+  // Teste de verdade: sai daqui, passa pelo servidor, pela Google/Apple e volta
+  // no aparelho. O teste antigo usava `new Notification()`, que so provava que a
+  // aba aberta consegue desenhar um balao — exatamente o que induziu todo mundo
+  // a achar que estava funcionando.
+  const testarPushReal = async () => {
+    if (!user?.id) return;
+    setTestandoPush(true);
+    try {
+      const { data: { session } } = await supabaseTyped.auth.getSession();
+      const r = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-push`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+        body: JSON.stringify({
+          user_id: user.id,
+          titulo: 'Teste do Amply',
+          corpo: 'Se você está vendo isto, o push está funcionando.',
+          url: '/conversas',
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok) { alert(`Falhou: ${j.error ?? r.status}`); return; }
+      if (!j.enviados) {
+        alert(`Nenhum aparelho recebeu. Motivo: ${j.motivo ?? 'desconhecido'}`);
+        return;
+      }
+      alert(`Enviado para ${j.enviados} aparelho(s). Feche o app e aguarde alguns segundos.`);
+    } catch (e) {
+      alert(`Erro ao testar: ${(e as Error).message}`);
+    } finally {
+      setTestandoPush(false);
     }
   };
 
@@ -982,17 +1044,25 @@ export default function Conversations() {
                 flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
                 padding: '4px 8px', fontSize: '0.7rem', borderRadius: 5, cursor: 'pointer',
                 border: '1px solid var(--border)',
-                background: notifPerm === 'granted' ? '#ecfdf5' : notifPerm === 'denied' ? '#fef2f2' : 'transparent',
-                color: notifPerm === 'granted' ? '#10b981' : notifPerm === 'denied' ? '#ef4444' : 'var(--text-secondary)',
+                background: notifPerm === 'denied' ? '#fef2f2'
+                  : notifPerm === 'granted' ? (pushInscrito ? '#ecfdf5' : '#fffbeb') : 'transparent',
+                color: notifPerm === 'denied' ? '#ef4444'
+                  : notifPerm === 'granted' ? (pushInscrito ? '#10b981' : '#b45309') : 'var(--text-secondary)',
                 fontWeight: 600,
               }}
             >
-              {notifPerm === 'granted' ? <Bell size={12} /> : <BellOff size={12} />}
-              {notifPerm === 'granted' ? 'Notificações ativas' : notifPerm === 'denied' ? 'Bloqueadas' : 'Ativar Notificações'}
+              {notifPerm === 'granted' && pushInscrito ? <Bell size={12} /> : <BellOff size={12} />}
+              {notifPerm === 'denied' ? 'Bloqueadas'
+                : notifPerm !== 'granted' ? 'Ativar Notificações'
+                : pushInscrito === null ? 'Verificando…'
+                : pushInscrito ? 'Notificações ativas'
+                : 'Registrar este aparelho'}
             </button>
             <button
               type="button"
-              onClick={testNotification}
+              disabled={testandoPush}
+              title="Envia um push de verdade: servidor, Google/Apple e de volta no aparelho"
+              onClick={testarPushReal}
               style={{
                 padding: '4px 8px', fontSize: '0.7rem', borderRadius: 5, cursor: 'pointer',
                 border: '1px solid var(--border)', background: 'transparent',
