@@ -635,11 +635,30 @@ export default function Conversations() {
       linhas.push(`Service worker: ${temSW ? 'registrado' : 'NAO registrado'}`);
       linhas.push(`Assinatura no navegador: ${temSub ? 'sim' : 'NAO'}`);
 
-      const { count } = await supabaseTyped
+      // Lista os aparelhos, nao so conta. "3 enviados" parece sucesso mas nao
+      // diz QUAIS tres — e no iPhone o push so existe dentro do app instalado
+      // na tela de inicio. Tres assinaturas de desktop com o iPhone de fora dao
+      // exatamente esse numero e nenhuma notificacao no bolso do lojista.
+      const { data: aparelhos } = await supabaseTyped
         .from('push_subscriptions')
-        .select('id', { count: 'exact', head: true })
+        .select('user_agent, endpoint')
         .eq('user_id', user.id);
-      linhas.push(`Aparelhos salvos no banco: ${count ?? 0}`);
+
+      const lista = (aparelhos ?? []) as Array<{ user_agent: string | null; endpoint: string | null }>;
+      linhas.push(`Aparelhos salvos no banco: ${lista.length}`);
+      lista.forEach((a, i) => {
+        const ua = String(a.user_agent ?? '');
+        const tipo = /iPhone|iPad/i.test(ua) ? 'iPHONE'
+          : /Android/i.test(ua) ? 'Android'
+          : /Macintosh/i.test(ua) ? 'Mac'
+          : /Windows/i.test(ua) ? 'Windows' : 'outro';
+        const servico = /apple/i.test(String(a.endpoint)) ? 'Apple'
+          : /fcm|google/i.test(String(a.endpoint)) ? 'Google' : '?';
+        linhas.push(`  ${i + 1}. ${tipo} via ${servico}`);
+      });
+      if (!lista.some((a) => /iPhone|iPad/i.test(String(a.user_agent)))) {
+        linhas.push('  >> Nenhum iPhone registrado. Abra o app pela tela de inicio do iPhone.');
+      }
 
       const { data: { session } } = await supabaseTyped.auth.getSession();
       const r = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-push`, {
