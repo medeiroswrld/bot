@@ -1605,7 +1605,7 @@ async function executeTool(
 
 interface Faq { question: string; answer: string }
 
-function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger, canal = 'whatsapp', falouDePagamento = true): string {
+function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger, canal = 'whatsapp', falouDePagamento = true, primeiroContato = false): string {
   const company = String(settings.company_name        ?? 'nossa concessionária');
   const address = String(settings.address             ?? 'não informado');
   const phone   = String(settings.phone_number        ?? 'não informado');
@@ -1631,7 +1631,14 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
 
   const nomeCliente = customerName ? customerName.split(' ')[0] : null;
   const nomeInfo = nomeCliente
-    ? `\n- Nome do cliente nesta conversa: ${nomeCliente} (use este nome ao se dirigir a ele)`
+    ? `\n- Nome do cliente nesta conversa: ${nomeCliente} (use este nome com parcimônia, não a cada mensagem)`
+    : '';
+
+  // Sem esta nota o modelo responde a primeira mensagem sem dizer de onde fala.
+  // A boas-vindas enlatada so dispara agora quando a abertura e um "oi" seco;
+  // quando o cliente ja abre perguntando, quem cumprimenta é ele.
+  const primeiroContatoInfo = primeiroContato
+    ? '\n- Esta é a PRIMEIRA mensagem desta conversa: cumprimente e diga de qual loja você fala, em uma linha curta, ANTES de responder o que foi perguntado.'
     : '';
 
   const paymentMethods = Array.isArray(settings.payment_methods)
@@ -1925,7 +1932,7 @@ e destroem a confiança justamente com quem estava mais perto de comprar.
 - Endereço: ${address}
 - Telefone: ${phone}
 - Horário de funcionamento: ${horarios}
-- Data de hoje (Brasília): ${todayLabel}${nomeInfo}
+- Data de hoje (Brasília): ${todayLabel}${nomeInfo}${primeiroContatoInfo}
 
 Use a data de hoje como referência sempre que o cliente falar em datas relativas ("hoje", "amanhã", "sexta que vem", "fim de semana"). Nunca ofereça nem confirme horário fora do funcionamento da loja: a agenda real — só com horários válidos e que ainda não passaram hoje — vem sempre do ver_horarios_disponiveis; ofereça apenas os horarios_livres que ela retornar.
 
@@ -1957,6 +1964,13 @@ Seu objetivo é entender o que o cliente procura, mostrar as opções que a conc
 - Não use formatação de markdown (como \`**\` ou \`##\`). Se precisar destacar algo, use o negrito do WhatsApp (\`*texto*\` com um asterisco só), com parcimônia.
 - Não despeje informação. Responda o que foi perguntado e conduza a conversa com naturalidade.
 - Faça uma pergunta de cada vez, como numa conversa de verdade.
+- **Responda ao que a pessoa acabou de dizer antes de puxar o próximo assunto.** Se ela contou que o carro é pra família, comente isso. Emendar outra pergunta sem reagir à resposta anterior é o que mais faz a conversa parecer formulário.
+
+### Quando o cliente disser que está acima do orçamento
+
+Não emende com financiamento nem pergunte quanto ele tem de entrada. Soa como cobrança, e é o momento em que a maioria some da conversa.
+
+Reconheça o que ele falou e siga por um destes dois caminhos: mostre por que aquele carro vale o que custa (o que ele tem de diferente, estado, equipamentos), ou ofereça uma alternativa real do estoque que caiba melhor. Só fale de financiamento se ELE perguntar.
 
 ## NUNCA argumente contra a própria venda
 
@@ -2529,7 +2543,20 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   }
 
   // ── 4. Boas-vindas: primeira mensagem da conversa ─────────────────────────
-  if (isFirstMessage) {
+  // Boas-vindas enlatada SO quando a primeira mensagem nao traz conteudo.
+  //
+  // Antes ela disparava sempre e dava `return`, ou seja: quem abria com "Qual o
+  // valor?" e a foto de um story recebia "qual o seu nome?" e tinha a pergunta
+  // ignorada. Pior: o turno da imagem era gasto, e na vez seguinte a foto ja
+  // era historico — o modelo respondia as cegas e perguntava se era compacto,
+  // SUV ou picape com o carro na tela do cliente.
+  const aberturaTexto = String(latestCustomerMsg?.content ?? '').trim();
+  const soCumprimento =
+    !/^\[(imagem|foto|audio)\]/i.test(aberturaTexto)
+    && aberturaTexto.length <= 25
+    && /^(oi+|ol[áa]+|opa|e a[ií]|bo[am] (dia|tarde|noite)|hey|hi|blz|beleza|tudo bem)\b/i.test(aberturaTexto);
+
+  if (isFirstMessage && soCumprimento) {
     const { data: wSettings } = await supabase
       .from('company_settings')
       .select('company_name, whatsapp_phone_number_id, ig_user_id, fb_page_id')
@@ -2719,6 +2746,9 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     // as falas do bot, a primeira menção dele reabriria o assunto sozinha.
     /\b(financ|parcel|entrada|cons[óo]rcio|troca|boleto|cart[ãa]o|pag(ar|amento)|[àa] vista)/i
       .test(orderedMessages.filter((m) => m.role === 'customer').map((m) => String(m.content)).join(' ')),
+    // Primeiro contato: quando a abertura ja traz pergunta, a boas-vindas
+    // enlatada nao dispara e quem cumprimenta e o modelo.
+    isFirstMessage,
   ) + leadBlock;
 
   // ── 6. Monta histórico para o modelo ──────────────────────────────────────
@@ -2800,25 +2830,47 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   //    multiplicaria o custo de uma conversa com várias fotos.
   //    Formato de URL (não base64) porque a imagem já está no nosso Storage,
   //    público, e assim não trafega duas vezes.
-  const ultimaMsg = orderedMessages[orderedMessages.length - 1];
-  const urlImagem = ultimaMsg?.role === 'customer'
-    ? (String(ultimaMsg.content).match(/^\[imagem\]\s*(https?:\/\/\S+)/i)?.[1] ?? '')
-    : '';
+  // Procura a foto do cliente nas ultimas mensagens, nao so na ULTIMA.
+  //
+  // Antes so a ultima contava, e bastava o cliente mandar a foto e escrever
+  // qualquer coisa depois ("Fernanda", "e ai?") pra o modelo perder a imagem e
+  // responder as cegas. Aconteceu numa resposta a story: ele perguntou se era
+  // compacto, SUV ou picape com o carro na tela do cliente.
+  //
+  // Uma imagem por chamada e so enquanto recente: reenviar todas multiplicaria
+  // o custo de uma conversa com varias fotos.
+  const JANELA_IMAGEM = 6;
+  let urlImagem = '';
+  let legendaImagem = '';
+  let imagemEhAtual = false;
+
+  for (let i = orderedMessages.length - 1, n = 0; i >= 0 && n < JANELA_IMAGEM; i--, n++) {
+    const m = orderedMessages[i];
+    if (m?.role !== 'customer') continue;
+    const achou = String(m.content).match(/^\[imagem\]\s*(https?:\/\/\S+)/i);
+    if (achou) {
+      urlImagem = achou[1];
+      legendaImagem = String(m.content).replace(/^\[imagem\]\s*\S+/i, '').trim();
+      imagemEhAtual = n === 0;
+      break;
+    }
+  }
 
   if (urlImagem && provider === 'anthropic' && claudeMessages.length) {
     const ultima = claudeMessages[claudeMessages.length - 1];
     if (ultima.role === 'user') {
-      const legenda = String(ultimaMsg.content).replace(/^\[imagem\]\s*\S+/i, '').trim();
+      const textoAtual = legendaImagem
+        ? `O cliente mandou esta foto e escreveu: "${legendaImagem}"`
+        : 'O cliente mandou esta foto, sem escrever nada junto.';
+      const textoAntigo = `Esta e a foto que o cliente mandou ha pouco NESTA conversa${
+        legendaImagem ? `, escrevendo: "${legendaImagem}"` : ''
+      }. A conversa continua sobre ela — considere a imagem ao responder a mensagem atual.`;
+
       ultima.content = [
         { type: 'image', source: { type: 'url', url: urlImagem } },
-        {
-          type: 'text',
-          text: legenda
-            ? `O cliente mandou esta foto e escreveu: "${legenda}"`
-            : 'O cliente mandou esta foto, sem escrever nada junto.',
-        },
+        { type: 'text', text: imagemEhAtual ? textoAtual : textoAntigo },
       ];
-      log.info('imagem do cliente enviada ao modelo', { action: 'visao' });
+      log.info('imagem do cliente enviada ao modelo', { action: 'visao', atual: imagemEhAtual });
     }
   }
 
