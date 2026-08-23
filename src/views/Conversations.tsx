@@ -618,6 +618,29 @@ export default function Conversations() {
     if (!user?.id) return;
     setTestandoPush(true);
     try {
+      // Diagnostico junto do teste. Cada resposta "nao chegou" custava um ciclo
+      // de ida e volta pra descobrir QUAL elo falhou; aqui os cinco elos
+      // aparecem de uma vez, e o principal e o numero de inscricoes salvas: se
+      // for 0, o aparelho nunca se registrou e o resto nem importa.
+      const linhas: string[] = [];
+      linhas.push(`Conta: ${user.id}`);
+      linhas.push(`Permissao do navegador: ${typeof Notification !== 'undefined' ? Notification.permission : 'sem suporte'}`);
+
+      let temSW = false, temSub = false;
+      try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        temSW = Boolean(reg);
+        if (reg) temSub = Boolean(await reg.pushManager.getSubscription());
+      } catch { /* sem suporte */ }
+      linhas.push(`Service worker: ${temSW ? 'registrado' : 'NAO registrado'}`);
+      linhas.push(`Assinatura no navegador: ${temSub ? 'sim' : 'NAO'}`);
+
+      const { count } = await supabaseTyped
+        .from('push_subscriptions')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+      linhas.push(`Aparelhos salvos no banco: ${count ?? 0}`);
+
       const { data: { session } } = await supabaseTyped.auth.getSession();
       const r = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-push`, {
         method: 'POST',
@@ -630,12 +653,16 @@ export default function Conversations() {
         }),
       });
       const j = await r.json();
-      if (!r.ok) { alert(`Falhou: ${j.error ?? r.status}`); return; }
-      if (!j.enviados) {
-        alert(`Nenhum aparelho recebeu. Motivo: ${j.motivo ?? 'desconhecido'}`);
-        return;
-      }
-      alert(`Enviado para ${j.enviados} aparelho(s). Feche o app e aguarde alguns segundos.`);
+      linhas.push(`Resposta do servidor: HTTP ${r.status} ${JSON.stringify(j)}`);
+
+      const texto = linhas.join('\n');
+      console.log('[push] diagnostico\n' + texto);
+      alert(
+        (j.enviados
+          ? `Enviado para ${j.enviados} aparelho(s). Feche o app e aguarde alguns segundos.`
+          : 'NAO foi enviado para nenhum aparelho.')
+        + '\n\n--- diagnóstico ---\n' + texto,
+      );
     } catch (e) {
       alert(`Erro ao testar: ${(e as Error).message}`);
     } finally {
