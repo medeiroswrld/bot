@@ -246,9 +246,14 @@ export const AppProvider = ({ children }) => {
     try {
       const { data: dbLeads, error } = await supabase
         .from('leads')
+        // O `!car_id` NAO e enfeite: desde que `sold_car_id` passou a apontar
+        // pra `cars` tambem (063), existem DUAS chaves estrangeiras de leads
+        // pra cars e o PostgREST recusa o embed ambiguo — a busca inteira
+        // falhava e a lista de leads vinha vazia. Dica por COLUNA em vez do
+        // nome da constraint, que depende de como o Postgres batizou.
         .select(`
           *,
-          cars ( brand, model, version )
+          cars!car_id ( brand, model, version )
         `)
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
@@ -1217,7 +1222,7 @@ export const AppProvider = ({ children }) => {
       const { data: newLead, error } = await supabase
         .from('leads')
         .insert([insertData])
-        .select(`*, cars (brand, model, version)`)
+        .select(`*, cars!car_id (brand, model, version)`)
         .single();
 
       if (error) throw error;
