@@ -27,8 +27,13 @@ serve(async (req) => {
 
     // Busca o carro
     const { data: car, error: carErr } = await supabase
+      // Colunas explicitas, NUNCA select('*'). Estas funcoes montam mensagem que
+      // vai pro CLIENTE, e a tabela cars guarda o que a loja pagou
+      // (purchase_price), chassi, renavam e dados do comprador. Com '*' basta
+      // alguem interpolar o objeto inteiro, ou uma coluna sensivel nova
+      // aparecer, pra vazar - e vazar quanto a loja pagou destroi a negociacao.
       .from('cars')
-      .select('*')
+      .select('id, user_id, brand, model, version, year, price, mileage, transmission, fuel, color, vehicle_type, status')
       .eq('id', car_id)
       .single();
 

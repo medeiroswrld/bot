@@ -35,7 +35,12 @@ serve(async (req) => {
     }
 
     // Carro
-    const { data: car } = await supabase.from('cars').select('*').eq('id', car_id).single();
+        // Colunas explicitas, NUNCA select('*'). Estas funcoes montam mensagem que
+    // vai pro CLIENTE, e a tabela cars guarda o que a loja pagou
+    // (purchase_price), chassi, renavam e dados do comprador. Com '*' basta
+    // alguem interpolar o objeto inteiro, ou uma coluna sensivel nova
+    // aparecer, pra vazar - e vazar quanto a loja pagou destroi a negociacao.
+    const { data: car } = await supabase.from('cars').select('id, user_id, brand, model, version, year, price, mileage, transmission, fuel, color, vehicle_type, status').eq('id', car_id).single();
     if (!car) {
       return new Response(JSON.stringify({ error: 'Carro não encontrado' }), {
         status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
