@@ -123,10 +123,36 @@ export function detectar(texto) {
     }
   }
 
+  const lista = [...achados.values()];
+
+  // Contrato está cheio de dinheiro que NÃO é o preço da venda: multa de
+  // R$ 500, parcela do financiamento, valor da entrada, percentual de arras.
+  //
+  // Sugerir {{valor}} para todos é perigoso, e não em teoria: na primeira
+  // revisão real isso marcou a multa contratual como preço do carro, e o
+  // contrato sairia dizendo "multa não compensatória no valor de R$ 56.900,00
+  // (quinhentos reais)". Quem revisa confia na sugestão — então a sugestão não
+  // pode ser um chute.
+  //
+  // Só o MAIOR valor vem sugerido. Os outros entram desmarcados, para a pessoa
+  // escolher de propósito.
+  const dinheiros = lista.filter((a) => a.campo === 'valor');
+  if (dinheiros.length > 1) {
+    const numero = (v) => Number(String(v).replace(/[^\d,]/g, '').replace(',', '.')) || 0;
+    const maior = dinheiros.reduce((a, b) => (numero(a.valor) >= numero(b.valor) ? a : b));
+    for (const d of dinheiros) if (d !== maior) d.campo = null;
+  }
+
+  // Mesma razão para datas: vencimento de parcela, prazo de garantia e data da
+  // venda convivem no mesmo documento. Com mais de uma, qualquer palpite sobre
+  // qual é a venda erra na maioria das vezes.
+  const datas = lista.filter((a) => a.campo === 'data');
+  if (datas.length > 1) for (const d of datas) d.campo = null;
+
   // Mais longo primeiro: se um valor contém outro (o CPF dentro de uma linha
   // inteira capturada por rótulo), substituir o maior antes evita que o menor
   // parta o marcador já inserido.
-  return [...achados.values()].sort((a, b) => b.valor.length - a.valor.length);
+  return lista.sort((a, b) => b.valor.length - a.valor.length);
 }
 
 /**

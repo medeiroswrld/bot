@@ -56,6 +56,14 @@ const AssistenteMarcadores = ({ texto, onAplicar, onFechar }) => {
                                 um nome é do comprador ou de uma testemunha. Esses você marca
                                 selecionando o texto e clicando no campo, na tela anterior.
                             </p>
+                            <p style={{ fontSize: '0.78rem', color: '#b45309', background: '#fffbeb',
+                                        border: '1px solid #fde68a', borderRadius: 8,
+                                        padding: '8px 11px', margin: '0 0 12px', lineHeight: 1.5 }}>
+                                Valores e datas vêm <strong>desmarcados de propósito</strong>, menos o
+                                maior valor. Um contrato tem multa, parcela e entrada além do preço
+                                da venda — marcar todos como preço faria a multa de R$ 500 sair como
+                                o valor do carro. Marque um por um o que for mesmo da venda.
+                            </p>
 
                             <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                                 <button type="button" className="btn-secondary"
