@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, Lock, Printer, TrendingUp, TrendingDown } from 'lucide-react';
+import { Plus, Trash2, Lock, Printer, TrendingUp, TrendingDown, Repeat, Check, Pencil } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
-import { demonstrativo, sugestoes, rotuloMes, brl } from '../lib/financeiro.js';
+import { demonstrativo, sugestoes, rotuloMes, brl, CATEGORIAS_OPERACAO } from '../lib/financeiro.js';
 
 const mesAtual = () => new Date().toISOString().slice(0, 7);
 const mesesAtras = (n) => {
@@ -101,6 +101,152 @@ const NovoLancamento = ({ onFechar }) => {
     );
 };
 
+// Despesas fixas: salário, aluguel, contabilidade, internet.
+//
+// Isto é MODELO, não agendamento. O sistema nao cria lançamento futuro sozinho:
+// conta de luz muda de valor, funcionário entra e sai, e caixa cheio de número
+// adivinhado é pior que caixa vazio — quem confere descobre que não é real e
+// para de olhar. A loja lança o mês quando ele chega e ajusta o que veio
+// diferente.
+const DespesasFixas = ({ mesFoco }) => {
+    const {
+        recurringExpenses, saveRecurringExpense, removeRecurringExpense,
+        lancarFixasDoMes, financialEntries,
+    } = useAppContext();
+
+    const [aberto, setAberto] = useState(false);
+    const [editando, setEditando] = useState(null);
+    const [lancando, setLancando] = useState(false);
+    const vazio = { categoria: '', valor: '', descricao: '', dia: '' };
+    const [form, setForm] = useState(vazio);
+
+    const ativas = (recurringExpenses || []).filter(f => f.ativo);
+    const totalMes = ativas.reduce((sm, f) => sm + Number(f.valor || 0), 0);
+
+    // Quais ainda nao foram lancadas no mes em foco. A checagem e pelo mesmo
+    // `ref` que o banco usa como chave unica, entao a tela nunca discorda dele.
+    const refs = new Set((financialEntries || []).map(l => l.ref).filter(Boolean));
+    const pendentes = ativas.filter(f => !refs.has(`fixo:${f.id}:${mesFoco}`));
+
+    const salvar = async () => {
+        if (!form.categoria.trim() || !Number(form.valor)) return;
+        await saveRecurringExpense({ ...form, id: editando });
+        setForm(vazio); setEditando(null); setAberto(false);
+    };
+
+    const lancar = async () => {
+        setLancando(true);
+        await lancarFixasDoMes(mesFoco);
+        setLancando(false);
+    };
+
+    return (
+        <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border)',
+                      borderRadius: 12, padding: '14px 16px', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <Repeat size={16} />
+                <strong style={{ fontSize: '0.9rem' }}>Despesas fixas</strong>
+                {ativas.length > 0 && (
+                    <span className="text-muted" style={{ fontSize: '0.8rem' }}>
+                        {ativas.length} · {brl(totalMes)} por mês
+                    </span>
+                )}
+                <span style={{ marginLeft: 'auto' }} />
+                <button className="btn-secondary" style={{ fontSize: '0.8rem' }}
+                        onClick={() => { setForm(vazio); setEditando(null); setAberto(a => !a); }}>
+                    <Plus size={15} /> Adicionar
+                </button>
+            </div>
+
+            {ativas.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                    {ativas.map(f => {
+                        const lancada = refs.has(`fixo:${f.id}:${mesFoco}`);
+                        return (
+                            <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 8,
+                                                     padding: '6px 0', borderTop: '1px solid var(--border)',
+                                                     fontSize: '0.84rem' }}>
+                                {f.dia && (
+                                    <span style={{ flex: '0 0 46px', fontSize: '0.72rem',
+                                                   color: 'var(--text-secondary)' }}>dia {f.dia}</span>
+                                )}
+                                <span style={{ flex: 1 }}>
+                                    {f.categoria}
+                                    {f.descricao && <span className="text-muted"> · {f.descricao}</span>}
+                                </span>
+                                <strong>{brl(f.valor)}</strong>
+                                {lancada && (
+                                    <span title={`Já lançada em ${rotuloMes(mesFoco)}`}
+                                          style={{ color: '#059669', display: 'flex' }}><Check size={14} /></span>
+                                )}
+                                <button className="icon-btn" title="Editar"
+                                        onClick={() => {
+                                            setForm({ categoria: f.categoria, valor: f.valor,
+                                                      descricao: f.descricao ?? '', dia: f.dia ?? '' });
+                                            setEditando(f.id); setAberto(true);
+                                        }}>
+                                    <Pencil size={13} />
+                                </button>
+                                <button className="icon-btn" title="Remover da lista de fixas"
+                                        onClick={() => removeRecurringExpense(f.id)} style={{ color: '#dc2626' }}>
+                                    <Trash2 size={13} />
+                                </button>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {aberto && (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)',
+                              display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <div className="form-group" style={{ flex: '1 1 160px', marginBottom: 0 }}>
+                        <label>Categoria</label>
+                        <input type="text" list="cat-fixa" value={form.categoria} autoFocus
+                            placeholder="Ex: Salários e comissões"
+                            onChange={e => setForm(f => ({ ...f, categoria: e.target.value }))} />
+                        <datalist id="cat-fixa">
+                            {CATEGORIAS_OPERACAO.map(c => <option key={c} value={c} />)}
+                        </datalist>
+                    </div>
+                    <div className="form-group" style={{ flex: '0 1 120px', marginBottom: 0 }}>
+                        <label>Valor</label>
+                        <input type="number" step="0.01" value={form.valor}
+                            onChange={e => setForm(f => ({ ...f, valor: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ flex: '0 1 90px', marginBottom: 0 }}>
+                        <label>Dia</label>
+                        <input type="number" min="1" max="31" value={form.dia} placeholder="opc."
+                            onChange={e => setForm(f => ({ ...f, dia: e.target.value }))} />
+                    </div>
+                    <div className="form-group" style={{ flex: '1 1 160px', marginBottom: 0 }}>
+                        <label>Descrição</label>
+                        <input type="text" value={form.descricao}
+                            onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))} />
+                    </div>
+                    <button className="btn-primary" onClick={salvar}
+                            disabled={!form.categoria.trim() || !Number(form.valor)}>
+                        {editando ? 'Salvar' : 'Adicionar'}
+                    </button>
+                </div>
+            )}
+
+            {pendentes.length > 0 && (
+                <div style={{ marginTop: 12, padding: '10px 12px', background: '#fffbeb',
+                              border: '1px solid #fde68a', borderRadius: 8,
+                              display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.82rem', color: '#92400e', flex: 1 }}>
+                        {pendentes.length} despesa(s) fixa(s) ainda não lançada(s) em {rotuloMes(mesFoco)}.
+                    </span>
+                    <button className="btn-primary" onClick={lancar} disabled={lancando}>
+                        {lancando ? 'Lançando…' : `Lançar em ${rotuloMes(mesFoco)}`}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
+};
+
 const Financeiro = () => {
     const { financialEntries, removeFinancialEntry } = useAppContext();
     const [de, setDe] = useState(mesesAtras(5));
@@ -184,8 +330,12 @@ const Financeiro = () => {
                 </button>
             </div>
 
+            <div style={{ marginTop: 16 }}>
+                <DespesasFixas mesFoco={ate} />
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                          gap: 12, margin: '16px 0' }}>
+                          gap: 12, margin: '0 0 16px' }}>
                 <div className="metric-card">
                     <p className="text-muted" style={{ fontSize: '0.76rem', margin: 0 }}>Receitas no período</p>
                     <p style={{ fontSize: '1.35rem', fontWeight: 700, color: '#059669', margin: '2px 0 0' }}>

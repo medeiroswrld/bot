@@ -72,6 +72,7 @@ export const AppProvider = ({ children }) => {
   const [messageTemplates, setMessageTemplates] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [financialEntries, setFinancialEntries] = useState([]);
+  const [recurringExpenses, setRecurringExpenses] = useState([]);
 
   const [toasts, setToasts] = useState([]);
 
@@ -458,6 +459,7 @@ export const AppProvider = ({ children }) => {
                 await fetchMessageTemplates(uid);
                 await fetchCampaigns(uid);
                 await fetchFinancialEntries(uid);
+                await fetchRecurringExpenses(uid);
               } catch (err) {
                 console.error('[AUTH] Erro ao carregar dados iniciais:', err);
               }
@@ -486,6 +488,7 @@ export const AppProvider = ({ children }) => {
                 await fetchMessageTemplates(uid);
                 await fetchCampaigns(uid);
                 await fetchFinancialEntries(uid);
+                await fetchRecurringExpenses(uid);
               } catch (err) {
                 console.error('[AUTH] Erro ao carregar dados pós-login:', err);
               }
@@ -502,6 +505,7 @@ export const AppProvider = ({ children }) => {
           setInventory([]);
           setSoldCars([]);
           setFinancialEntries([]);
+          setRecurringExpenses([]);
           setLeads([]);
           setAppointments([]);
           setCompanySettings(null);
@@ -918,6 +922,88 @@ export const AppProvider = ({ children }) => {
     }
     setFinancialEntries(prev => [nova, ...prev]);
     return nova;
+  };
+
+  // ── Despesas fixas ────────────────────────────────────────────────────────
+
+  const fetchRecurringExpenses = useCallback(async (userId) => {
+    const { data: rows, error } = await supabase
+      .from('recurring_expenses')
+      .select('*')
+      .eq('user_id', userId)
+      .order('dia', { ascending: true, nullsFirst: false });
+    if (error) {
+      console.error('[FIN] erro ao buscar despesas fixas:', error.message);
+      return;
+    }
+    setRecurringExpenses(rows ?? []);
+  }, []);
+
+  const saveRecurringExpense = async (fixa) => {
+    if (!user?.id) return null;
+    const linha = {
+      user_id: user.id,
+      categoria: String(fixa.categoria || '').trim(),
+      valor: Number(fixa.valor) || 0,
+      descricao: fixa.descricao || null,
+      dia: fixa.dia ? Number(fixa.dia) : null,
+      ativo: fixa.ativo !== false,
+    };
+    const q = fixa.id
+      ? supabase.from('recurring_expenses').update(linha).eq('id', fixa.id).eq('user_id', user.id)
+      : supabase.from('recurring_expenses').insert([linha]);
+
+    const { data: salva, error } = await q.select().single();
+    if (error) {
+      console.error('[FIN] erro ao salvar despesa fixa:', error.message);
+      addToast('Nao consegui salvar a despesa fixa.', 'error');
+      return null;
+    }
+    setRecurringExpenses(prev => fixa.id
+      ? prev.map(f => (f.id === salva.id ? salva : f))
+      : [...prev, salva]);
+    return salva;
+  };
+
+  const removeRecurringExpense = async (id) => {
+    if (!user?.id) return;
+    const { error } = await supabase
+      .from('recurring_expenses').delete().eq('id', id).eq('user_id', user.id);
+    if (error) {
+      addToast('Nao consegui excluir a despesa fixa.', 'error');
+      return;
+    }
+    setRecurringExpenses(prev => prev.filter(f => f.id !== id));
+  };
+
+  /**
+   * Lanca as fixas ativas de um mes (AAAA-MM).
+   *
+   * O `ref` "fixo:<id>:<mes>" e o que impede lancar o mesmo mes duas vezes —
+   * inclusive dois usuarios da loja clicando junto, porque a unicidade esta no
+   * banco e nao numa checagem daqui.
+   */
+  const lancarFixasDoMes = async (mes) => {
+    const ativas = recurringExpenses.filter(f => f.ativo);
+    if (!ativas.length) return 0;
+
+    let criadas = 0;
+    for (const f of ativas) {
+      const dia = String(Math.min(Number(f.dia) || 1, 28)).padStart(2, '0');
+      const nova = await addFinancialEntry({
+        tipo: 'despesa',
+        categoria: f.categoria,
+        valor: f.valor,
+        descricao: f.descricao,
+        data: `${mes}-${dia}`,
+        origem: 'manual',
+        ref: `fixo:${f.id}:${mes}`,
+      });
+      if (nova) criadas += 1;
+    }
+    if (criadas) addToast(`${criadas} despesa(s) fixa(s) lancada(s).`, 'success');
+    else addToast('As fixas deste mes ja estavam lancadas.', 'info');
+    return criadas;
   };
 
   const removeFinancialEntry = async (id) => {
@@ -1805,6 +1891,10 @@ export const AppProvider = ({ children }) => {
     financialEntries,
     addFinancialEntry,
     removeFinancialEntry,
+    recurringExpenses,
+    saveRecurringExpense,
+    removeRecurringExpense,
+    lancarFixasDoMes,
     leads,          // Sobrescreve data.leads (Supabase)
     appointments,   // Sobrescreve data.appointments (Supabase)
     agendaConfig,   // Sobrescreve data.agendaConfig (Supabase company_settings)
