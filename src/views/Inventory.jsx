@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import CustosDoVeiculo from './CustosDoVeiculo.jsx';
 import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
     X, Gauge, Tag, CheckCircle2, ShoppingCart, Package, Camera,
@@ -25,7 +26,7 @@ const StatusBadge = ({ status }) => {
     return <span className="inv-status-badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>;
 };
 
-const EMPTY_CAR = { brand: '', model: '', version: '', year: '', model_year: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', description: '', chassi: '', renavam: '', images: [], specsImage: null, video: null };
+const EMPTY_CAR = { brand: '', model: '', version: '', year: '', model_year: '', purchase_price: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', description: '', chassi: '', renavam: '', images: [], specsImage: null, video: null };
 
 // Parse preço no formato brasileiro ("198.000" ou "198.000,00" ou "198000") → número
 const parsePriceBR = (value) => {
@@ -488,6 +489,10 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
                             renavam, e ate aqui nao havia onde guardar — os marcadores
                             saiam em branco. A consulta por placa preenche chassi e ano
                             do modelo; renavam nenhum fornecedor devolve. */}
+                        {/* Quanto a loja PAGOU. Sem isto nao existe lucro real, nem a
+                            linha de compra no financeiro, nem base de calculo pra nota
+                            fiscal de usado — que incide sobre a margem. */}
+                        <div className="form-group"><label>Valor de compra</label><input type="number" step="0.01" value={form.purchase_price} onChange={e => handleChange('purchase_price', e.target.value)} placeholder="Quanto a loja pagou" /></div>
                         <div className="form-group"><label>Ano do modelo</label><input type="number" value={form.model_year} onChange={e => handleChange('model_year', e.target.value)} placeholder="2021" /></div>
                         <div className="form-group"><label>Chassi</label><input type="text" value={form.chassi} onChange={e => handleChange('chassi', e.target.value.toUpperCase())} placeholder="Vem da consulta por placa" style={{ fontFamily: 'monospace' }} /></div>
                         <div className="form-group"><label>Renavam</label><input type="text" value={form.renavam} onChange={e => handleChange('renavam', e.target.value)} placeholder="Preenchimento manual" /></div>
@@ -917,6 +922,7 @@ const DetailDrawer = ({ car, onClose }) => {
                             </div>
                         ))}
                     </div>
+                    <CustosDoVeiculo car={car} />
                 </div>
             </div>
         </div>

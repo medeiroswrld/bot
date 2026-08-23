@@ -3,7 +3,7 @@ import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, CarFront, Users, Calendar, Settings,
   Bell, LogOut, Loader2, MessageCircle, Bot,
-  Sun, Moon, Megaphone, Menu, LifeBuoy,
+  Sun, Moon, Megaphone, Menu, LifeBuoy, Wallet,
 } from 'lucide-react';
 import './App.css';
 
@@ -23,6 +23,7 @@ const WaitingList  = lazy(() => import('./views/WaitingList.jsx'));
 const Templates    = lazy(() => import('./views/Templates.jsx'));
 const Campaigns    = lazy(() => import('./views/Campaigns.jsx'));
 const CampaignDetails = lazy(() => import('./views/CampaignDetails.jsx'));
+const Financeiro   = lazy(() => import('./views/Financeiro.jsx'));
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,7 @@ const NAV_ITEMS = [
       { name: 'Lista de Espera', path: '/lista-de-espera' },
     ],
   },
+  { name: 'Financeiro', icon: <Wallet size={18} />,         path: '/financeiro' },
   { name: 'Agenda',    icon: <Calendar size={18} />,        path: '/agenda' },
   { name: 'Conversas', icon: <MessageCircle size={18} />,   path: '/conversas' },
   {
@@ -284,6 +286,7 @@ const AuthenticatedApp = () => {
               <Route path="/"              element={<Dashboard />} />
               <Route path="/estoque"       element={<Inventory />} />
               <Route path="/vendidos"      element={<SoldCars />} />
+            <Route path="/financeiro" element={<Financeiro />} />
               <Route path="/leads"         element={<Leads />} />
               <Route path="/agenda"        element={<Agenda />} />
               <Route path="/conversas"     element={<Conversations />} />

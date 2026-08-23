@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Search, TrendingUp, ShoppingCart, X, Package, Camera, FileText, Printer, RefreshCw } from 'lucide-react';
 import { useAppContext, formatDateStr } from '../context/AppContext.jsx';
 import { MODELO_PADRAO, montarContrato, dadosDoContrato, imprimirContrato, formatarCPF } from '../lib/contrato.js';
+import CustosDoVeiculo from './CustosDoVeiculo.jsx';
 
 // Par rotulo/valor. Valor ausente vira travessao em vez de sumir: espaco vazio
 // mostra que o dado FALTA, e e assim que a loja descobre o que nao coletou.
@@ -160,6 +161,11 @@ const DetailDrawer = ({ car, onClose }) => {
                             <Campo rotulo="Valor avaliado" valor={dinheiro(car.trade_in_value)} />
                         </Bloco>
                     )}
+
+                    {/* Mesmo painel do estoque: despesa que aparece DEPOIS da venda
+                        (multa atrasada, acerto de documentacao) entra aqui e refaz o
+                        lucro. Sem isso o numero congelaria no dia da venda. */}
+                    <CustosDoVeiculo car={car} />
                 </div>
             </div>
             {verContrato && <ContratoDaVenda car={car} onClose={() => setVerContrato(false)} />}

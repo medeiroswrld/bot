@@ -71,6 +71,7 @@ export const AppProvider = ({ children }) => {
   const [vehicleInterests, setVehicleInterests] = useState([]);
   const [messageTemplates, setMessageTemplates] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
+  const [financialEntries, setFinancialEntries] = useState([]);
 
   const [toasts, setToasts] = useState([]);
 
@@ -456,6 +457,7 @@ export const AppProvider = ({ children }) => {
                 await fetchVehicleInterests(uid);
                 await fetchMessageTemplates(uid);
                 await fetchCampaigns(uid);
+                await fetchFinancialEntries(uid);
               } catch (err) {
                 console.error('[AUTH] Erro ao carregar dados iniciais:', err);
               }
@@ -483,6 +485,7 @@ export const AppProvider = ({ children }) => {
                 await fetchVehicleInterests(uid);
                 await fetchMessageTemplates(uid);
                 await fetchCampaigns(uid);
+                await fetchFinancialEntries(uid);
               } catch (err) {
                 console.error('[AUTH] Erro ao carregar dados pós-login:', err);
               }
@@ -498,6 +501,7 @@ export const AppProvider = ({ children }) => {
           setProfile(null);
           setInventory([]);
           setSoldCars([]);
+          setFinancialEntries([]);
           setLeads([]);
           setAppointments([]);
           setCompanySettings(null);
@@ -739,6 +743,7 @@ export const AppProvider = ({ children }) => {
         description: car.description || null,
         // Documento do veiculo. Sem estes tres o contrato de venda sai com
         // linha em branco justamente onde ele identifica o bem.
+        purchase_price: car.purchase_price ? Number(car.purchase_price) : null,
         plate: car.plate || null,
         chassi: car.chassi || null,
         renavam: car.renavam || null,
@@ -761,6 +766,20 @@ export const AppProvider = ({ children }) => {
       }
 
       console.log('[INVENTORY] Veículo criado:', newCar.id);
+
+      // Compra vira despesa no caixa E no custo do carro. Sem isto o lojista
+      // teria que lancar a mao o numero que acabou de digitar no cadastro.
+      if (Number(car.purchase_price) > 0) {
+        await addFinancialEntry({
+          car_id: newCar.id,
+          tipo: 'despesa',
+          categoria: 'Compra de veículos',
+          valor: Number(car.purchase_price),
+          descricao: `${newCar.brand ?? ''} ${newCar.model ?? ''}`.trim(),
+          origem: 'automatico',
+          ref: `compra:${newCar.id}`,
+        });
+      }
 
       // Chama a sincronização das imagens
       const finalImageUrls = await syncCarImages(newCar.id, car.images || []);
@@ -797,6 +816,9 @@ export const AppProvider = ({ children }) => {
       }
       if (dbUpdates.year !== undefined) dbUpdates.year = Number(dbUpdates.year);
       // Vazio precisa virar null, nao 0: ano do modelo em branco nao e ano zero.
+      if (dbUpdates.purchase_price !== undefined) {
+        dbUpdates.purchase_price = dbUpdates.purchase_price ? Number(dbUpdates.purchase_price) : null;
+      }
       if (dbUpdates.model_year !== undefined) {
         dbUpdates.model_year = dbUpdates.model_year ? Number(dbUpdates.model_year) : null;
       }
@@ -852,6 +874,62 @@ export const AppProvider = ({ children }) => {
       console.error('Erro ao remover', error);
       addToast('Erro ao remover veículo.', 'error');
     }
+  };
+
+  // ========== Financeiro ==========
+
+  const fetchFinancialEntries = useCallback(async (userId) => {
+    const { data: rows, error } = await supabase
+      .from('financial_entries')
+      .select('*')
+      .eq('user_id', userId)
+      .order('data', { ascending: false });
+    if (error) {
+      console.error('[FIN] erro ao buscar lancamentos:', error.message);
+      return;
+    }
+    setFinancialEntries(rows ?? []);
+  }, []);
+
+  const addFinancialEntry = async (entrada) => {
+    if (!user?.id) return null;
+    const linha = {
+      user_id: user.id,
+      car_id: entrada.car_id || null,
+      tipo: entrada.tipo,
+      categoria: String(entrada.categoria || '').trim(),
+      valor: Number(entrada.valor) || 0,
+      descricao: entrada.descricao || null,
+      data: entrada.data || new Date().toISOString().slice(0, 10),
+      origem: entrada.origem || 'manual',
+      ref: entrada.ref || null,
+    };
+    const { data: nova, error } = await supabase
+      .from('financial_entries').insert([linha]).select().single();
+
+    if (error) {
+      // Conflito de `ref` significa que o lancamento automatico ja existe. Nao e
+      // erro: e a idempotencia funcionando (vender, desfazer e vender de novo
+      // nao pode gerar dois lancamentos).
+      if (error.code === '23505') return null;
+      console.error('[FIN] erro ao lancar:', error.message);
+      addToast('Nao consegui salvar o lancamento.', 'error');
+      return null;
+    }
+    setFinancialEntries(prev => [nova, ...prev]);
+    return nova;
+  };
+
+  const removeFinancialEntry = async (id) => {
+    if (!user?.id) return;
+    const { error } = await supabase
+      .from('financial_entries').delete().eq('id', id).eq('user_id', user.id);
+    if (error) {
+      console.error('[FIN] erro ao excluir:', error.message);
+      addToast('Nao consegui excluir o lancamento.', 'error');
+      return;
+    }
+    setFinancialEntries(prev => prev.filter(l => l.id !== id));
   };
 
   // Dois telefones sao o mesmo numero? Compara DDD + 8 digitos finais.
@@ -936,6 +1014,22 @@ export const AppProvider = ({ children }) => {
         status: 'vendido',
         images: inventoryCar?.images ?? [],
       }, ...prev]);
+      // ── Lancamento da venda no financeiro ─────────────────────────────────
+      // `ref` garante um por carro: vender, desfazer e vender de novo nao gera
+      // dois. Marcado como automatico pra nao se confundir com o que o lojista
+      // digitou — relatorio que conta a mesma venda duas vezes nao e aberto de
+      // novo.
+      await addFinancialEntry({
+        car_id: inventoryId,
+        tipo: 'receita',
+        categoria: 'Venda de veículos',
+        valor: salePrice,
+        descricao: `${updatedCar.brand ?? ''} ${updatedCar.model ?? ''}`.trim(),
+        data: (saleDate || new Date().toISOString()).slice(0, 10),
+        origem: 'automatico',
+        ref: `venda:${inventoryId}`,
+      });
+
       // ── Liga o lead que comprou ────────────────────────────────────────────
       // Sem isto o lead fica parado em "atendimento" pra sempre e nao da pra
       // separar quem comprou de quem so olhou.
@@ -1708,6 +1802,9 @@ export const AppProvider = ({ children }) => {
     ...data,
     inventory,      // Sobrescreve data.inventory (Supabase)
     soldCars,       // Sobrescreve data.soldCars (Supabase)
+    financialEntries,
+    addFinancialEntry,
+    removeFinancialEntry,
     leads,          // Sobrescreve data.leads (Supabase)
     appointments,   // Sobrescreve data.appointments (Supabase)
     agendaConfig,   // Sobrescreve data.agendaConfig (Supabase company_settings)
