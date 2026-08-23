@@ -73,8 +73,19 @@ Deno.serve(async (req) => {
     // sempre se o disparo mirou a conta certa. Sem isto so da pra adivinhar.
     console.log(`[send-push] alvo=${user_id} papel=${papel || 'usuario'} inscricoes=${inscricoes?.length ?? 0}`);
 
+    const origem = papel === 'service_role' ? 'webhook' : 'app';
+
+    // Registra a tentativa no banco. E o que permite ver de dentro do CRM se o
+    // webhook chegou a chamar — sem isso, "nao chegou" e indistinguivel de
+    // "nem foi tentado", que foi onde esta investigacao travou.
+    const registrar = async (enviados: number, total: number, detalhe: string) => {
+      await supabase.from('push_log').insert({ user_id, origem, enviados, total, detalhe })
+        .then(({ error }) => { if (error) console.warn('[send-push] log falhou:', error.message); });
+    };
+
     if (!inscricoes?.length) {
       console.warn(`[send-push] NENHUM aparelho inscrito para ${user_id}`);
+      await registrar(0, 0, 'nenhum aparelho inscrito');
       return json({ enviados: 0, motivo: 'nenhum aparelho inscrito', alvo: user_id });
     }
 
@@ -121,6 +132,7 @@ Deno.serve(async (req) => {
     // Formato do subject: a Apple exige mailto: ou https: e RECUSA o que a
     // Google aceita calado. Reporta a validade sem expor o valor.
     const subjectOk = /^(mailto:\S+@\S+|https:\/\/)/.test(subject);
+    await registrar(enviados, inscricoes.length, JSON.stringify(detalhes).slice(0, 400));
     return json({ enviados, removidas: mortas.length, total: inscricoes.length, detalhes, subjectOk });
   } catch (e) {
     console.error('[send-push] exceção:', e);

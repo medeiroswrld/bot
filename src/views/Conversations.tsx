@@ -680,6 +680,48 @@ export default function Conversations() {
           : `  envio ${i + 1}: ${d.servico} FALHOU status=${d.status} ${String(d.erro ?? '').slice(0, 90)}`);
       });
 
+      // TESTE LOCAL, sem passar pelo servidor. Separa duas coisas que eu vinha
+      // tratando como uma: o service worker consegue DESENHAR uma notificação?
+      // e o push CHEGA até ele?
+      //
+      // Local aparece e a do servidor não → o problema é entrega ou
+      // descriptografia do payload. Nem a local aparece → é permissão ou o
+      // próprio registro, e nenhuma correção no servidor resolveria.
+      try {
+        const reg = await navigator.serviceWorker.getRegistration();
+        if (reg) {
+          await reg.showNotification('Teste LOCAL do Amply', {
+            body: 'Esta veio direto do aparelho, sem passar pelo servidor.',
+            data: { url: '/conversas' },
+          });
+          linhas.push('Notificação local: disparada (deve aparecer agora)');
+        } else {
+          linhas.push('Notificação local: SEM service worker registrado');
+        }
+      } catch (e) {
+        linhas.push(`Notificação local: FALHOU — ${(e as Error).message}`);
+      }
+
+      // Historico das tentativas REAIS, gravadas pelo servidor (066). E o que
+      // separa "o webhook nao chamou" de "chamou e nao havia aparelho": a
+      // primeira nao deixa linha nenhuma aqui, a segunda deixa com enviados=0.
+      const { data: tentativas } = await supabaseTyped
+        .from('push_log')
+        .select('origem, enviados, total, detalhe, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      const hist = (tentativas ?? []) as Array<Record<string, unknown>>;
+      linhas.push(`Últimas tentativas registradas: ${hist.length}`);
+      hist.forEach((t) => {
+        const hora = String(t.created_at ?? '').slice(11, 19);
+        linhas.push(`  ${hora} ${t.origem} → ${t.enviados}/${t.total}`);
+      });
+      if (!hist.some((t) => t.origem === 'webhook')) {
+        linhas.push('  >> NENHUMA tentativa vinda do webhook. Ele não está chamando.');
+      }
+
       const texto = linhas.join('\n');
       console.log('[push] diagnostico\n' + texto);
       alert(
