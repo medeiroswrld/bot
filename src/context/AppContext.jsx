@@ -269,6 +269,8 @@ export const AppProvider = ({ children }) => {
         client_type: l.client_type || null,
         notes: l.notes || '',
         date: l.created_at,
+        sold_car_id: l.sold_car_id || null,
+        sold_at: l.sold_at || null,
         birth_date: l.birth_date || '',
         city: 'Não informada',
         family_info: l.family_info || '',
@@ -847,6 +849,23 @@ export const AppProvider = ({ children }) => {
     }
   };
 
+  // Dois telefones sao o mesmo numero? Compara DDD + 8 digitos finais.
+  //
+  // Nao da pra comparar string crua: o mesmo numero aparece como
+  // "5515988372081", "(15) 98837-2081" e "15 8837-2081" dependendo de quem
+  // digitou, e o nono digito entrou em epocas diferentes por regiao. Os 8
+  // finais mais o DDD e o maior denominador comum confiavel.
+  const mesmoTelefone = (a, b) => {
+    const limpar = (v) => {
+      let d = String(v ?? '').replace(/\D/g, '');
+      if (d.length > 11) d = d.slice(-11);       // tira o 55 do pais
+      if (d.length === 11) d = d.slice(0, 2) + d.slice(3); // tira o nono digito
+      return d;                                   // sobra DDD + 8
+    };
+    const x = limpar(a), y = limpar(b);
+    return x.length >= 10 && x === y;
+  };
+
   const sellCar = async (inventoryId, salePrice, saleDate, sellerName, comprador = null, veiculo = null) => {
     if (!user?.id) return;
     try {
@@ -912,6 +931,43 @@ export const AppProvider = ({ children }) => {
         status: 'vendido',
         images: inventoryCar?.images ?? [],
       }, ...prev]);
+      // ── Liga o lead que comprou ────────────────────────────────────────────
+      // Sem isto o lead fica parado em "atendimento" pra sempre e nao da pra
+      // separar quem comprou de quem so olhou.
+      //
+      // So marca quando UM unico lead bate o telefone. Dois leads com o mesmo
+      // numero e caso real (casal, pai e filho, o mesmo cliente cadastrado
+      // duas vezes), e escolher um no chute marcaria a pessoa errada como
+      // compradora. Nesse caso nao mexe em nada.
+      const tel = comprador?.buyer_name ? comprador?.buyer_phone : null;
+      if (tel) {
+        const candidatos = leads.filter(l => mesmoTelefone(l.phone, tel) && l.status !== 'vendido');
+        if (candidatos.length === 1) {
+          const lead = candidatos[0];
+          const { error: erroLead } = await supabase
+            .from('leads')
+            .update({
+              status: 'vendido',
+              sold_car_id: inventoryId,
+              sold_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
+            })
+            .eq('id', lead.id)
+            .eq('user_id', user.id);
+
+          if (erroLead) {
+            // Nao derruba a venda: o carro ja foi vendido e isso e o que importa.
+            console.warn('[VENDA] nao consegui marcar o lead:', erroLead.message);
+          } else {
+            setLeads(prev => prev.map(l => l.id === lead.id
+              ? { ...l, status: 'vendido', sold_car_id: inventoryId }
+              : l));
+            addToast('Lead ' + lead.name + ' marcado como comprador.', 'success');
+          }
+        } else if (candidatos.length > 1) {
+          console.info('[VENDA] mais de um lead com este telefone; nenhum marcado');
+        }
+      }
+
       addToast('Venda registrada com sucesso! Analise o histórico.', 'success');
     } catch (error) {
       console.error('Erro ao vender', error);

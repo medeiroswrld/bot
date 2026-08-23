@@ -47,6 +47,17 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
     ];
     const hasTradeIn = [...TRADE_FIELDS.map(f => f[0]), 'trade_in_extra_info'].some(f => (lead[f] || '').toString().trim());
     const s = STATUS_MAP[lead.status] || STATUS_MAP.novo;
+
+    // Interesse e compra são coisas diferentes: é comum o cliente procurar um
+    // carro e levar outro. Mostrar os dois lado a lado é o que revela isso — e
+    // é a diferença entre "o que atraiu" e "o que fechou".
+    const { soldCars } = useAppContext();
+    const carroComprado = lead.sold_car_id
+        ? (soldCars || []).find(c => c.id === lead.sold_car_id)
+        : null;
+    const comprou = carroComprado
+        ? `${carroComprado.brand} ${carroComprado.model} ${carroComprado.version || ''}`.trim()
+        : (lead.sold_car_id ? 'veículo já removido' : '');
     return (
         <div className="drawer-overlay" onClick={onClose}>
             <div className="drawer-content" onClick={e => e.stopPropagation()}>
@@ -68,6 +79,7 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
                             ['Telefone', lead.phone],
                             ['Cidade', lead.city],
                             ['Interesse', lead.car],
+                            ...(comprou ? [['Comprou', comprou]] : []),
                             ['Renda Declarada', lead.income],
                             ['Entrada Disponível', lead.entry],
                             ['Captado em', formatDateStr(lead.date)]
