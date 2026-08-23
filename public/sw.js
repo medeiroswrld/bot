@@ -21,16 +21,33 @@ self.addEventListener('push', (event) => {
     // payload não-JSON: mantém o texto padrão em vez de engolir a notificação
   }
 
+  // Duas tentativas, e a segunda é o que salva o iPhone.
+  //
+  // O Safari rejeita `showNotification` inteiro quando não reconhece uma opção
+  // — `renotify` e `badge` são os suspeitos — e a notificação simplesmente não
+  // aparece, sem erro visível em lugar nenhum. No Chrome do desktop as mesmas
+  // opções funcionam, o que faz o problema parecer "só no iPhone" e mandar a
+  // investigação pro lado errado.
+  //
+  // Então: tenta a versão completa e, se ela falhar, mostra o mínimo que toda
+  // implementação aceita. Notificação simples é infinitamente melhor que
+  // notificação nenhuma.
+  const titulo = dados.titulo || 'Amply';
+  const minima = { body: dados.corpo, data: { url: dados.url } };
+  const completa = {
+    ...minima,
+    icon: '/logo.png',
+    badge: '/logo.png',
+    // Mesma tag = mensagens seguidas do mesmo cliente se substituem em vez de
+    // empilharem cinco notificações na tela de bloqueio.
+    tag: dados.tag || 'amply-mensagem',
+    renotify: true,
+  };
+
   event.waitUntil(
-    self.registration.showNotification(dados.titulo, {
-      body: dados.corpo,
-      icon: '/logo.png',
-      badge: '/logo.png',
-      // Mesma tag = mensagens seguidas do mesmo cliente se substituem em vez de
-      // empilharem cinco notificações na tela de bloqueio.
-      tag: dados.tag || 'amply-mensagem',
-      renotify: true,
-      data: { url: dados.url },
+    self.registration.showNotification(titulo, completa).catch((e) => {
+      console.warn('[sw] opções completas recusadas, caindo pro mínimo:', e);
+      return self.registration.showNotification(titulo, minima);
     }),
   );
 });
