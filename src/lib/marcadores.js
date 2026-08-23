@@ -42,9 +42,13 @@ const POR_ROTULO = [
  * O grupo 1 de cada regex é o valor.
  */
 const POR_CONTEXTO = [
-  { re: /COMPRADOR(?:\(A\)|A)?\s*:\s*(?:Sr\(a\)\.?|Sras?\.?|Sr\.?)?\s*([^,\n]{3,70})/gi,
+  // [ \t] e NAO \s depois dos dois-pontos: \s atravessa quebra de linha, e num
+  // contrato existe "Comprador:" sozinho numa linha com "E-mail: ..." logo
+  // abaixo. Com \s o nome capturado virava a linha do e-mail, e aplicar
+  // destruia o campo de contato.
+  { re: /COMPRADOR(?:\(A\)|A)?[ \t]*:[ \t]*(?:Sr\(a\)\.?|Sras?\.?|Sr\.?)?[ \t]*([^,\n]{3,70})/gi,
     campo: 'comprador_nome', o: ['comprador_nome'] },
-  { re: /VENDEDOR(?:\(A\)|A)?\s*:\s*([^,\n]{3,70})/gi,
+  { re: /VENDEDOR(?:\(A\)|A)?[ \t]*:[ \t]*([^,\n]{3,70})/gi,
     campo: 'loja_nome', o: ['loja_nome', 'vendedor'] },
   // Aceita nº. / no. / n. / nro — cada contrato escreve de um jeito, e foi por
   // um 'o' no lugar do 'º' que o RG escapou no primeiro teste.
@@ -56,6 +60,9 @@ const POR_CONTEXTO = [
   { re: /com\s+endere[çc]o\s+n[ao]\s+([^\n]{5,180}?)(?=,\s*telefone|\n|$)/gi,
     campo: 'comprador_endereco', o: ['comprador_endereco'] },
   { re: /com\s+sede\s+n[ao]\s+([^\n]{5,180})/gi,
+    campo: 'loja_endereco', o: ['loja_endereco'] },
+  // A clausula de retirada repete o endereco com outra redacao.
+  { re: /endere[çc]o\s+situado\s+n[ao]\s+([^\n]{5,180}?)(?=,\s*sede|\n|$)/gi,
     campo: 'loja_endereco', o: ['loja_endereco'] },
 ];
 
