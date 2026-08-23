@@ -672,7 +672,13 @@ export default function Conversations() {
         }),
       });
       const j = await r.json();
-      linhas.push(`Resposta do servidor: HTTP ${r.status} ${JSON.stringify(j)}`);
+      linhas.push(`Servidor: HTTP ${r.status} · enviados ${j.enviados ?? 0} de ${j.total ?? 0}`);
+      if (j.subjectOk === false) linhas.push('  >> VAPID_SUBJECT invalido (a Apple recusa, a Google aceita)');
+      (j.detalhes ?? []).forEach((d: Record<string, unknown>, i: number) => {
+        linhas.push(d.ok
+          ? `  envio ${i + 1}: ${d.servico} OK`
+          : `  envio ${i + 1}: ${d.servico} FALHOU status=${d.status} ${String(d.erro ?? '').slice(0, 90)}`);
+      });
 
       const texto = linhas.join('\n');
       console.log('[push] diagnostico\n' + texto);

@@ -87,21 +87,28 @@ Deno.serve(async (req) => {
 
     let enviados = 0;
     const mortas: string[] = [];
+    // Resultado POR APARELHO. O total sozinho engana: "3 enviados" com o iPhone
+    // recusado parece sucesso e e o cenario que mais custou tempo aqui.
+    const detalhes: Array<Record<string, unknown>> = [];
 
     for (const s of inscricoes) {
+      const apple = /apple/i.test(String(s.endpoint));
       try {
         await webpush.sendNotification(
           { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
           payload,
         );
         enviados++;
+        detalhes.push({ servico: apple ? 'Apple' : 'Google', ok: true });
       } catch (e) {
         // 404/410 = inscrição morta (app desinstalado, permissão revogada).
         // Guardar isso pra sempre significa tentar entregar a um endereço que
         // não existe em toda mensagem que chega.
         const status = (e as { statusCode?: number })?.statusCode;
+        const msg = (e as { body?: string })?.body ?? (e as Error)?.message ?? '';
+        detalhes.push({ servico: apple ? 'Apple' : 'Google', ok: false, status, erro: String(msg).slice(0, 200) });
         if (status === 404 || status === 410) mortas.push(s.id);
-        else console.error('[send-push] falha no envio:', status, (e as Error)?.message);
+        else console.error('[send-push] falha no envio:', apple ? 'Apple' : 'Google', status, msg);
       }
     }
 
@@ -111,7 +118,10 @@ Deno.serve(async (req) => {
     }
 
     console.log(`[send-push] resultado: enviados=${enviados} de ${inscricoes.length}, removidas=${mortas.length}`);
-    return json({ enviados, removidas: mortas.length, total: inscricoes.length });
+    // Formato do subject: a Apple exige mailto: ou https: e RECUSA o que a
+    // Google aceita calado. Reporta a validade sem expor o valor.
+    const subjectOk = /^(mailto:\S+@\S+|https:\/\/)/.test(subject);
+    return json({ enviados, removidas: mortas.length, total: inscricoes.length, detalhes, subjectOk });
   } catch (e) {
     console.error('[send-push] exceção:', e);
     return json({ error: String((e as Error)?.message ?? e) }, 500);
