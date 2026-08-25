@@ -536,7 +536,13 @@ const Settings = () => {
     };
 
     // ── Funcionamento do bot (liga/desliga + janela de horario) ────────────────
-    const [botCfg, setBotCfg] = useState({ enabled: true, agendado: false, inicio: '08:00', fim: '18:00' });
+    const [botCfg, setBotCfg] = useState({
+        enabled: true, agendado: false, inicio: '08:00', fim: '18:00',
+        // Desligado por padrão: loja com equipe grande pode preferir que a
+        // conversa espere um humano de verdade, e assumir isso pelo cliente
+        // seria o bot atropelando um atendimento em andamento.
+        devolver: false, devolverMin: 15,
+    });
     const [savingBot, setSavingBot] = useState(false);
     const [savedBot,  setSavedBot]  = useState(false);
 
@@ -550,6 +556,11 @@ const Settings = () => {
                 bot_schedule_enabled: botCfg.agendado,
                 bot_start: botCfg.inicio,
                 bot_end: botCfg.fim,
+                auto_return_enabled: botCfg.devolver === true,
+                // Piso de 5 minutos: abaixo disso o bot atropela o atendente que
+                // so foi buscar uma informacao, e a varredura roda de 5 em 5 —
+                // prometer 2 minutos seria promessa que o cron nao cumpre.
+                auto_return_minutes: Math.max(5, Number(botCfg.devolverMin) || 15),
                 updated_at: new Date().toISOString(),
             })
             .eq('user_id', user.id);
@@ -689,6 +700,8 @@ const Settings = () => {
             // Postgres devolve time como "08:00:00"; o input type=time quer HH:MM.
             inicio: String(s.bot_start ?? '08:00').slice(0, 5),
             fim:    String(s.bot_end   ?? '18:00').slice(0, 5),
+            devolver: s.auto_return_enabled === true,
+            devolverMin: Number(s.auto_return_minutes ?? 15),
         });
         // Equipe e contatos por setor
         setEquipe(Array.isArray(s.team_members) ? s.team_members : []);
@@ -1611,6 +1624,47 @@ const Settings = () => {
                                 Essa janela atravessa a meia-noite: o bot responde das {botCfg.inicio} ate a
                                 meia-noite e da meia-noite ate as {botCfg.fim} do dia seguinte.
                             </p>
+                        )}
+
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10,
+                                      marginTop: 14, marginBottom: 10,
+                                      paddingTop: 14, borderTop: '1px solid var(--border)',
+                                      opacity: botCfg.enabled ? 1 : 0.45 }}>
+                            <button type="button" disabled={!botCfg.enabled}
+                                onClick={() => setBotCfg(b => ({ ...b, devolver: !b.devolver }))}
+                                title={botCfg.devolver ? 'Desativar' : 'Ativar'}
+                                style={{ background: 'none', border: 'none',
+                                         cursor: botCfg.enabled ? 'pointer' : 'not-allowed',
+                                         padding: 0, flexShrink: 0,
+                                         color: botCfg.devolver ? '#10b981' : '#94a3b8' }}>
+                                {botCfg.devolver ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
+                            </button>
+                            <div>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>
+                                    Devolver ao bot se o atendente parar de responder
+                                </span>
+                                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                                    O atendente assume, some, e a conversa fica travada em
+                                    &quot;humano&quot; pra sempre — o cliente não recebe mais nada e
+                                    ninguém percebe. Com isto ligado, o bot retoma sozinho.
+                                </p>
+                            </div>
+                        </div>
+
+                        {botCfg.enabled && botCfg.devolver && (
+                            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end',
+                                          flexWrap: 'wrap', marginBottom: 10 }}>
+                                <div className="form-group" style={{ flex: '0 1 150px', marginBottom: 0 }}>
+                                    <label>Depois de quantos minutos</label>
+                                    <input type="number" min="5" max="240" value={botCfg.devolverMin}
+                                        onChange={e => setBotCfg(b => ({ ...b, devolverMin: e.target.value }))} />
+                                </div>
+                                <p style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)',
+                                            flex: '1 1 220px', margin: '0 0 4px' }}>
+                                    Conta a partir da última mensagem da conversa. Se o cliente
+                                    estiver esperando, o bot responde na hora que retomar.
+                                </p>
+                            </div>
                         )}
 
                         <button
