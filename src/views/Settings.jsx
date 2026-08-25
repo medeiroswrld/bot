@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     Building2, Calendar, MapPin, Phone, MessageSquare, Save, CheckCircle,
     User, Mail, ToggleLeft, ToggleRight, Plus, Trash2, CalendarOff,
-    Image as ImageIcon, Upload, RefreshCw, Gift, Bell, CreditCard, Bot, Landmark
+    Image as ImageIcon, Upload, RefreshCw, Gift, Bell, CreditCard, Bot, Landmark, X
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
@@ -543,8 +543,20 @@ const Settings = () => {
         // seria o bot atropelando um atendimento em andamento.
         devolver: false, devolverMin: 15,
     });
+    const [bloqueados, setBloqueados] = useState([]);
+    const [novoBloqueio, setNovoBloqueio] = useState('');
     const [savingBot, setSavingBot] = useState(false);
     const [savedBot,  setSavedBot]  = useState(false);
+
+    // Guarda so os digitos: o mesmo numero digitado de tres jeitos viraria tres
+    // entradas na lista, e a loja acharia que bloqueou quando bloqueou o
+    // formato.
+    const adicionarBloqueio = () => {
+        const d = String(novoBloqueio).replace(/\D/g, '');
+        if (d.length < 10) return;
+        if (!bloqueados.includes(d)) setBloqueados(l => [...l, d]);
+        setNovoBloqueio('');
+    };
 
     const saveBotCfg = async () => {
         if (!user?.id) return;
@@ -561,6 +573,7 @@ const Settings = () => {
                 // so foi buscar uma informacao, e a varredura roda de 5 em 5 —
                 // prometer 2 minutos seria promessa que o cron nao cumpre.
                 auto_return_minutes: Math.max(5, Number(botCfg.devolverMin) || 15),
+                bot_blocked_numbers: bloqueados,
                 updated_at: new Date().toISOString(),
             })
             .eq('user_id', user.id);
@@ -703,6 +716,7 @@ const Settings = () => {
             devolver: s.auto_return_enabled === true,
             devolverMin: Number(s.auto_return_minutes ?? 15),
         });
+        setBloqueados(Array.isArray(s.bot_blocked_numbers) ? s.bot_blocked_numbers : []);
         // Equipe e contatos por setor
         setEquipe(Array.isArray(s.team_members) ? s.team_members : []);
         setContatos(Array.isArray(s.department_contacts) ? s.department_contacts : []);
@@ -1666,6 +1680,53 @@ const Settings = () => {
                                 </p>
                             </div>
                         )}
+
+                        <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                            <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>
+                                Números que o bot nunca responde
+                            </span>
+                            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: '2px 0 10px' }}>
+                                O número da equipe, do contador, do guincho, do fornecedor. A mensagem
+                                continua aparecendo em Conversas — só o bot fica calado.
+                            </p>
+
+                            {bloqueados.length > 0 && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                                    {bloqueados.map((n) => (
+                                        <span key={n} style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
+                                                               fontSize: '0.8rem', padding: '3px 6px 3px 10px',
+                                                               borderRadius: 999, background: 'var(--input-bg)',
+                                                               border: '1px solid var(--border)',
+                                                               fontFamily: 'ui-monospace, monospace' }}>
+                                            {n}
+                                            <button type="button" title="Remover"
+                                                onClick={() => setBloqueados(l => l.filter(x => x !== n))}
+                                                style={{ background: 'none', border: 'none', cursor: 'pointer',
+                                                         color: '#dc2626', display: 'flex', padding: 2 }}>
+                                                <X size={13} />
+                                            </button>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                <div className="form-group" style={{ flex: '0 1 200px', marginBottom: 0 }}>
+                                    <label>Telefone</label>
+                                    <input type="tel" placeholder="(15) 98837-2081"
+                                        value={novoBloqueio}
+                                        onChange={e => setNovoBloqueio(e.target.value)}
+                                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); adicionarBloqueio(); } }} />
+                                </div>
+                                <button type="button" className="btn-secondary" onClick={adicionarBloqueio}
+                                    disabled={novoBloqueio.replace(/\D/g, '').length < 10}>
+                                    Adicionar
+                                </button>
+                            </div>
+                            <p style={{ fontSize: '0.74rem', color: 'var(--color-text-muted)', margin: '8px 0 0' }}>
+                                Pode digitar como quiser: a comparação ignora DDI, parênteses e o nono dígito.
+                            </p>
+                        </div>
 
                         <button
                             className="btn-primary"

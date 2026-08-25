@@ -88,6 +88,30 @@ function avisarNoCelular(userId: string, nome: string, texto: string, convId: st
   }
 }
 
+/**
+ * Este número está na lista de bloqueio da loja?
+ *
+ * Compara por DDD + 8 dígitos finais, não por texto. O mesmo telefone chega da
+ * Meta como "5515988372081" e é digitado no cadastro como "(15) 98837-2081" ou
+ * "15 8837-2081" — e o nono dígito entrou em épocas diferentes por região.
+ * Comparar string crua faria a lista falhar justamente para quem a cadastrou
+ * com carinho.
+ */
+function numeroBloqueado(lista: unknown, telefone: string): boolean {
+  if (!Array.isArray(lista) || !lista.length) return false;
+
+  const chave = (v: unknown) => {
+    let d = String(v ?? '').replace(/\D/g, '');
+    if (d.length > 11) d = d.slice(-11);                  // fora o 55
+    if (d.length === 11) d = d.slice(0, 2) + d.slice(3);  // fora o nono dígito
+    return d;
+  };
+
+  const alvo = chave(telefone);
+  if (alvo.length < 10) return false;
+  return lista.some((n) => chave(typeof n === 'string' ? n : (n as { numero?: string })?.numero) === alvo);
+}
+
 // O bot deve responder agora?
 //
 // Duas travas independentes: a chave mestra (bot_enabled) e a janela de
@@ -437,7 +461,7 @@ serve(async (req) => {
   // incidente — e não podem terminar no mesmo lugar.
   let { data: settings, error: settingsErr } = await supabase
     .from('company_settings')
-    .select('user_id, bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso')
+    .select('user_id, bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso, bot_blocked_numbers')
     .eq('whatsapp_phone_number_id', phoneNumberId)
     .maybeSingle();
 
@@ -599,6 +623,21 @@ ${legendaEco}` : `${marcador} ${url}`;
     // Bot desligado ou fora da janela: a mensagem JA foi salva acima e a
     // conversa vai pra 'pendente'. Ficar so em silencio perderia o
     // atendimento — alguem precisa ver que o cliente escreveu.
+    // Numero bloqueado: a mensagem JA foi salva acima e aparece no CRM
+    // normalmente. So o bot nao responde.
+    //
+    // Vem ANTES do horario de propósito: bloqueio nao tem excecao, e checar
+    // depois faria o log dizer "fora do horario" para um numero que nunca seria
+    // respondido de qualquer forma.
+    if (numeroBloqueado((settings as { bot_blocked_numbers?: unknown })?.bot_blocked_numbers, from)) {
+      await supabase.from('conversations')
+        .update({ status: 'pending' })
+        .eq('id', upsertedConv.id)
+        .neq('status', 'human');
+      console.log(`[WH] numero na lista de bloqueio — bot nao responde (${maskPhone(from)})`);
+      return ok();
+    }
+
     if (!botPodeResponder(settings)) {
       await supabase.from('conversations')
         .update({ status: 'pending' })
