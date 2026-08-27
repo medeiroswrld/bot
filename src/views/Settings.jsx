@@ -650,6 +650,9 @@ const Settings = () => {
     // Cada pergunta da troca liga/desliga sozinha: "nota de 0 a 10" cai bem numa
     // loja e soa estranha em outra. Mesmo padrao do ford acima.
     const [tradeQ, setTradeQ] = useState({ modelo: true, ano: true, km: true, tempo_dono: true, nota: true, pagamento: true });
+    // Desligada por padrão: loja que usa outra base de cálculo — ou que não quer
+    // número nenhum antes de ver o carro — não pode ter isso ativo sem pedir.
+    const [avaliacao, setAvaliacao] = useState({ enabled: false, teto: 90 });
     const [savingFord, setSavingFord] = useState(false);
     const [savedFord,  setSavedFord]  = useState(false);
 
@@ -730,6 +733,10 @@ const Settings = () => {
         });
         // Comportamento do bot / FORD / lembrete / troca
         setDelayedSched(s.delayed_schedule_enabled !== false);
+        setAvaliacao({
+            enabled: s.trade_in_valuation_enabled === true,
+            teto: Number(s.trade_in_valuation_max_percent ?? 90),
+        });
         if (s.trade_in_questions && typeof s.trade_in_questions === 'object') {
             setTradeQ({ ...{ modelo: true, ano: true, km: true, tempo_dono: true, nota: true, pagamento: true }, ...s.trade_in_questions });
         }
@@ -798,6 +805,8 @@ const Settings = () => {
                 trade_in_evaluation_enabled: tradeIn.enabled,
                 trade_in_extra_questions: tradeIn.extraQuestions || null,
                 trade_in_questions: tradeQ,
+                trade_in_valuation_enabled: avaliacao.enabled,
+                trade_in_valuation_max_percent: Math.min(100, Math.max(10, Number(avaliacao.teto) || 90)),
                 updated_at: new Date().toISOString(),
             })
             .eq('user_id', user.id);
@@ -2014,6 +2023,42 @@ const Settings = () => {
                                     />
                                     <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '-0.25rem' }}>Cada linha = 1 pergunta extra que o bot vai fazer.</p>
                                 </div>
+
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10,
+                                              paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+                                    <button type="button"
+                                        onClick={() => setAvaliacao(a => ({ ...a, enabled: !a.enabled }))}
+                                        title={avaliacao.enabled ? 'Desativar' : 'Ativar'}
+                                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                                                 flexShrink: 0, color: avaliacao.enabled ? '#10b981' : '#94a3b8' }}>
+                                        {avaliacao.enabled ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
+                                    </button>
+                                    <div>
+                                        <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>
+                                            Estimar o valor da troca pela FIPE
+                                        </span>
+                                        <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                                            O bot pergunta quanto o carro está na FIPE e aplica a nota que o próprio
+                                            dono deu. Nota 7 num carro de R$ 50.000 = 70% = R$ 35.000. Sempre como
+                                            estimativa, com a avaliação real na loja.
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {avaliacao.enabled && (
+                                    <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                                        <div className="form-group" style={{ flex: '0 1 150px', marginBottom: 0 }}>
+                                            <label>Teto da estimativa (%)</label>
+                                            <input type="number" min="10" max="100" value={avaliacao.teto}
+                                                onChange={e => setAvaliacao(a => ({ ...a, teto: e.target.value }))} />
+                                        </div>
+                                        <p style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)',
+                                                    flex: '1 1 220px', margin: '0 0 4px' }}>
+                                            Sem teto, nota 10 significaria pagar 100% da FIPE. Nenhuma loja faz isso, e
+                                            o bot prometendo vira discussão no balcão.
+                                        </p>
+                                    </div>
+                                )}
                             </>
                         )}
                         <button

@@ -315,7 +315,7 @@ const TOOLS = [
   {
     name: 'simular_financiamento',
     description:
-      'Calcula uma ESTIMATIVA de parcela de financiamento (Tabela Price) com a config da loja. Use quando o cliente pedir pra simular o financiamento de um carro específico. Apresente SEMPRE como estimativa, com o disclaimer retornado, e convide pra confirmar na loja. Nunca afirme que a parcela é o valor final.',
+      'Calcula ESTIMATIVAS de parcela (Tabela Price) com a config da loja. Devolve DOIS OU TRÊS cenários de uma vez: sem entrada, com a entrada padrão da loja e, se o cliente informou alguma, com a dele. Apresente TODOS juntos, em texto corrido, dizendo qual é qual — a comparação é o que ajuda o cliente a decidir. Sempre como estimativa, com o disclaimer, e convidando a simular na loja porque depende de aprovação de crédito.',
     input_schema: {
       type: 'object',
       properties: {
@@ -325,6 +325,24 @@ const TOOLS = [
         installments:   { type: 'integer', description: 'Prazo em meses; se não informado, usa o máximo da loja' },
       },
       required: ['car_price'],
+    },
+  },
+  {
+    name: 'avaliar_troca',
+    description:
+      'Estima quanto a loja pagaria no carro que o cliente quer dar na troca, a partir da TABELA FIPE e da nota que o PRÓPRIO DONO deu ao carro. '
+      + 'SEQUÊNCIA: colete antes os dados do carro (modelo, ano, km, tempo de posse) e principalmente a NOTA de 0 a 10; só então pergunte quanto está na FIPE hoje. '
+      + 'Perguntar a FIPE antes de conversar sobre o estado do carro faz a pessoa achar que o valor já está definido. '
+      + 'Você NÃO consulta a FIPE: quem informa é o cliente. Se ele não souber, peça pra ele olhar e diga que sem isso não dá pra estimar. '
+      + 'Apresente SEMPRE como estimativa e deixe claro que o valor real sai na avaliação presencial, porque depende de ver o carro. '
+      + 'Se vier disponivel:false, a loja não usa essa base de cálculo — NÃO invente valor nem percentual, colete os dados e siga.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        valor_fipe: { type: 'number', description: 'Valor da tabela FIPE do carro do cliente, informado por ele' },
+        nota:       { type: 'number', description: 'Nota de 0 a 10 que o próprio dono deu ao estado do carro' },
+      },
+      required: ['valor_fipe', 'nota'],
     },
   },
   {
@@ -1192,18 +1210,46 @@ async function executeTool(
     if (n > maxN) n = maxN; // teto de parcelas
 
     const entradaTotal = downPayment + tradeIn;
-    const minEntrada   = carPrice * (minPct / 100);
 
-    // Validação: entrada mínima (dinheiro + troca)
-    if (minPct > 0 && entradaTotal < minEntrada) {
-      log.info('entrada insuficiente', { action: 'simular_financiamento', entradaTotal, entradaMinima: Math.round(minEntrada), minPct });
+    // TRÊS cenários, sempre juntos.
+    //
+    // Antes a simulação devolvia um número só e recusava tudo abaixo da entrada
+    // mínima — ou seja, quem perguntava "dá pra financiar tudo?" ouvia um não
+    // seco e ia embora. Só que financiar 100% existe: depende do banco e do
+    // perfil, e quem decide isso é a análise de crédito, não o nosso cálculo.
+    //
+    // Mostrar sem entrada E com entrada lado a lado faz duas coisas ao mesmo
+    // tempo: responde o que a pessoa perguntou e deixa visível o quanto a
+    // entrada derruba a parcela. É o argumento do vendedor, feito por conta.
+    const pctComEntrada = minPct > 0 ? minPct : 20;
+
+    const monta = (rotulo: string, entrada: number, nota: string) => {
+      const financiado = Math.max(0, carPrice - entrada);
       return {
-        sucesso: false, entrada_insuficiente: true,
-        entrada_informada: entradaTotal,
-        entrada_minima: Math.round(minEntrada),
-        entrada_minima_percent: minPct,
-        mensagem: `Entrada (dinheiro + troca = R$ ${entradaTotal.toLocaleString('pt-BR')}) abaixo do mínimo de ${minPct}% (R$ ${Math.round(minEntrada).toLocaleString('pt-BR')}). Diga o mínimo e pergunte se consegue complementar. NÃO calcule abaixo do mínimo.`,
+        rotulo,
+        entrada: Math.round(entrada),
+        entrada_percent: carPrice > 0 ? Math.round((entrada / carPrice) * 100) : 0,
+        valor_financiado: Math.round(financiado),
+        parcelas: n,
+        valor_parcela: Math.round(calcParcelaPrice(financiado, taxa, n) * 100) / 100,
+        nota,
       };
+    };
+
+    const cenarios = [
+      monta('Sem entrada', 0, 'Financiando o valor total. Nem todo banco aceita, e depende da análise de crédito.'),
+      monta(`Com ${pctComEntrada}% de entrada`, carPrice * (pctComEntrada / 100), 'Entrada derruba a parcela e amplia as opções de banco.'),
+    ];
+
+    // O cenário da entrada que o CLIENTE informou só entra se ele informou
+    // alguma e ela for diferente das outras duas — repetir o mesmo número com
+    // outro rótulo confunde em vez de ajudar.
+    if (entradaTotal > 0 && Math.abs(entradaTotal - carPrice * (pctComEntrada / 100)) > 1) {
+      cenarios.push(monta(
+        tradeIn > 0 ? 'Com a sua entrada + troca' : 'Com a entrada que você falou',
+        entradaTotal,
+        'Considera o que você informou' + (tradeIn > 0 ? ', somando a avaliação estimada da troca.' : '.'),
+      ));
     }
 
     const valorFinanciado = Math.max(0, carPrice - entradaTotal);
@@ -1232,11 +1278,77 @@ async function executeTool(
 
     return {
       sucesso: true,
+      cenarios,
+      taxa_mes: taxa,
+      // Mantidos para não quebrar nada que já lia estes campos.
       valor_financiado: Math.round(valorFinanciado),
       parcelas: n,
       valor_parcela: Math.round(parcela * 100) / 100,
-      disclaimer: 'Esta é uma simulação aproximada. O valor exato depende da análise de crédito do banco e do perfil do cliente.',
-      mensagem: 'Apresente como ESTIMATIVA + disclaimer e convide pra confirmar na loja. Nunca diga que é o valor final.',
+      disclaimer: 'Estimativa. O valor exato depende da análise de crédito do banco e do perfil do cliente.',
+      mensagem: 'Apresente os cenários JUNTOS, em texto corrido e curto, dizendo qual é sem entrada e qual é com entrada. '
+        + 'Explique numa frase que alguns bancos pedem entrada. '
+        + 'Feche convidando pra simular na loja, porque depende de aprovação de crédito. '
+        + 'NUNCA diga que é o valor final e NUNCA monte tabela nem lista com marcadores.',
+    };
+  }
+
+  if (name === 'avaliar_troca') {
+    const fipe = Number(input.valor_fipe ?? 0);
+    const nota = Number(input.nota ?? -1);
+
+    const { data: cfg } = await supabase
+      .from('company_settings')
+      .select('trade_in_valuation_enabled, trade_in_valuation_max_percent')
+      .eq('user_id', userId).single();
+
+    // Desligada: a loja usa outra base de cálculo, ou não quer número nenhum
+    // antes de ver o carro. Nesse caso o bot NÃO improvisa.
+    if (!cfg || cfg.trade_in_valuation_enabled !== true) {
+      return {
+        disponivel: false,
+        mensagem: 'A loja não usa estimativa automática de troca. NÃO dê valor nem percentual. '
+          + 'Diga que a avaliação é feita pessoalmente, porque depende de ver o carro, e convide pra levar na loja.',
+      };
+    }
+
+    if (!fipe || fipe <= 0) {
+      return { sucesso: false, mensagem: 'Preciso do valor da FIPE. Peça pro cliente consultar e informar.' };
+    }
+    if (!(nota >= 0 && nota <= 10)) {
+      return { sucesso: false, mensagem: 'Preciso da nota de 0 a 10 que o dono dá ao carro. Pergunte antes de estimar.' };
+    }
+
+    // Nota 7 = 70% da FIPE. É a conta que o lojista faz de cabeça.
+    //
+    // Com teto: pela regra pura, nota 10 daria 100% da FIPE — valor que loja
+    // nenhuma paga, e o bot prometendo isso vira discussão no balcão com o
+    // cliente com razão na mão.
+    const teto = Number(cfg.trade_in_valuation_max_percent ?? 90);
+    const percentual = Math.min(nota * 10, teto);
+    const estimado = Math.round(fipe * (percentual / 100));
+
+    log.info('troca avaliada', { action: 'avaliar_troca', fipe, nota, percentual, estimado });
+
+    try {
+      const { data: lead } = await supabase.from('leads')
+        .select('id, trade_in_extra_info').eq('user_id', userId).eq('phone', customerPhone).maybeSingle();
+      if (lead) {
+        const resumo = `Avaliação estimada: FIPE R$ ${fipe.toLocaleString('pt-BR')} x nota ${nota} = ${percentual}% = R$ ${estimado.toLocaleString('pt-BR')}`;
+        const novo = lead.trade_in_extra_info ? `${lead.trade_in_extra_info}\n${resumo}` : resumo;
+        await supabase.from('leads').update({ trade_in_extra_info: novo, updated_at: new Date().toISOString() }).eq('id', lead.id);
+      }
+    } catch (e) { log.error('erro ao salvar avaliação no lead', { action: 'avaliar_troca', error: e }); }
+
+    return {
+      sucesso: true,
+      valor_fipe: fipe,
+      nota,
+      percentual,
+      valor_estimado: estimado,
+      teto_aplicado: nota * 10 > teto,
+      mensagem: 'Diga o valor estimado explicando a conta em UMA frase (a nota que ele mesmo deu aplicada sobre a FIPE). '
+        + 'Deixe claro que é estimativa e que o valor real sai vendo o carro na loja. '
+        + 'Se ele já escolheu um veículo, use este valor como entrada em simular_financiamento.',
     };
   }
 
