@@ -402,14 +402,26 @@ serve(async (req) => {
 
   // ── Acorda o bot ───────────────────────────────────────────────────────────
   if (conv?.status !== 'human') {
-    fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/process-conversation`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
-      },
-      body: JSON.stringify({ conversation_id: convId }),
-    }).catch((e) => console.error('[SW] falha ao acordar o bot:', e));
+    // waitUntil + espera de 2s, pelos MESMOS dois motivos do whatsapp-webhook:
+    //
+    // 1. fetch solto e cancelado quando o handler responde. Aqui vinha
+    //    funcionando por acidente, porque o handler ainda fazia trabalho depois
+    //    — acidente nao e garantia.
+    // 2. A trava contra processamento duplo usa o id da ultima mensagem do
+    //    cliente. Duas mensagens seguidas viravam duas chaves e duas execucoes,
+    //    e o bot cumprimentava a mesma pessoa duas vezes.
+    // @ts-ignore — EdgeRuntime e global nas Supabase Edge Functions
+    EdgeRuntime.waitUntil(
+      new Promise((r) => setTimeout(r, 2000)).then(() =>
+      fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/process-conversation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        },
+        body: JSON.stringify({ conversation_id: convId }),
+      }).catch((e) => console.error('[SW] falha ao acordar o bot:', e))),
+    );
   }
 
   console.log(`[SW] ${msg.canal}: mensagem recebida (conversa ${convId})`);

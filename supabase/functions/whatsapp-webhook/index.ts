@@ -519,14 +519,31 @@ serve(async (req) => {
   // 8. Helper: aciona process-conversation de forma assíncrona (mantém a function viva)
   const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  // Espera um instante antes de acionar o bot.
+  //
+  // A trava contra processamento duplo usa o id da ULTIMA mensagem do cliente
+  // como chave. Cliente que manda foto e texto em seguida gera dois webhooks:
+  // disparando na hora, o primeiro trava com a chave da foto e o segundo com a
+  // do texto — chaves diferentes, nenhuma bloqueia a outra, e o modelo roda
+  // duas vezes. Foi assim que o bot cumprimentou o mesmo cliente duas vezes.
+  //
+  // Com a pausa, as duas execucoes leem a MESMA ultima mensagem, chegam na
+  // mesma chave, e a segunda aborta. De quebra o bot responde as duas mensagens
+  // juntas, que e o que uma pessoa faria.
+  //
+  // Nao atrasa a resposta ao Meta: isto roda dentro do waitUntil, depois do
+  // ok().
+  const ESPERA_LOTE_MS = 2000;
+
   const fireProcess = (conversationId: string) => {
     // @ts-ignore — EdgeRuntime é global nas Supabase Edge Functions
     EdgeRuntime.waitUntil(
+      new Promise((r) => setTimeout(r, ESPERA_LOTE_MS)).then(() =>
       fetch(`${supabaseUrl}/functions/v1/process-conversation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${serviceKey}` },
         body: JSON.stringify({ conversation_id: conversationId }),
-      }).catch((e: unknown) => console.error('[WH] Erro ao acionar process-conversation:', e)),
+      }).catch((e: unknown) => console.error('[WH] Erro ao acionar process-conversation:', e))),
     );
   };
 
