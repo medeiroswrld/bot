@@ -484,14 +484,21 @@ const Painel = ({ onSair }) => {
   };
   // Plano da loja. A coluna e protegida por trigger no banco, entao esta e a
   // UNICA porta: o lojista nao consegue se liberar nem chamando a API direto.
-  const alternarPlano = async (loja) => {
-    const incluindo = !loja.bot_contratado;
+  const alternarPlano = async (loja, campo) => {
+    const atual = campo === 'bot' ? loja.bot_contratado : loja.disparos_contratado;
+    const nome = campo === 'bot' ? 'o bot' : 'os disparos';
+    const incluindo = !atual;
     if (!confirm(incluindo
-      ? `Incluir o bot no plano de ${loja.empresa || loja.email}?`
-      : `Tirar o bot do plano de ${loja.empresa || loja.email}? Ele para de responder imediatamente.`)) return;
+      ? `Incluir ${nome} no plano de ${loja.empresa || loja.email}?`
+      : `Tirar ${nome} do plano de ${loja.empresa || loja.email}? Para de funcionar imediatamente.`)) return;
     setSalvandoId(loja.user_id);
     try {
-      await chamar({ acao: 'plano', user_id: loja.user_id, bot_contratado: incluindo });
+      // Manda SO o campo alterado: os dois niveis sao independentes e um toggle
+      // nao pode zerar o outro sem querer.
+      const corpo = { acao: 'plano', user_id: loja.user_id };
+      if (campo === 'bot') corpo.bot_contratado = incluindo;
+      else corpo.disparos_contratado = incluindo;
+      await chamar(corpo);
       await carregar();
     } finally {
       setSalvandoId(null);
@@ -727,17 +734,23 @@ const Painel = ({ onSair }) => {
                           }}>
                           {l.suspenso ? 'suspensa' : 'ativa'}
                         </button>
-                        <button type="button" onClick={() => alternarPlano(l)} disabled={salvandoId === l.user_id}
-                          title={l.bot_contratado ? 'Plano COM bot. Clique pra tirar o bot do plano.' : 'Plano SO CRM. Clique pra incluir o bot.'}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 999,
-                            cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, marginTop: 4,
-                            border: `1px solid ${l.bot_contratado ? '#1e3a8a' : '#3f3f46'}`,
-                            background: l.bot_contratado ? '#0f1e3d' : '#18181b',
-                            color: l.bot_contratado ? '#93c5fd' : '#71717a',
-                          }}>
-                          {l.bot_contratado ? 'com bot' : 'só CRM'}
-                        </button>
+                        <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                          {[['bot', 'bot', l.bot_contratado], ['disparos', 'disparos', l.disparos_contratado]].map(([campo, rotulo, ativo]) => (
+                            <button key={campo} type="button" onClick={() => alternarPlano(l, campo)}
+                              disabled={salvandoId === l.user_id}
+                              title={ativo ? `${rotulo} incluso no plano. Clique pra tirar.` : `${rotulo} fora do plano. Clique pra incluir.`}
+                              style={{
+                                padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+                                fontSize: '0.68rem', fontWeight: 600,
+                                border: `1px solid ${ativo ? '#1e3a8a' : '#3f3f46'}`,
+                                background: ativo ? '#0f1e3d' : '#18181b',
+                                color: ativo ? '#93c5fd' : '#52525b',
+                                textDecoration: ativo ? 'none' : 'line-through',
+                              }}>
+                              {rotulo}
+                            </button>
+                          ))}
+                        </div>
                         {!l.bot_enabled && !l.suspenso && l.bot_contratado && (
                           <div style={{ fontSize: '0.68rem', color: '#f59e0b', marginTop: 3 }}>bot desligado pela loja</div>
                         )}

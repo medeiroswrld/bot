@@ -69,14 +69,20 @@ Deno.serve(async (req) => {
   // Plano da loja: com ou sem bot. So o administrador altera — a coluna e
   // protegida por trigger no banco, entao nem adianta o lojista tentar pela API.
   if (acao === 'plano') {
-    const { user_id, bot_contratado } = body as { user_id?: string; bot_contratado?: boolean };
+    const { user_id, bot_contratado, disparos_contratado } = body as { user_id?: string; bot_contratado?: boolean; disparos_contratado?: boolean };
     if (!user_id) return json({ error: 'user_id obrigatório' }, 400);
     const { error } = await admin
       .from('company_settings')
-      .update({ bot_contratado: bot_contratado === true, updated_at: new Date().toISOString() })
+      .update({
+        // So mexe no que veio no corpo: os dois niveis sao independentes e um
+        // toggle nao pode zerar o outro sem querer.
+        ...(bot_contratado !== undefined ? { bot_contratado: bot_contratado === true } : {}),
+        ...(disparos_contratado !== undefined ? { disparos_contratado: disparos_contratado === true } : {}),
+        updated_at: new Date().toISOString(),
+      })
       .eq('user_id', user_id);
     if (error) return json({ error: error.message }, 500);
-    return json({ ok: true, bot_contratado: bot_contratado === true });
+    return json({ ok: true });
   }
 
   if (acao === 'suspender') {
@@ -301,11 +307,11 @@ Deno.serve(async (req) => {
   // Plano de cada loja. Vem por consulta separada em vez de entrar na funcao
   // SQL: mudar o `returns table` do admin_metricas exige DROP + CREATE, e
   // recriar a funcao de metricas pra carregar um booleano nao se paga.
-  const planos = new Map<string, boolean>();
+  const planos = new Map<string, { bot: boolean; disparos: boolean }>();
   try {
     const { data: linhas } = await admin
-      .from('company_settings').select('user_id, bot_contratado');
-    for (const l of linhas ?? []) planos.set(String(l.user_id), l.bot_contratado === true);
+      .from('company_settings').select('user_id, bot_contratado, disparos_contratado');
+    for (const l of linhas ?? []) planos.set(String(l.user_id), { bot: l.bot_contratado === true, disparos: l.disparos_contratado === true });
   } catch (e) {
     console.warn('[admin-metrics] planos indisponiveis:', (e as Error)?.message);
   }
@@ -315,7 +321,8 @@ Deno.serve(async (req) => {
     return {
       ...l,
       qualidade: qualidades.get(uid) ?? null,
-      bot_contratado: planos.get(uid) ?? true,
+      bot_contratado: planos.get(uid)?.bot ?? true,
+      disparos_contratado: planos.get(uid)?.disparos ?? true,
     };
   });
 

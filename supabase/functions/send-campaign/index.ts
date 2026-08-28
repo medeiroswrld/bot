@@ -5,6 +5,7 @@ import { resolveWhatsAppToken, variantesTelefoneBR } from '../_shared/whatsapp.t
 import { maskPhone } from '../_shared/maskPII.ts';
 
 import { buildCors } from '../_shared/cors.ts';
+import { podeDisparar, COLUNAS_DISPARO } from '../_shared/botGuards.ts';
 
 // Rate limit: ~1s entre envios pra não estourar o limite da Meta
 const DELAY_BETWEEN_SENDS_MS = 1100;
@@ -63,9 +64,19 @@ serve(async (req) => {
     // Phone Number ID vem de company_settings (multi-tenant)
     const { data: settings } = await supabase
       .from('company_settings')
-      .select('whatsapp_phone_number_id')
+      .select(`whatsapp_phone_number_id, ${COLUNAS_DISPARO}`)
       .eq('user_id', campaign.user_id)
       .single();
+
+    // Plano sem disparo: existe cliente que compra so o CRM, e outro que compra
+    // CRM + disparo sem bot. A trava e servidor — a tela pode esconder o botao,
+    // mas a fronteira e aqui.
+    if (!podeDisparar(settings)) {
+      console.warn(`[campanha] bloqueada: plano sem disparo (user ${campaign.user_id})`);
+      return new Response(JSON.stringify({ error: 'Envio em massa não faz parte do plano desta conta.' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
     if (!phoneNumberId) {

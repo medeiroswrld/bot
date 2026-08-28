@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { buildCors } from '../_shared/cors.ts';
 import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
+import { podeDisparar, COLUNAS_DISPARO } from '../_shared/botGuards.ts';
 
 // Rate limit in-memory (por instância) — suficiente para evitar spam à Meta.
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
@@ -100,9 +101,17 @@ serve(async (req) => {
     // WABA ID por tenant: lê de company_settings (pelo dono do template); fallback para o secret.
     const { data: wabaSettings } = await supabase
       .from('company_settings')
-      .select('whatsapp_business_account_id')
+      .select(`whatsapp_business_account_id, ${COLUNAS_DISPARO}`)
       .eq('user_id', template.user_id)
       .maybeSingle();
+
+    // Template existe pra ser disparado. Sem disparo no plano, submeter a Meta
+    // so consome fila de revisao deles pra nada.
+    if (!podeDisparar(wabaSettings)) {
+      return new Response(JSON.stringify({ error: 'Envio em massa não faz parte do plano desta conta.' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     const wabaId = String(
       wabaSettings?.whatsapp_business_account_id || Deno.env.get('WHATSAPP_BUSINESS_ACCOUNT_ID') || '',
     ).trim();

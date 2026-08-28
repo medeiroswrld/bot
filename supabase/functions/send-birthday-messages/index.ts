@@ -5,6 +5,7 @@ import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
 import { buildCors } from '../_shared/cors.ts';
+import { podeDisparar, COLUNAS_DISPARO } from '../_shared/botGuards.ts';
 
 serve(async (req) => {
   const corsHeaders = buildCors(req);
@@ -31,7 +32,7 @@ serve(async (req) => {
 
     const { data: settingsList } = await supabase
       .from('company_settings')
-      .select('user_id, whatsapp_phone_number_id, birthday_template_id, birthday_enabled, company_name')
+      .select(`user_id, whatsapp_phone_number_id, birthday_template_id, birthday_enabled, company_name, ${COLUNAS_DISPARO}`)
       .eq('birthday_enabled', true)
       .not('birthday_template_id', 'is', null);
 
@@ -45,6 +46,11 @@ serve(async (req) => {
     let totalFailed = 0;
 
     for (const settings of settingsList) {
+      // Aniversario e disparo em massa: entra no mesmo plano das campanhas.
+      if (!podeDisparar(settings)) {
+        console.log(`[birthday] user ${settings.user_id}: plano sem disparo — pulando`);
+        continue;
+      }
       const phoneNumberId = String(settings.whatsapp_phone_number_id ?? '');
       if (!phoneNumberId) continue;
       const token = await resolveWhatsAppToken(supabase, settings.user_id);

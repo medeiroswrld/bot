@@ -21,6 +21,24 @@ export interface GuardasDoBot {
 export const COLUNAS_GUARDA =
   'bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso, bot_contratado, bot_blocked_numbers';
 
+/** Colunas necessárias para checar disparo em massa. */
+export const COLUNAS_DISPARO = 'suspenso, disparos_contratado';
+
+/**
+ * A loja pode ENVIAR em massa (campanha, aniversário, template)?
+ *
+ * Separado do bot de propósito: existe cliente que quer disparo e não quer bot,
+ * e o contrário também. Dois booleanos independentes combinam sozinhos; um
+ * campo `plano` com três valores obrigaria a reescrever toda checagem no dia
+ * em que aparecer a quarta combinação.
+ *
+ * Suspensão continua cortando tudo — inadimplente não dispara.
+ */
+export function podeDisparar(s: { suspenso?: boolean | null; disparos_contratado?: boolean | null } | null | undefined): boolean {
+  if (s?.suspenso === true) return false;
+  return s?.disparos_contratado !== false;
+}
+
 /**
  * O bot deve responder agora?
  *
