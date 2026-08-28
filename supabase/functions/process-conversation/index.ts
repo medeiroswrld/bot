@@ -4,6 +4,7 @@ import { sendMessage, sendMessageComId, sendImage, sendVideo, resolveWhatsAppTok
 import { enviarSocial, enviarImagemSocial } from '../_shared/social.ts';
 import { maskName } from '../_shared/maskPII.ts';
 import { withRequest, type Logger } from '../_shared/logger.ts';
+import { botPodeResponder, COLUNAS_GUARDA } from '../_shared/botGuards.ts';
 
 // deploy: vendas ETAPA A (consultar_estoque cruza visitas) + fixes agendamento (8380dc1)
 
@@ -2693,6 +2694,35 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     log.warn('claim ignorado (coluna last_handled_msg_id existe?) — dedupe desativada', { action: 'claim', error: claimErr.message });
   } else if (!claimed) {
     log.info('lote já assumido por outra invocação — abortando', { action: 'claim', batchKey });
+    return new Response('OK', { status: 200 });
+  }
+
+  // ── 3b. O bot PODE falar nesta conta? ─────────────────────────────────────
+  //
+  // A trava vive aqui, e nao so em quem chama, porque este e o unico ponto por
+  // onde o bot fala. Ela nasceu dentro do whatsapp-webhook: o social-webhook
+  // foi escrito depois e passou meses sem nenhuma verificacao, e o
+  // devolver-ao-bot, escrito ontem, tambem chamava direto.
+  //
+  // Guarda em quem chama e guarda que a proxima porta esquece. Esta e a ultima.
+  //
+  // Vem ANTES das boas-vindas de proposito: aquele bloco JA ENVIA mensagem.
+  const { data: guardas } = await supabase
+    .from('company_settings')
+    .select(COLUNAS_GUARDA)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (guardas && !botPodeResponder(guardas)) {
+    await supabase.from('conversations')
+      .update({ status: 'pending' })
+      .eq('id', conversationId)
+      .neq('status', 'human');
+    log.info('bot nao pode responder nesta conta', {
+      action: 'guarda',
+      contratado: (guardas as { bot_contratado?: boolean }).bot_contratado,
+      suspenso: (guardas as { suspenso?: boolean }).suspenso,
+    });
     return new Response('OK', { status: 200 });
   }
 

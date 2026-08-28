@@ -7,6 +7,7 @@
 //
 // Roda por cron. Cada loja escolhe se quer e depois de quantos minutos.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
+import { botPodeResponder, COLUNAS_GUARDA } from '../_shared/botGuards.ts';
 
 const json = (d: unknown, s = 200) =>
   new Response(JSON.stringify(d), { status: s, headers: { 'Content-Type': 'application/json' } });
@@ -19,9 +20,12 @@ Deno.serve(async () => {
   );
 
   // Só lojas que ligaram a devolução.
+  // Le as travas junto: nao adianta devolver conversa pro bot de uma loja que
+  // nao tem bot no plano, ou que esta suspensa. Sem isto, uma loja rebaixada
+  // pra so-CRM teria o bot ressuscitado pelo cron.
   const { data: lojas, error: erroLojas } = await supabase
     .from('company_settings')
-    .select('user_id, auto_return_minutes')
+    .select(`user_id, auto_return_minutes, ${COLUNAS_GUARDA}`)
     .eq('auto_return_enabled', true);
 
   if (erroLojas) {
@@ -34,6 +38,10 @@ Deno.serve(async () => {
   const acionar: string[] = [];
 
   for (const loja of lojas) {
+    if (!botPodeResponder(loja)) {
+      console.log(`[devolver] loja ${loja.user_id} sem bot ativo — pulando`);
+      continue;
+    }
     const minutos = Math.max(1, Number(loja.auto_return_minutes) || 15);
     const limite = new Date(Date.now() - minutos * 60_000).toISOString();
 
