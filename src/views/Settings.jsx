@@ -1597,7 +1597,18 @@ const Settings = () => {
                         <h2>Funcionamento do Bot</h2>
                     </div>
                     <div className="settings-form">
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14 }}>
+                        {companySettings?.bot_contratado === false && (
+                            // Aviso, nao trava. A trava de verdade e no servidor e no banco —
+                            // esconder controle na tela nao impede ninguem de chamar a API.
+                            <p style={{ fontSize: '0.82rem', color: '#0369a1', background: '#e0f2fe',
+                                        border: '1px solid #bae6fd', borderRadius: 8,
+                                        padding: '10px 12px', lineHeight: 1.5, marginBottom: 14 }}>
+                                O bot não faz parte do seu plano. As configurações abaixo ficam
+                                salvas, mas ele não responde. Fale com a gente para incluir.
+                            </p>
+                        )}
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14,
+                                      opacity: companySettings?.bot_contratado === false ? 0.5 : 1 }}>
                             <button type="button" onClick={() => setBotCfg(b => ({ ...b, enabled: !b.enabled }))}
                                 title={botCfg.enabled ? 'Desativar' : 'Ativar'}
                                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0, color: botCfg.enabled ? '#10b981' : '#94a3b8' }}>

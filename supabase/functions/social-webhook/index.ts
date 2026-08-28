@@ -9,6 +9,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { parseSocial, nomeDoUsuarioSocial, miniaturaDoStory } from '../_shared/social.ts';
+import { botPodeResponder, COLUNAS_GUARDA } from '../_shared/botGuards.ts';
 
 const ok  = () => new Response('EVENT_RECEIVED', { status: 200 });
 const err = (s: number, m: string) => new Response(m, { status: s });
@@ -152,7 +153,7 @@ serve(async (req) => {
   const coluna = msg.canal === 'instagram' ? 'ig_user_id' : 'fb_page_id';
   const { data: cfg, error: cfgErr } = await supabase
     .from('company_settings')
-    .select('user_id')
+    .select(`user_id, ${COLUNAS_GUARDA}`)
     .eq(coluna, msg.contaId)
     .maybeSingle();
 
@@ -401,6 +402,20 @@ serve(async (req) => {
     .eq('id', convId);
 
   // ── Acorda o bot ───────────────────────────────────────────────────────────
+  //
+  // As mesmas travas do WhatsApp valem aqui. Elas viviam so no outro webhook, e
+  // este nasceu sem nenhuma: loja suspensa continuava sendo atendida pelo
+  // Instagram, bot desligado respondia assim mesmo, e a janela de horario nao
+  // valia fora do WhatsApp. A mensagem JA foi salva acima — so o bot para.
+  if (!botPodeResponder(cfg)) {
+    await supabase.from('conversations')
+      .update({ status: 'pending' })
+      .eq('id', convId)
+      .neq('status', 'human');
+    console.log(`[SW] bot nao pode responder (plano/suspensao/horario) — conversa pendente`);
+    return ok();
+  }
+
   if (conv?.status !== 'human') {
     // waitUntil + espera de 2s, pelos MESMOS dois motivos do whatsapp-webhook:
     //

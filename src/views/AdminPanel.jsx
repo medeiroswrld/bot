@@ -482,6 +482,22 @@ const Painel = ({ onSair }) => {
     } catch (e) { setErro(e.message); }
     finally { setSalvandoId(null); }
   };
+  // Plano da loja. A coluna e protegida por trigger no banco, entao esta e a
+  // UNICA porta: o lojista nao consegue se liberar nem chamando a API direto.
+  const alternarPlano = async (loja) => {
+    const incluindo = !loja.bot_contratado;
+    if (!confirm(incluindo
+      ? `Incluir o bot no plano de ${loja.empresa || loja.email}?`
+      : `Tirar o bot do plano de ${loja.empresa || loja.email}? Ele para de responder imediatamente.`)) return;
+    setSalvandoId(loja.user_id);
+    try {
+      await chamar({ acao: 'plano', user_id: loja.user_id, bot_contratado: incluindo });
+      await carregar();
+    } finally {
+      setSalvandoId(null);
+    }
+  };
+
 
   const alternarSuspensao = async (loja) => {
     const suspendendo = !loja.suspenso;
@@ -711,7 +727,18 @@ const Painel = ({ onSair }) => {
                           }}>
                           {l.suspenso ? 'suspensa' : 'ativa'}
                         </button>
-                        {!l.bot_enabled && !l.suspenso && (
+                        <button type="button" onClick={() => alternarPlano(l)} disabled={salvandoId === l.user_id}
+                          title={l.bot_contratado ? 'Plano COM bot. Clique pra tirar o bot do plano.' : 'Plano SO CRM. Clique pra incluir o bot.'}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 999,
+                            cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, marginTop: 4,
+                            border: `1px solid ${l.bot_contratado ? '#1e3a8a' : '#3f3f46'}`,
+                            background: l.bot_contratado ? '#0f1e3d' : '#18181b',
+                            color: l.bot_contratado ? '#93c5fd' : '#71717a',
+                          }}>
+                          {l.bot_contratado ? 'com bot' : 'só CRM'}
+                        </button>
+                        {!l.bot_enabled && !l.suspenso && l.bot_contratado && (
                           <div style={{ fontSize: '0.68rem', color: '#f59e0b', marginTop: 3 }}>bot desligado pela loja</div>
                         )}
                       </td>

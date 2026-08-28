@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { timingSafeEqual } from 'https://deno.land/std@0.224.0/crypto/timing_safe_equal.ts';
 import { parseInboundMessage, sendMessage, resolveWhatsAppToken, variantesTelefoneBR } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
+import { botPodeResponder, numeroBloqueado, COLUNAS_GUARDA } from '../_shared/botGuards.ts';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -86,65 +87,6 @@ function avisarNoCelular(userId: string, nome: string, texto: string, convId: st
   } catch (e) {
     console.warn('[WH-push] erro inesperado:', e);
   }
-}
-
-/**
- * Este número está na lista de bloqueio da loja?
- *
- * Compara por DDD + 8 dígitos finais, não por texto. O mesmo telefone chega da
- * Meta como "5515988372081" e é digitado no cadastro como "(15) 98837-2081" ou
- * "15 8837-2081" — e o nono dígito entrou em épocas diferentes por região.
- * Comparar string crua faria a lista falhar justamente para quem a cadastrou
- * com carinho.
- */
-function numeroBloqueado(lista: unknown, telefone: string): boolean {
-  if (!Array.isArray(lista) || !lista.length) return false;
-
-  const chave = (v: unknown) => {
-    let d = String(v ?? '').replace(/\D/g, '');
-    if (d.length > 11) d = d.slice(-11);                  // fora o 55
-    if (d.length === 11) d = d.slice(0, 2) + d.slice(3);  // fora o nono dígito
-    return d;
-  };
-
-  const alvo = chave(telefone);
-  if (alvo.length < 10) return false;
-  return lista.some((n) => chave(typeof n === 'string' ? n : (n as { numero?: string })?.numero) === alvo);
-}
-
-// O bot deve responder agora?
-//
-// Duas travas independentes: a chave mestra (bot_enabled) e a janela de
-// horario. Roda AQUI, no webhook, e nao no prompt — fora do horario nem
-// existe chamada de modelo, entao nao ha custo nem risco de o modelo
-// "decidir" responder assim mesmo.
-function botPodeResponder(s: {
-  bot_enabled?: boolean | null;
-  bot_schedule_enabled?: boolean | null;
-  bot_start?: string | null;
-  bot_end?: string | null;
-  suspenso?: boolean | null;
-}): boolean {
-  // Suspensao do administrador vem primeiro e nao tem excecao. E separada de
-  // bot_enabled de proposito: aquela e do lojista, esta e do dono do sistema —
-  // senao o inadimplente se reativaria sozinho.
-  if (s?.suspenso === true) return false;
-  if (s?.bot_enabled === false) return false;
-  if (s?.bot_schedule_enabled !== true) return true;
-
-  const agora = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(new Date());
-
-  // O Postgres devolve time como "18:00:00"; comparamos so HH:MM.
-  const ini = String(s.bot_start ?? '00:00').slice(0, 5);
-  const fim = String(s.bot_end   ?? '23:59').slice(0, 5);
-  if (ini === fim) return true;              // janela degenerada: nao cala o bot
-
-  // Janela que ATRAVESSA A MEIA-NOITE (ex: 18:00 as 08:00) e o caso comum aqui
-  // — loja com equipe de dia querendo o bot so a noite. Tratar como intervalo
-  // simples deixaria o bot mudo 24h.
-  return ini < fim ? (agora >= ini && agora < fim) : (agora >= ini || agora < fim);
 }
 
 // Extensão por mime. Nota de voz do WhatsApp chega como 'audio/ogg; codecs=opus',
@@ -461,7 +403,7 @@ serve(async (req) => {
   // incidente — e não podem terminar no mesmo lugar.
   let { data: settings, error: settingsErr } = await supabase
     .from('company_settings')
-    .select('user_id, bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso, bot_blocked_numbers')
+    .select(`user_id, ${COLUNAS_GUARDA}`)
     .eq('whatsapp_phone_number_id', phoneNumberId)
     .maybeSingle();
 

@@ -66,6 +66,19 @@ Deno.serve(async (req) => {
   }
 
   // ── Suspender / reativar ───────────────────────────────────────────────────
+  // Plano da loja: com ou sem bot. So o administrador altera — a coluna e
+  // protegida por trigger no banco, entao nem adianta o lojista tentar pela API.
+  if (acao === 'plano') {
+    const { user_id, bot_contratado } = body as { user_id?: string; bot_contratado?: boolean };
+    if (!user_id) return json({ error: 'user_id obrigatório' }, 400);
+    const { error } = await admin
+      .from('company_settings')
+      .update({ bot_contratado: bot_contratado === true, updated_at: new Date().toISOString() })
+      .eq('user_id', user_id);
+    if (error) return json({ error: error.message }, 500);
+    return json({ ok: true, bot_contratado: bot_contratado === true });
+  }
+
   if (acao === 'suspender') {
     const { user_id, suspenso, motivo } = body as { user_id?: string; suspenso?: boolean; motivo?: string };
     if (!user_id) return json({ error: 'user_id obrigatório' }, 400);
@@ -285,10 +298,26 @@ Deno.serve(async (req) => {
     console.warn('[admin-metrics] qualidades da lista indisponiveis:', (e as Error)?.message);
   }
 
-  const lojasComQualidade = lojas.map((l) => ({
-    ...l,
-    qualidade: qualidades.get(String((l as unknown as { user_id: string }).user_id)) ?? null,
-  }));
+  // Plano de cada loja. Vem por consulta separada em vez de entrar na funcao
+  // SQL: mudar o `returns table` do admin_metricas exige DROP + CREATE, e
+  // recriar a funcao de metricas pra carregar um booleano nao se paga.
+  const planos = new Map<string, boolean>();
+  try {
+    const { data: linhas } = await admin
+      .from('company_settings').select('user_id, bot_contratado');
+    for (const l of linhas ?? []) planos.set(String(l.user_id), l.bot_contratado === true);
+  } catch (e) {
+    console.warn('[admin-metrics] planos indisponiveis:', (e as Error)?.message);
+  }
+
+  const lojasComQualidade = lojas.map((l) => {
+    const uid = String((l as unknown as { user_id: string }).user_id);
+    return {
+      ...l,
+      qualidade: qualidades.get(uid) ?? null,
+      bot_contratado: planos.get(uid) ?? true,
+    };
+  });
 
   return json({
     dias,
