@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import {
     Bookmark, Search, Trash2, Copy, Eye, CheckCircle2, XCircle, Bell, X, Package,
-    Rocket, Loader2
+    Rocket, Loader2, Plus
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 
@@ -177,6 +177,108 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
     </div>
 );
 
+// Cadastro manual na lista de espera.
+//
+// Até aqui só o bot criava interesse — o que deixava de fora o caso mais comum:
+// o cliente que ligou, passou na loja, ou falou com o vendedor na rua. Esses
+// ficavam num papel e a loja não era avisada quando o carro entrava.
+//
+// O telefone é obrigatório porque é ele que permite avisar depois. Interesse
+// sem telefone é anotação, não lista de espera.
+const NovoInteresse = ({ onFechar }) => {
+    const { addInterest } = useAppContext();
+    const [salvando, setSalvando] = useState(false);
+    const [form, setForm] = useState({
+        customer_name: '', customer_phone: '', brand: '', model: '',
+        year_min: '', year_max: '', km_max: '', price_max: '',
+        vehicle_type: 'carro', notes: '',
+    });
+
+    const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+    const podeSalvar = form.customer_phone.replace(/\D/g, '').length >= 10 && form.model.trim();
+
+    const salvar = async () => {
+        setSalvando(true);
+        const ok = await addInterest(form);
+        setSalvando(false);
+        if (ok) onFechar();
+    };
+
+    return (
+        <div className="modal-overlay" onClick={onFechar}>
+            <div className="modal-content modal-sm" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-header"><h2>Adicionar à lista de espera</h2></div>
+                <div style={{ padding: '1.1rem 1.4rem' }}>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                        <div className="form-group" style={{ flex: '1 1 170px' }}>
+                            <label>Nome do cliente</label>
+                            <input type="text" value={form.customer_name} autoFocus
+                                onChange={(e) => set('customer_name', e.target.value)} />
+                        </div>
+                        <div className="form-group" style={{ flex: '1 1 150px' }}>
+                            <label>Telefone *</label>
+                            <input type="tel" placeholder="(15) 98837-2081" value={form.customer_phone}
+                                onChange={(e) => set('customer_phone', e.target.value)} />
+                        </div>
+                        <div className="form-group" style={{ flex: '1 1 130px' }}>
+                            <label>Marca</label>
+                            <input type="text" placeholder="Opcional" value={form.brand}
+                                onChange={(e) => set('brand', e.target.value)} />
+                        </div>
+                        <div className="form-group" style={{ flex: '1 1 150px' }}>
+                            <label>Modelo *</label>
+                            <input type="text" placeholder="Ex: Onix" value={form.model}
+                                onChange={(e) => set('model', e.target.value)} />
+                        </div>
+                        <div className="form-group" style={{ flex: '0 1 110px' }}>
+                            <label>Ano mínimo</label>
+                            <input type="number" value={form.year_min}
+                                onChange={(e) => set('year_min', e.target.value)} />
+                        </div>
+                        <div className="form-group" style={{ flex: '0 1 110px' }}>
+                            <label>Ano máximo</label>
+                            <input type="number" value={form.year_max}
+                                onChange={(e) => set('year_max', e.target.value)} />
+                        </div>
+                        <div className="form-group" style={{ flex: '0 1 120px' }}>
+                            <label>Km máxima</label>
+                            <input type="number" value={form.km_max}
+                                onChange={(e) => set('km_max', e.target.value)} />
+                        </div>
+                        <div className="form-group" style={{ flex: '0 1 130px' }}>
+                            <label>Até quanto (R$)</label>
+                            <input type="number" value={form.price_max}
+                                onChange={(e) => set('price_max', e.target.value)} />
+                        </div>
+                        <div className="form-group" style={{ flex: '0 1 120px' }}>
+                            <label>Tipo</label>
+                            <select value={form.vehicle_type} onChange={(e) => set('vehicle_type', e.target.value)}>
+                                <option value="carro">Carro</option>
+                                <option value="moto">Moto</option>
+                            </select>
+                        </div>
+                        <div className="form-group" style={{ flex: '1 1 100%' }}>
+                            <label>Observações</label>
+                            <input type="text" placeholder="Ex: prefere prata, aceita financiar"
+                                value={form.notes} onChange={(e) => set('notes', e.target.value)} />
+                        </div>
+                    </div>
+                    <p style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)', margin: '4px 0 0' }}>
+                        Quanto menos filtro, mais carros batem. Marca e ano em branco significam
+                        &quot;qualquer um&quot;.
+                    </p>
+                </div>
+                <div className="modal-footer">
+                    <button className="btn-secondary" onClick={onFechar}>Cancelar</button>
+                    <button className="btn-primary" onClick={salvar} disabled={salvando || !podeSalvar}>
+                        {salvando ? 'Salvando…' : 'Adicionar'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 // ─── Página ───────────────────────────────────────────────────────────────────
 const WaitingList = () => {
     const { vehicleInterests, inventory, updateInterestStatus, deleteInterest, addToast,
@@ -187,6 +289,7 @@ const WaitingList = () => {
     const [notifyModal, setNotifyModal] = useState(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
     const [notifyingId, setNotifyingId] = useState(null);
+    const [novoAberto, setNovoAberto] = useState(false);
 
     // Calcula os carros que batem com cada interesse UMA vez por mudança de dados
     // (em vez de recalcular por linha em cada render).
@@ -252,6 +355,10 @@ const WaitingList = () => {
                     <h1>Lista de Espera</h1>
                     <p>Clientes esperando veículos específicos. Avise quando o carro entrar no estoque.</p>
                 </div>
+                <button className="btn-secondary" onClick={() => setNovoAberto(true)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Plus size={16} /> Adicionar cliente
+                </button>
                 {waitingListTemplateReady && matchedWithCar && (
                     <button className="btn-primary" onClick={notifyAllMatched} disabled={notifyingId === 'all'}
                         style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#059669' }}>
@@ -260,6 +367,8 @@ const WaitingList = () => {
                     </button>
                 )}
             </header>
+
+            {novoAberto && <NovoInteresse onFechar={() => setNovoAberto(false)} />}
 
             <div className="inv-toolbar" style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
                 <div className="inv-search" style={{ flex: 1, minWidth: 220, display: 'flex', alignItems: 'center', gap: '0.75rem', background: 'var(--card-bg)', border: '1px solid var(--border)', padding: '0.65rem 1rem', borderRadius: 'var(--radius-md, 8px)' }}>

@@ -1179,6 +1179,45 @@ export const AppProvider = ({ children }) => {
     return true;
   };
 
+  // Cadastro manual na lista de espera.
+  //
+  // Ate agora so o bot criava interesse, o que deixava de fora o caso mais
+  // comum de todos: o cliente que ligou, passou na loja ou falou com o vendedor
+  // na rua. Esses ficavam num papel e a loja nao era avisada quando o carro
+  // entrava.
+  const addInterest = async (dados) => {
+    if (!user?.id) return null;
+    const telefone = String(dados.customer_phone ?? '').replace(/\D/g, '');
+    if (!telefone || !String(dados.model ?? '').trim()) {
+      addToast('Telefone e modelo sao obrigatorios.', 'error');
+      return null;
+    }
+    const linha = {
+      user_id: user.id,
+      customer_phone: telefone,
+      customer_name: dados.customer_name || null,
+      brand: dados.brand || null,
+      model: String(dados.model).trim(),
+      year_min: dados.year_min ? Number(dados.year_min) : null,
+      year_max: dados.year_max ? Number(dados.year_max) : null,
+      km_max: dados.km_max ? Number(dados.km_max) : null,
+      price_max: dados.price_max ? Number(dados.price_max) : null,
+      vehicle_type: dados.vehicle_type || null,
+      notes: dados.notes || null,
+      status: 'active',
+    };
+    const { data: nova, error } = await supabase
+      .from('vehicle_interests').insert([linha]).select().single();
+    if (error) {
+      console.error('[INTERESSE] erro ao cadastrar:', error.message);
+      addToast('Nao consegui salvar na lista de espera.', 'error');
+      return null;
+    }
+    setVehicleInterests(prev => [nova, ...prev]);
+    addToast('Cliente adicionado a lista de espera.', 'success');
+    return nova;
+  };
+
   const deleteInterest = async (interestId) => {
     const { error } = await supabase
       .from('vehicle_interests')
@@ -1948,6 +1987,7 @@ export const AppProvider = ({ children }) => {
     matchedCount: vehicleInterests.filter(i => i.status === 'matched').length,
     refreshVehicleInterests,
     updateInterestStatus,
+    addInterest,
     deleteInterest,
     notifyWaitingListMatch,
     // True quando há template de lista de espera configurado E aprovado
