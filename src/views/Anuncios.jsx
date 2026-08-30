@@ -12,8 +12,11 @@ import { brl } from '../lib/financeiro.js';
 // adivinhando por que nada chegava, quando um contador na tela teria dado a
 // resposta na primeira. Fila que ninguém enxerga é fila que falha em silêncio.
 
+// Nomes escolhidos pelo que o Gerenciador de Eventos reconhece, não pelo que a
+// documentação lista: `QualifiedLead` aparece nos docs mas não existe na
+// interface, e evento com nome desconhecido entra sem servir pra otimização.
 const ROTULO_EVENTO = {
-    QualifiedLead:    'Qualificado',
+    LeadSubmitted:    'Qualificado',
     InitiateCheckout: 'Visita agendada',
     Purchase:         'Venda',
 };

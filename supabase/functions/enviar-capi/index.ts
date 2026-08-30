@@ -52,7 +52,7 @@ Deno.serve(async () => {
   const userIds = [...new Set(eventos.map((e) => e.user_id))];
   const { data: lojas } = await supabase
     .from('company_settings')
-    .select('user_id, capi_enabled, capi_dataset_id, whatsapp_business_account_id, suspenso')
+    .select('user_id, capi_enabled, capi_dataset_id, whatsapp_business_account_id, fb_page_id, suspenso')
     .in('user_id', userIds);
 
   const porLoja = new Map((lojas ?? []).map((l) => [l.user_id, l]));
@@ -120,6 +120,16 @@ Deno.serve(async () => {
       user_data: {
         whatsapp_business_account_id: waba,
         ctwa_clid: clid,
+        // A documentação pede whatsapp_business_account_id pro canal WhatsApp,
+        // mas o assistente do Gerenciador de Eventos lista "Identificação da
+        // Página" como parâmetro obrigatório. As duas fontes se contradizem, e
+        // o modo de falhar aqui é silencioso: a Meta responde sucesso e
+        // simplesmente não atribui.
+        //
+        // Mandar os dois resolve sem risco — campo a mais é ignorado, campo a
+        // menos quebra a atribuição sem avisar. Só vai quando a loja tem a
+        // página cadastrada.
+        ...(loja.fb_page_id ? { page_id: loja.fb_page_id } : {}),
       },
     };
 
