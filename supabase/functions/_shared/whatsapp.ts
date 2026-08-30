@@ -4,6 +4,26 @@
 
 import { logger, type Logger } from './logger.ts';
 
+/**
+ * Bloco que a Meta anexa quando o cliente chegou tocando num anúncio.
+ *
+ * Só vem na PRIMEIRA mensagem daquela pessoa, e não existe endpoint pra buscar
+ * depois. Ou é lido aqui, ou o clique some — junto com qualquer chance de
+ * dizer pra Meta que ele virou venda.
+ */
+export interface AdReferral {
+  ctwaClid?: string       // identificador do clique — é o que amarra venda ao anúncio
+  sourceId?: string       // id do anúncio
+  sourceType?: string     // 'ad' ou 'post'
+  sourceUrl?: string
+  headline?: string       // título do anúncio
+  body?: string           // texto do anúncio
+  mediaType?: string      // 'image' ou 'video'
+  imageUrl?: string
+  videoUrl?: string
+  thumbnailUrl?: string
+}
+
 export interface InboundMessage {
   phoneNumberId: string   // Cloud: phone_number_id do metadata; Evolution: nome da instância
   from: string            // Telefone do cliente (formato internacional, ex.: 5515999998888)
@@ -13,6 +33,7 @@ export interface InboundMessage {
   type: 'text' | 'audio' | 'image'  // Tipo da mensagem recebida
   mediaId?: string        // ID da mídia na Meta (presente em 'audio' e 'image')
   isEcho?: boolean        // Mensagem que a LOJA enviou pelo celular (coexistência)
+  referral?: AdReferral   // Presente só quando veio de anúncio, e só na 1ª mensagem
 }
 
 // ─── parseInboundMessage ───────────────────────────────────────────────────────
@@ -44,6 +65,39 @@ export function variantesTelefoneBR(phone: string): string[] {
 export function parseInboundMessage(payload: unknown): InboundMessage | null {
   const provider = Deno.env.get('WHATSAPP_PROVIDER') ?? 'cloud';
   return provider === 'evolution' ? parseEvolution(payload) : parseCloud(payload);
+}
+
+/**
+ * Traduz o `referral` cru da Meta.
+ *
+ * Devolve undefined quando não há nada de útil: mensagem normal não tem o
+ * bloco, e responder a um story também gera `referral` — mas sem `ctwa_clid` e
+ * sem `source_id`, que é o que interessa. Gravar essas seria encher a tabela de
+ * linha vazia e depois ter que filtrar em todo relatório.
+ */
+function lerReferral(cru: unknown): AdReferral | undefined {
+  if (!cru || typeof cru !== 'object') return undefined;
+  const r = cru as Record<string, unknown>;
+
+  const txt = (v: unknown) => {
+    const s = String(v ?? '').trim();
+    return s ? s : undefined;
+  };
+
+  const ref: AdReferral = {
+    ctwaClid:     txt(r.ctwa_clid),
+    sourceId:     txt(r.source_id),
+    sourceType:   txt(r.source_type),
+    sourceUrl:    txt(r.source_url),
+    headline:     txt(r.headline),
+    body:         txt(r.body),
+    mediaType:    txt(r.media_type),
+    imageUrl:     txt(r.image_url),
+    videoUrl:     txt(r.video_url),
+    thumbnailUrl: txt(r.thumbnail_url),
+  };
+
+  return (ref.ctwaClid || ref.sourceId) ? ref : undefined;
 }
 
 function parseCloud(payload: unknown): InboundMessage | null {
@@ -104,11 +158,18 @@ function parseCloud(payload: unknown): InboundMessage | null {
     const metadata = value.metadata as Record<string, string>;
     const contact  = ((value.contacts as unknown[])?.[0] as Record<string, unknown>) ?? {};
     const profile  = (contact.profile as Record<string, string>) ?? {};
+    // Fica no `base`, e não dentro do ramo de texto, porque quem vem de anúncio
+    // nem sempre começa escrevendo: manda a foto do carro da troca, ou toca no
+    // botão do template. Ler só no caso de texto perderia justamente o lead mais
+    // quente.
+    const referral = lerReferral(msg.referral);
+
     const base = {
       phoneNumberId: metadata?.phone_number_id ?? '',
       from:          String(msg.from ?? ''),
       senderName:    profile.name ?? '',
       waMessageId:   String(msg.id ?? ''),
+      ...(referral ? { referral } : {}),
     };
 
     if (msg.type === 'text') {

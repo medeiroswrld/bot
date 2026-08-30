@@ -448,14 +448,57 @@ serve(async (req) => {
     .eq('phone', from)
     .maybeSingle();
 
+  let leadId: string | null = existingLead?.id ?? null;
+
   if (!existingLead) {
-    await supabase.from('leads').insert({
+    // Anúncio entra na nota do lead. É o jeito de a origem aparecer HOJE na
+    // tela que o lojista já usa, sem depender da tela nova.
+    const nota = msg.referral?.headline
+      ? `Lead criado automaticamente via WhatsApp — anúncio: ${msg.referral.headline}`
+      : 'Lead criado automaticamente via WhatsApp';
+
+    const { data: novoLead } = await supabase.from('leads').insert({
       user_id: userId,
       name: senderName || 'Cliente WhatsApp',
       phone: from,
       status: 'novo',
-      notes: 'Lead criado automaticamente via WhatsApp',
+      notes: nota,
+    }).select('id').maybeSingle();
+
+    leadId = novoLead?.id ?? null;
+  }
+
+  // 7b. Clique em anúncio.
+  //
+  // Gravado aqui e não depois porque este bloco só existe na PRIMEIRA mensagem
+  // do cliente — a Meta não reenvia e não há endpoint pra buscar. Falhar aqui
+  // não pode derrubar o atendimento: o cliente mandando mensagem vale mais do
+  // que a atribuição dele, então erro vira log e a vida segue.
+  if (msg.referral) {
+    const r = msg.referral;
+    const { error: erroRef } = await supabase.from('ad_referrals').insert({
+      user_id:         userId,
+      lead_id:         leadId,
+      conversation_id: upsertedConv.id,
+      wa_message_id:   waMessageId,
+      ctwa_clid:       r.ctwaClid ?? null,
+      source_id:       r.sourceId ?? null,
+      source_type:     r.sourceType ?? null,
+      source_url:      r.sourceUrl ?? null,
+      headline:        r.headline ?? null,
+      body:            r.body ?? null,
+      media_type:      r.mediaType ?? null,
+      image_url:       r.imageUrl ?? null,
+      video_url:       r.videoUrl ?? null,
+      thumbnail_url:   r.thumbnailUrl ?? null,
     });
+
+    // 23505 = reentrega do mesmo webhook. Esperado, não é incidente.
+    if (erroRef && erroRef.code !== '23505') {
+      console.error('[WH] falha ao gravar origem do anúncio:', erroRef.message);
+    } else if (!erroRef) {
+      console.log(`[WH] origem de anúncio gravada: source_id=${r.sourceId ?? '-'} clid=${r.ctwaClid ? 'sim' : 'nao'}`);
+    }
   }
 
   // 8. Helper: aciona process-conversation de forma assíncrona (mantém a function viva)
