@@ -23,7 +23,20 @@ const LOTE = 200;
 
 interface Referral { ctwa_clid: string | null; created_at: string }
 
-Deno.serve(async () => {
+Deno.serve(async (req) => {
+  // Código de teste da Meta (aba "Eventos de teste" do dataset).
+  //
+  // Quando presente, o evento aparece lá em segundos em vez de entrar nos
+  // dados reais. É o que permite provar que o circuito fechou sem esperar
+  // anúncio rodando e sem inventar uma venda no relatório da loja.
+  //
+  // O cron manda `{}`, então em produção isto nunca vai junto.
+  let testEventCode = '';
+  try {
+    const corpo = await req.json();
+    testEventCode = String(corpo?.test_event_code ?? '').trim();
+  } catch { /* corpo vazio ou inválido: segue como envio normal */ }
+
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL') ?? '',
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
@@ -147,6 +160,7 @@ Deno.serve(async () => {
             data: [evento],
             partner_agent: 'amply',
             access_token: token,
+            ...(testEventCode ? { test_event_code: testEventCode } : {}),
           }),
         },
       );
