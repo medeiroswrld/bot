@@ -85,6 +85,40 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
+  // ── Integração de anúncios (CAPI) ──────────────────────────────────────────
+  // Dataset e liga/desliga. Protegidos por trigger no banco junto com o plano:
+  // se a loja pudesse escolher o dataset, apontaria as conversões pro dataset
+  // de terceiro. Quem gerencia o anúncio é quem define isto.
+  if (acao === 'capi') {
+    const { user_id, capi_dataset_id, capi_enabled } = body as {
+      user_id?: string; capi_dataset_id?: string | null; capi_enabled?: boolean;
+    };
+    if (!user_id) return json({ error: 'user_id obrigatório' }, 400);
+
+    const dataset = capi_dataset_id === undefined
+      ? undefined
+      : (String(capi_dataset_id ?? '').trim() || null);
+
+    // Ligar sem dataset não faz nada além de encher a fila de evento que nunca
+    // sai. Melhor recusar do que deixar o administrador achando que ligou.
+    if (capi_enabled === true && dataset === null) {
+      return json({ error: 'Informe o dataset antes de ligar a integração.' }, 400);
+    }
+
+    const { error } = await admin
+      .from('company_settings')
+      .update({
+        ...(dataset !== undefined ? { capi_dataset_id: dataset } : {}),
+        ...(capi_enabled !== undefined ? { capi_enabled: capi_enabled === true } : {}),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('user_id', user_id);
+
+    if (error) return json({ error: error.message }, 500);
+    console.log(`[admin-metrics] CAPI de ${user_id} atualizado (por ${email})`);
+    return json({ ok: true });
+  }
+
   if (acao === 'suspender') {
     const { user_id, suspenso, motivo } = body as { user_id?: string; suspenso?: boolean; motivo?: string };
     if (!user_id) return json({ error: 'user_id obrigatório' }, 400);
@@ -307,11 +341,16 @@ Deno.serve(async (req) => {
   // Plano de cada loja. Vem por consulta separada em vez de entrar na funcao
   // SQL: mudar o `returns table` do admin_metricas exige DROP + CREATE, e
   // recriar a funcao de metricas pra carregar um booleano nao se paga.
-  const planos = new Map<string, { bot: boolean; disparos: boolean }>();
+  const planos = new Map<string, { bot: boolean; disparos: boolean; capiOn: boolean; dataset: string | null }>();
   try {
     const { data: linhas } = await admin
-      .from('company_settings').select('user_id, bot_contratado, disparos_contratado');
-    for (const l of linhas ?? []) planos.set(String(l.user_id), { bot: l.bot_contratado === true, disparos: l.disparos_contratado === true });
+      .from('company_settings').select('user_id, bot_contratado, disparos_contratado, capi_enabled, capi_dataset_id');
+    for (const l of linhas ?? []) planos.set(String(l.user_id), {
+      bot: l.bot_contratado === true,
+      disparos: l.disparos_contratado === true,
+      capiOn: l.capi_enabled === true,
+      dataset: l.capi_dataset_id ?? null,
+    });
   } catch (e) {
     console.warn('[admin-metrics] planos indisponiveis:', (e as Error)?.message);
   }
@@ -323,6 +362,10 @@ Deno.serve(async (req) => {
       qualidade: qualidades.get(uid) ?? null,
       bot_contratado: planos.get(uid)?.bot ?? true,
       disparos_contratado: planos.get(uid)?.disparos ?? true,
+      // Default FALSE, ao contrário do plano: loja sem configuração explícita
+      // não deve começar mandando conversão pra dataset nenhum.
+      capi_enabled: planos.get(uid)?.capiOn ?? false,
+      capi_dataset_id: planos.get(uid)?.dataset ?? null,
     };
   });
 

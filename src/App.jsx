@@ -24,6 +24,7 @@ const Templates    = lazy(() => import('./views/Templates.jsx'));
 const Campaigns    = lazy(() => import('./views/Campaigns.jsx'));
 const CampaignDetails = lazy(() => import('./views/CampaignDetails.jsx'));
 const Financeiro   = lazy(() => import('./views/Financeiro.jsx'));
+const Anuncios     = lazy(() => import('./views/Anuncios.jsx'));
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ const NAV_ITEMS = [
     tabs: [
       { name: 'Campanhas', path: '/campanhas' },
       { name: 'Templates', path: '/templates' },
+      { name: 'Anúncios',  path: '/anuncios' },
     ],
   },
   { name: 'Assistente',    icon: <Bot size={18} />,      path: '/assistente' },
@@ -287,6 +289,7 @@ const AuthenticatedApp = () => {
               <Route path="/estoque"       element={<Inventory />} />
               <Route path="/vendidos"      element={<SoldCars />} />
             <Route path="/financeiro" element={<Financeiro />} />
+            <Route path="/anuncios"   element={<Anuncios />} />
               <Route path="/leads"         element={<Leads />} />
               <Route path="/agenda"        element={<Agenda />} />
               <Route path="/conversas"     element={<Conversations />} />

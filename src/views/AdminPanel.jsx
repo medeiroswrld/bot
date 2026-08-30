@@ -499,7 +499,41 @@ const Painel = ({ onSair }) => {
       if (campo === 'bot') corpo.bot_contratado = incluindo;
       else corpo.disparos_contratado = incluindo;
       await chamar(corpo);
-      await carregar();
+      // `buscar`, não `carregar`: este componente só define `buscar`. O
+      // `carregar` que estava aqui vive no componente de créditos, então a
+      // troca de plano salvava e a tela nunca refletia — parecia que o clique
+      // não tinha funcionado.
+      await buscar();
+    } catch (e) {
+      setErro(e.message);
+    } finally {
+      setSalvandoId(null);
+    }
+  };
+
+  // Integração de anúncios da loja. O dataset é de quem gerencia o anúncio —
+  // hoje a Amply — então quem define é o administrador, não o lojista.
+  const configurarCapi = async (loja) => {
+    const valor = window.prompt(
+      `Dataset da Meta para ${loja.empresa || loja.email}.\n\n` +
+      'É o ID do dataset no Gerenciador de Eventos, que recebe as conversões.\n' +
+      'Deixe em branco para desligar a devolução.',
+      loja.capi_dataset_id || '',
+    );
+    if (valor === null) return;   // cancelou
+
+    const dataset = valor.trim();
+    setSalvandoId(loja.user_id);
+    try {
+      await chamar({
+        acao: 'capi',
+        user_id: loja.user_id,
+        capi_dataset_id: dataset || null,
+        capi_enabled: Boolean(dataset),
+      });
+      await buscar();
+    } catch (e) {
+      setErro(e.message);
     } finally {
       setSalvandoId(null);
     }
@@ -750,6 +784,21 @@ const Painel = ({ onSair }) => {
                               {rotulo}
                             </button>
                           ))}
+                          <button type="button" onClick={() => configurarCapi(l)}
+                            disabled={salvandoId === l.user_id}
+                            title={l.capi_enabled
+                              ? `Conversões indo pro dataset ${l.capi_dataset_id}. Clique pra trocar ou desligar.`
+                              : 'Sem devolução de conversão pra Meta. Clique pra configurar o dataset.'}
+                            style={{
+                              padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+                              fontSize: '0.68rem', fontWeight: 600,
+                              border: `1px solid ${l.capi_enabled ? '#134e4a' : '#3f3f46'}`,
+                              background: l.capi_enabled ? '#0c2624' : '#18181b',
+                              color: l.capi_enabled ? '#5eead4' : '#52525b',
+                              textDecoration: l.capi_enabled ? 'none' : 'line-through',
+                            }}>
+                            anúncios
+                          </button>
                         </div>
                         {!l.bot_enabled && !l.suspenso && l.bot_contratado && (
                           <div style={{ fontSize: '0.68rem', color: '#f59e0b', marginTop: 3 }}>bot desligado pela loja</div>

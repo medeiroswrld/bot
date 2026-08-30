@@ -3,6 +3,7 @@ import {
     Search, List, LayoutGrid, X, Phone, MessageSquare, Users, Trash2, Upload, Archive
 } from 'lucide-react';
 import { useAppContext, formatDateStr } from '../context/AppContext.jsx';
+import { supabase } from '../lib/supabase.js';
 import ImportContacts from './ImportContacts.jsx';
 import { classificarIdade, IDADE_ROTULO, DIAS_CLIENTE_NOVO } from '../lib/leads.js';
 
@@ -35,6 +36,25 @@ const STATUS_MAP = {
 const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
     const { updateLead } = useAppContext();
     const [savedField, setSavedField] = useState(null);
+
+    // Origem buscada aqui, e não junto da lista de leads, de propósito: a lista
+    // carrega centenas de linhas e um embed a mais já zerou essa tela uma vez
+    // (duas FKs pra `cars`). Uma consulta por ficha aberta custa nada.
+    const [origem, setOrigem] = useState(null);
+    useEffect(() => {
+        if (!lead?.id) { setOrigem(null); return; }
+        let vivo = true;
+        supabase
+            .from('ad_referrals')
+            .select('headline, body, source_id, source_type, ctwa_clid, created_at')
+            .eq('lead_id', lead.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+            .then(({ data }) => { if (vivo) setOrigem(data ?? null); });
+        return () => { vivo = false; };
+    }, [lead?.id]);
+
     if (!lead) return null;
     const TRADE_FIELDS = [
         ['trade_in_model', 'Modelo'],
@@ -90,6 +110,31 @@ const LeadDrawer = ({ lead, onClose, onStatusChange }) => {
                             </div>
                         ))}
                     </div>
+
+                    {origem && (
+                        <div style={{
+                            marginBottom: '1.5rem', padding: '0.9rem 1rem',
+                            background: '#eef2ff', borderRadius: 12, borderLeft: '3px solid #6366f1',
+                        }}>
+                            <p style={{ fontSize: '0.7rem', fontWeight: 700, color: '#4338ca', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.4rem' }}>
+                                Veio de anúncio
+                            </p>
+                            <p style={{ fontWeight: 600, fontSize: '0.9rem', lineHeight: 1.35 }}>
+                                {origem.headline || 'Anúncio sem título'}
+                            </p>
+                            {origem.body && (
+                                <p className="text-muted" style={{ fontSize: '0.78rem', marginTop: '0.25rem', lineHeight: 1.4 }}>
+                                    {origem.body}
+                                </p>
+                            )}
+                            <p className="text-muted" style={{ fontSize: '0.68rem', fontFamily: 'monospace', marginTop: '0.4rem' }}>
+                                {origem.source_type || 'ad'} {origem.source_id}
+                                {/* Sem clique não há conversão pra devolver. Dizer isso aqui evita
+                                    a pergunta "por que esse não aparece no relatório da Meta". */}
+                                {!origem.ctwa_clid && ' · sem identificador de clique'}
+                            </p>
+                        </div>
+                    )}
 
                     <div style={{ marginBottom: '1.5rem' }}>
                         <label style={{ fontSize: '0.85rem', fontWeight: 600, color: '#64748b', display: 'block', marginBottom: '0.5rem' }}>Atualizar Status</label>
