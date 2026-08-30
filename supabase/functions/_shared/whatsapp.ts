@@ -209,6 +209,34 @@ function parseCloud(payload: unknown): InboundMessage | null {
 
     if (msg.type === 'interactive') {
       const inter = msg.interactive as Record<string, Record<string, string>>;
+
+      // Formulário do anúncio (WhatsApp Flows).
+      //
+      // Chega como `nfm_reply` e caía no return null lá embaixo — ou seja, a
+      // mensagem sumia. Isso é grave num anúncio: o modelo padrão de
+      // Click-to-WhatsApp da Meta É um formulário, e a PRIMEIRA mensagem é a
+      // que carrega o `ctwa_clid`. Descartar ela perdia a conversa inteira e a
+      // origem junto, sem erro em lugar nenhum.
+      if (inter?.nfm_reply) {
+        const bruto = (inter.nfm_reply as unknown as Record<string, string>)?.response_json ?? '';
+        let respostas: string[] = [];
+        try {
+          const obj = JSON.parse(String(bruto)) as Record<string, unknown>;
+          respostas = Object.entries(obj)
+            // flow_token é controle da Meta, não resposta de ninguém.
+            .filter(([k]) => k !== 'flow_token')
+            .map(([, v]) => String(v ?? '').trim())
+            .filter(Boolean);
+        } catch { /* sem json utilizável: cai no texto padrão abaixo */ }
+
+        // Formulário vazio (o caso do anúncio sem campos) não deixa a conversa
+        // começar muda. "Vim pelo anúncio" é verdade — a pessoa tocou no
+        // anúncio — e dá ao bot um gancho pra abrir sem inventar interesse por
+        // um carro que ela não citou.
+        const texto = respostas.length ? respostas.join(' — ') : 'Vim pelo anúncio';
+        return { ...base, text: texto, type: 'text' };
+      }
+
       const texto = String(
         inter?.button_reply?.title ?? inter?.list_reply?.title ?? '',
       ).trim();
