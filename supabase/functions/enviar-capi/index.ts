@@ -177,15 +177,24 @@ Deno.serve(async (req) => {
         enviados++;
         console.log(`[capi] ${ev.event_name} enviado (lead ${ev.lead_id})`);
       } else {
+        // A Meta diz se vale a pena tentar de novo. `is_transient: false` é
+        // definitivo — ctwa_clid inválido, evento fora de janela, dataset
+        // errado. Reenfileirar isso é queimar cinco chamadas pra receber a
+        // mesma recusa e ainda esconder o erro real atrás de "pendente".
+        let definitivo = false;
+        try {
+          definitivo = (JSON.parse(corpo)?.error?.is_transient === false);
+        } catch { /* resposta não-JSON: trata como temporária e tenta de novo */ }
+
         // Guarda o corpo do erro: a Meta responde 400 com a razão exata, e sem
         // isso o diagnóstico vira adivinhação — foi o que custou caro no push.
         await supabase.from('capi_events').update({
-          status: 'pendente',
-          tentativas: (ev.tentativas ?? 0) + 1,
+          status: definitivo ? 'erro' : 'pendente',
+          tentativas: definitivo ? MAX_TENTATIVAS : (ev.tentativas ?? 0) + 1,
           ultimo_erro: corpo.slice(0, 500),
         }).eq('id', ev.id);
         erros++;
-        console.error(`[capi] ${res.status} no evento ${ev.id}: ${corpo.slice(0, 300)}`);
+        console.error(`[capi] ${res.status}${definitivo ? ' (definitivo)' : ''} no evento ${ev.id}: ${corpo.slice(0, 300)}`);
       }
     } catch (e) {
       await supabase.from('capi_events').update({
