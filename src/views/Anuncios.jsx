@@ -183,11 +183,32 @@ export default function Anuncios() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {anuncios.map(a => (
+                                {anuncios.map(a => {
+                                    // A Meta manda referral tanto de anúncio pago quanto de
+                                    // publicação orgânica, mas só o pago tem identificador de
+                                    // clique. Sem essa distinção na tela, o lojista compara os
+                                    // dois como se fossem campanhas e decide investimento errado.
+                                    const organico = a.source_type === 'post';
+                                    return (
                                     <tr key={a.source_id} style={{ borderTop: '1px solid var(--border)' }}>
                                         <td style={{ padding: '0.75rem 1rem' }}>
-                                            <p style={{ fontWeight: 600 }}>{a.headline || 'Anúncio sem título'}</p>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                                                <p style={{ fontWeight: 600 }}>{a.headline || 'Sem título'}</p>
+                                                <span style={{
+                                                    fontSize: '0.62rem', fontWeight: 700, letterSpacing: '0.04em',
+                                                    textTransform: 'uppercase', padding: '0.1rem 0.4rem', borderRadius: 4,
+                                                    background: organico ? '#f1f5f9' : '#eef2ff',
+                                                    color: organico ? '#64748b' : '#4338ca',
+                                                }}>
+                                                    {organico ? 'publicação' : 'anúncio'}
+                                                </span>
+                                            </div>
                                             <p className="text-muted" style={{ fontSize: '0.7rem', fontFamily: 'monospace' }}>{a.source_id}</p>
+                                            {organico && (
+                                                <p className="text-muted" style={{ fontSize: '0.7rem', marginTop: '0.2rem' }}>
+                                                    Post orgânico — não gera conversão pra Meta
+                                                </p>
+                                            )}
                                         </td>
                                         <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 600 }}>{a.leads}</td>
                                         <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>{a.qualificados}</td>
@@ -196,13 +217,20 @@ export default function Anuncios() {
                                             {a.faturamento > 0 ? brl(a.faturamento) : '—'}
                                         </td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
                 )}
             </div>
 
+            <p className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.55 }}>
+                <strong>Anúncio</strong> é tráfego pago e carrega o identificador do clique — só ele
+                vira conversão devolvida pra Meta. <strong>Publicação</strong> é post orgânico com botão
+                de WhatsApp: traz cliente do mesmo jeito, mas a Meta não tem como ligar aquela venda a
+                nada. Não compare os dois pra decidir investimento.
+            </p>
             <p className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.55 }}>
                 O custo do anúncio não aparece aqui ainda — ele vive no gerenciador da Meta.
                 Enquanto isso, a coluna que importa é <strong>Vendas</strong>: é ela que diz qual
