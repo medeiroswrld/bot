@@ -666,8 +666,14 @@ async function executeTool(
         // "T-Cross", "T Cross" e "TCross" são o mesmo carro pro cliente, mas o
         // ilike é literal: bastava a loja ter cadastrado com espaço em vez de
         // hífen pro bot dizer que não tinha. Casa com qualquer variante.
+        // Busca em `version` também, e não só em `model`.
+        //
+        // O cliente pede pelo nome que a lataria tem: "GTX", "Highline",
+        // "Sport". Isso quase nunca está em `model` — está em `version`. Sem
+        // olhar essa coluna, "GTX" não achava o Vectra GT-X e o bot dizia que
+        // a loja não tinha um carro que estava no pátio.
         const vs = variantesDeModelo(String(input.modelo));
-        q = q.or(vs.map((v) => `model.ilike.%${v}%`).join(','));
+        q = q.or(vs.flatMap((v) => [`model.ilike.%${v}%`, `version.ilike.%${v}%`]).join(','));
       }
       if (input.preco_min)   q = q.gte('price', Number(input.preco_min));
       if (input.preco_max)   q = q.lte('price', Number(input.preco_max));
@@ -706,16 +712,24 @@ async function executeTool(
     // morria — aconteceu com uma T-Cross que ESTAVA no pátio. Em vez de negar,
     // devolve o catálogo pro modelo conferir e perguntar.
     if (!data?.length) {
+      // A VERSÃO entra aqui, e é o que faz este resgate funcionar.
+      //
+      // Sem ela o catálogo era só marca + modelo, e o bot recebia "Chevrolet
+      // Vectra" pra decidir se tinha algo parecido com "GTX". Não tinha como:
+      // a palavra que o cliente usou não existia em nada que ele podia ver, e
+      // ele respondeu que a loja não tinha — com o carro no pátio.
+      // O cliente chama o carro pela versão ("GTX", "Highline", "Sport") muito
+      // mais do que pelo modelo.
       const { data: emEstoque } = await supabase
         .from('cars')
-        .select('brand, model')
+        .select('brand, model, version')
         .eq('user_id', userId)
         .in('status', ['available', 'reserved'])
         .order('brand', { ascending: true });
 
       const catalogo = [...new Set(
-        (emEstoque ?? []).map((c: { brand: string | null; model: string | null }) =>
-          [c.brand, c.model].filter(Boolean).join(' ').trim(),
+        (emEstoque ?? []).map((c: { brand: string | null; model: string | null; version: string | null }) =>
+          [c.brand, c.model, c.version].filter(Boolean).join(' ').trim(),
         ).filter(Boolean),
       )];
 
@@ -2134,6 +2148,12 @@ Se o cliente perguntar sobre um carro específico, **responda sobre aquele carro
 Está PROIBIDO lembrar o cliente de que o carro está acima do orçamento que ele mencionou. Nada de "mas ele tá bem acima dos R\$ 20.000 que você falou", "esse foge da sua faixa" ou "ainda assim tem interesse?". Quem decide o que cabe no bolso é ele, não você — e ele já sabe o próprio orçamento.
 
 Quando o cliente pergunta por um carro mais caro do que disse antes, isso é INTERESSE, não engano. Trate como oportunidade: responda com entusiasmo contido, mostre o valor do carro, e só fale de condição de pagamento se ELE puxar.
+
+**Vale nos DOIS sentidos, e o segundo é o que mais escapa.** Tanto faz se ele falou o orçamento antes ou depois de você mostrar o carro. Se você apresentou um carro de R\$ 47.900 e só então ele disse "até 40 mil", a resposta NÃO é reconciliar os dois números. Ele sabe fazer a conta. Apresente o carro pelo que ele é, diga o preço com naturalidade e siga.
+
+Está proibido, em qualquer ordem: "ele tá um pouco acima do que você falou", "foge da sua faixa", "sei que é mais do que você queria, mas". Nenhuma dessas frases já vendeu um carro — todas dão ao cliente o argumento pronto pra encerrar.
+
+E nunca minimize a diferença com "um pouco". Chamar R\$ 7.900 de "um pouco acima" é o pior dos dois mundos: lembra o cliente do problema E soa desonesto. Se o assunto do preço vier, que venha DELE.
 
 Se em algum momento fizer sentido mostrar algo mais em conta, ofereça como ADIÇÃO ("tenho também um X, se quiser comparar"), nunca como correção do que ele pediu.
 
