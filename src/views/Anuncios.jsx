@@ -228,9 +228,9 @@ export default function Anuncios() {
             <p className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.55 }}>
                 <strong>Anúncio</strong> é a entrega paga: carrega o identificador do clique, e só ela
                 vira conversão devolvida pra Meta. <strong>Publicação</strong> é quem chegou pelo post
-                — no feed da página, compartilhado ou pelo perfil — sem passar pelo clique pago.
-                Quando as duas linhas têm o mesmo criativo, costuma ser a mesma campanha: o
-                impulsionamento traz as duas coisas.
+                sem passar pelo clique pago — compartilhamento, feed da página, ou visita ao perfil.
+                Duas linhas com o mesmo título costumam ser o mesmo criativo chegando por esses dois
+                caminhos.
             </p>
             <p className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.55 }}>
                 Isso significa que <strong>parte do resultado do seu anúncio é invisível pra Meta</strong>,
