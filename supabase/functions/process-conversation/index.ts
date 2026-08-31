@@ -2717,6 +2717,79 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     return new Response('OK', { status: 200 });
   }
 
+  // ── 3.6. Trava POR CONVERSA ───────────────────────────────────────────────
+  //
+  // A dedupe acima compara CHAVES: ela impede duas execuções com a mesma
+  // mensagem, e deixa passar duas execuções simultâneas com mensagens
+  // diferentes — que é exatamente o caso que duplicou a resposta na DSC. O
+  // cliente escolheu o Celta, o modelo começou a gerar, e um minuto depois ele
+  // mandou "O de 24.900": chave nova, trava vencida, duas simulações enviadas.
+  //
+  // Esta é exclusão mútua de verdade: uma geração por conversa, ponto.
+  //
+  // Vence em 3 minutos de propósito. Execução que morre no meio (timeout do
+  // modelo, deploy, erro não tratado) deixaria a conversa muda para sempre —
+  // e conversa muda é a pior falha que este produto pode ter.
+  const LOCK_MAX_MS = 3 * 60_000;
+  const limiteLock  = new Date(Date.now() - LOCK_MAX_MS).toISOString();
+
+  const { data: travou, error: lockErr } = await supabase
+    .from('conversations')
+    .update({ processing_since: new Date().toISOString() })
+    .eq('id', conversationId)
+    .or(`processing_since.is.null,processing_since.lt.${limiteLock}`)
+    .select('id')
+    .maybeSingle();
+
+  if (lockErr) {
+    // Coluna ainda não criada (migration 076 não rodou): não trava o bot, só
+    // avisa. Volta a valer sozinho quando a coluna existir.
+    log.warn('trava por conversa indisponível — seguindo sem ela', { action: 'lock', error: lockErr.message });
+  } else if (!travou) {
+    // Já tem alguém gerando. Não descarta a mensagem: marca que sobrou coisa
+    // pra responder, e quem está lá dentro dispara outra rodada ao terminar.
+    await supabase.from('conversations')
+      .update({ reprocess_pending: true })
+      .eq('id', conversationId);
+    log.info('outra geração em curso — marcado para reprocessar', { action: 'lock' });
+    return new Response('OK', { status: 200 });
+  }
+
+  /**
+   * Libera a conversa e, se chegou mensagem durante a geração, dispara de novo.
+   *
+   * Chamada no fim do caminho de sucesso. Os outros caminhos de saída contam
+   * com a expiração de 3 minutos — preferi isso a espalhar `finally` por uma
+   * função desta altura, onde esquecer um `return` reintroduziria o bug.
+   */
+  const liberarConversa = async () => {
+    const { data: conv } = await supabase
+      .from('conversations')
+      .update({ processing_since: null })
+      .eq('id', conversationId)
+      .select('reprocess_pending')
+      .maybeSingle();
+
+    if (!conv?.reprocess_pending) return;
+
+    await supabase.from('conversations')
+      .update({ reprocess_pending: false })
+      .eq('id', conversationId);
+
+    log.info('mensagem chegou durante a geração — rodando de novo', { action: 'lock' });
+    // @ts-ignore — EdgeRuntime é global nas Supabase Edge Functions
+    EdgeRuntime.waitUntil(
+      fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/process-conversation`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
+        },
+        body: JSON.stringify({ conversation_id: conversationId }),
+      }).catch((e) => log.warn('falha ao reprocessar', { action: 'lock', error: String(e) })),
+    );
+  };
+
   // ── 3b. O bot PODE falar nesta conta? ─────────────────────────────────────
   //
   // A trava vive aqui, e nao so em quem chama, porque este e o unico ponto por
@@ -3553,6 +3626,11 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     })),
   );
   await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);
+
+  // Libera a conversa DEPOIS de gravar as mensagens: se soltasse antes, a
+  // rodada seguinte poderia montar o histórico sem o que acabamos de dizer e
+  // repetir a resposta — o mesmo defeito por outro caminho.
+  await liberarConversa();
 
   return new Response('OK', { status: 200 });
 }));
