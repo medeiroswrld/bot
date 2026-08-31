@@ -206,7 +206,7 @@ export default function Anuncios() {
                                             <p className="text-muted" style={{ fontSize: '0.7rem', fontFamily: 'monospace' }}>{a.source_id}</p>
                                             {organico && (
                                                 <p className="text-muted" style={{ fontSize: '0.7rem', marginTop: '0.2rem' }}>
-                                                    Post orgânico — não gera conversão pra Meta
+                                                    Alcance orgânico — chegou sem clique pago, a Meta não credita
                                                 </p>
                                             )}
                                         </td>
@@ -226,10 +226,16 @@ export default function Anuncios() {
             </div>
 
             <p className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.55 }}>
-                <strong>Anúncio</strong> é tráfego pago e carrega o identificador do clique — só ele
-                vira conversão devolvida pra Meta. <strong>Publicação</strong> é post orgânico com botão
-                de WhatsApp: traz cliente do mesmo jeito, mas a Meta não tem como ligar aquela venda a
-                nada. Não compare os dois pra decidir investimento.
+                <strong>Anúncio</strong> é a entrega paga: carrega o identificador do clique, e só ela
+                vira conversão devolvida pra Meta. <strong>Publicação</strong> é quem chegou pelo post
+                — no feed da página, compartilhado ou pelo perfil — sem passar pelo clique pago.
+                Quando as duas linhas têm o mesmo criativo, costuma ser a mesma campanha: o
+                impulsionamento traz as duas coisas.
+            </p>
+            <p className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.55 }}>
+                Isso significa que <strong>parte do resultado do seu anúncio é invisível pra Meta</strong>,
+                mas aparece aqui. Ao comparar o custo por lead do gerenciador com o que você vê nesta
+                tela, some as duas linhas do mesmo criativo — senão o anúncio parece pior do que é.
             </p>
             <p className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.55 }}>
                 O custo do anúncio não aparece aqui ainda — ele vive no gerenciador da Meta.
