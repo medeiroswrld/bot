@@ -229,6 +229,10 @@ export const AppProvider = ({ children }) => {
           images: sortedImages.map(img => img.image_url),
           km: c.mileage || 0,
           status: c.status === 'sold' ? 'vendido' : 'disponivel',
+          // O status do banco tem quatro valores e este mapa achata pra dois.
+          // `status_real` preserva o original, que é o que distingue o carro
+          // recém-chegado da troca ('incoming') de um pronto pra vender.
+          status_real: c.status,
           description: c.description || '',
         };
       });
@@ -829,6 +833,17 @@ export const AppProvider = ({ children }) => {
       if (dbUpdates.price !== undefined) dbUpdates.price = Number(dbUpdates.price);
       if (dbUpdates.status === 'disponivel') dbUpdates.status = 'available';
       if (dbUpdates.status === 'vendido') dbUpdates.status = 'sold';
+
+      // Carro que veio da troca sai de 'incoming' no momento em que ganha
+      // preço. Precificar É a liberação: enquanto não tem valor de venda, ele
+      // fica fora do bot e do feed. Fazer disso um botão separado só criaria
+      // um passo que alguém esqueceria, e o carro ficaria invisível no pátio.
+      const atual = inventory.find(c => c.id === id);
+      if (atual?.status_real === 'incoming'
+          && dbUpdates.status === undefined
+          && Number(dbUpdates.price) > 0) {
+        dbUpdates.status = 'available';
+      }
 
       const { data: updatedCar, error } = await supabase
         .from('cars')

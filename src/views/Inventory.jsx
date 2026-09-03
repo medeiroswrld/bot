@@ -4,7 +4,7 @@ import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
     X, Gauge, Tag, CheckCircle2, ShoppingCart, Package, Camera,
     Video, Loader2
-, CalendarDays, Printer } from 'lucide-react';
+, CalendarDays, Printer, ArrowLeftRight } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import { MODELO_PADRAO, montarContrato, dadosDoContrato, imprimirContrato, formatarCPF, cpfValido } from '../lib/contrato.js';
 import { supabase } from '../lib/supabase.js';
@@ -1061,7 +1061,22 @@ const Inventory = () => {
                                 </div>
                                 <span className="inv-card-year">{car.year}</span>
                             </div>
-                            <div className="inv-card-price">R$ {Number(car.price).toLocaleString('pt-BR')}</div>
+                            {car.status_real === 'incoming' ? (
+                                // Chegou pela troca e ainda não tem preço de venda.
+                                // Fica fora do bot e do feed até ser precificado — o
+                                // aviso existe pra ninguém achar que o carro sumiu.
+                                <div style={{
+                                    display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+                                    padding: '6px 10px', borderRadius: 8, margin: '4px 0',
+                                    background: '#fef3c7', color: '#92400e',
+                                    fontSize: '0.78rem', fontWeight: 600,
+                                }}>
+                                    <ArrowLeftRight size={14} />
+                                    Veio na troca — defina o preço pra publicar
+                                </div>
+                            ) : (
+                                <div className="inv-card-price">R$ {Number(car.price).toLocaleString('pt-BR')}</div>
+                            )}
                             <div className="inv-card-specs">
                                 <span><Gauge size={14} /> {Number(car.km).toLocaleString('pt-BR')} km</span>
                                 <span><Tag size={14} /> {car.transmission}</span>
