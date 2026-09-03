@@ -441,9 +441,47 @@ const Painel = ({ onSair }) => {
   const [dados, setDados] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro]   = useState('');
-  // Cotação editável em vez de buscar de API: muda pouco no dia, e uma
-  // dependência externa quebraria o painel inteiro quando ela caísse.
-  const [cotacao, setCotacao] = useState(5.4);
+  // Cotação do dólar: buscada, com queda suave.
+  //
+  // Era fixa em 5,40 e editável na mão. O problema não era a digitação — era
+  // que TODO número de custo do painel é multiplicado por ela. Com o câmbio
+  // longe de 5,40, a margem por loja aparece errada, e é justamente esse
+  // número que decide preço de plano.
+  //
+  // A objeção original continua válida: dependência externa não pode derrubar
+  // o painel. Por isso a busca é opcional e cai em cascata —
+  //   cotação de hoje → última guardada no navegador → 5,40
+  // — e o valor segue editável, pra quando você quiser fixar um câmbio de
+  // fechamento e conferir contra a fatura.
+  const [cotacao, setCotacao] = useState(() => {
+    try {
+      const salva = JSON.parse(localStorage.getItem('cotacao_usd') || 'null');
+      if (salva?.valor > 0) return salva.valor;
+    } catch { /* storage bloqueado ou lixo: segue no padrão */ }
+    return 5.4;
+  });
+  const [cotacaoEm, setCotacaoEm] = useState(null);
+
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      try {
+        const r = await fetch('https://economia.awesomeapi.com.br/json/last/USD-BRL');
+        if (!r.ok) return;
+        const j = await r.json();
+        const v = Number(j?.USDBRL?.bid);
+        // Faixa de sanidade: resposta estranha (0, null, ou câmbio absurdo) não
+        // entra. Errar pra menos aqui inventa lucro que não existe.
+        if (!vivo || !(v > 2 && v < 15)) return;
+        setCotacao(v);
+        setCotacaoEm(new Date());
+        try {
+          localStorage.setItem('cotacao_usd', JSON.stringify({ valor: v, em: Date.now() }));
+        } catch { /* sem storage: só não guarda */ }
+      } catch { /* offline ou API fora: fica com a última conhecida */ }
+    })();
+    return () => { vivo = false; };
+  }, []);
   const [salvandoId, setSalvandoId] = useState(null);
   const [lojaAberta, setLojaAberta] = useState(null);
 
@@ -598,6 +636,13 @@ const Painel = ({ onSair }) => {
           Dólar
           <input type="number" step="0.01" value={cotacao} onChange={(e) => setCotacao(Number(e.target.value) || 0)}
             style={{ width: 76, padding: '4px 8px', borderRadius: 6, border: '1px solid #2c2c36', background: '#0f0f14', color: '#e4e4e7' }} />
+          {/* De onde veio o número. Sem isso não dá pra saber se o painel está
+              usando o câmbio de hoje ou um valor velho de quando a API caiu. */}
+          <span style={{ fontSize: '0.68rem', color: cotacaoEm ? '#4ade80' : '#71717a' }}>
+            {cotacaoEm
+              ? `de hoje, ${cotacaoEm.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+              : 'não atualizada'}
+          </span>
         </label>
       </div>
 

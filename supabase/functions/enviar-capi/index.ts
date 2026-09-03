@@ -133,16 +133,17 @@ Deno.serve(async (req) => {
       user_data: {
         whatsapp_business_account_id: waba,
         ctwa_clid: clid,
-        // A documentação pede whatsapp_business_account_id pro canal WhatsApp,
-        // mas o assistente do Gerenciador de Eventos lista "Identificação da
-        // Página" como parâmetro obrigatório. As duas fontes se contradizem, e
-        // o modo de falhar aqui é silencioso: a Meta responde sucesso e
-        // simplesmente não atribui.
+        // NÃO mandar page_id aqui. Parece inofensivo e não é.
         //
-        // Mandar os dois resolve sem risco — campo a mais é ignorado, campo a
-        // menos quebra a atribuição sem avisar. Só vai quando a loja tem a
-        // página cadastrada.
-        ...(loja.fb_page_id ? { page_id: loja.fb_page_id } : {}),
+        // Eu mandava, por achar que campo a mais seria ignorado — a doc pede
+        // `whatsapp_business_account_id` pro canal WhatsApp, o assistente do
+        // Gerenciador lista "Identificação da Página" como obrigatória, e eu
+        // resolvi cobrir os dois. A Meta VALIDA o campo: se o page_id não for
+        // o da página vinculada ao dataset, ela recusa o evento inteiro com
+        // subcode 2804065 ("incompatibilidade de página e conjunto de dados").
+        //
+        // Resultado: todos os eventos falharam. O par que a Meta casa no canal
+        // WhatsApp é dataset ↔ WABA, e o ctwa_clid faz o resto.
       },
     };
 

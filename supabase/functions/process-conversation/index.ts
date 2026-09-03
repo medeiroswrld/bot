@@ -963,6 +963,62 @@ async function executeTool(
       car_id: carId,
       status: appointmentStatus,
     };
+    // ── Já existe visita desta pessoa? ────────────────────────────────────
+    //
+    // Antes daqui era INSERT puro, e a agenda enchia de visita duplicada da
+    // mesma pessoa. Basta o modelo chamar a ferramenta duas vezes — o cliente
+    // reconfirma ("pode ser 15h então"), ou pede pra trocar o horário — pra
+    // nascerem dois registros. Quem paga é o vendedor, que vê a agenda cheia
+    // de compromisso que não existe e não sabe qual é o bom.
+    //
+    // Regra: mesma pessoa, MESMO DIA, é sempre a mesma visita.
+    //   igual        → devolve a que existe, sem inserir (idempotente)
+    //   horário novo → REMARCA a existente, não cria outra
+    //   outro dia    → deixa criar; pode ser visita legítima pra outro carro
+    const { data: jaExiste } = await supabase
+      .from('appointments')
+      .select('id, appointment_date, appointment_time, car_id')
+      .eq('user_id', userId)
+      .eq('customer_phone', customerPhone)
+      .eq('appointment_date', dateStr)
+      .in('status', ['scheduled', 'confirmed'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (jaExiste) {
+      const mesmoHorario = String(jaExiste.appointment_time ?? '').slice(0, 5) === horarioHm;
+
+      if (mesmoHorario) {
+        log.info('visita já existia — devolvendo a mesma', { action: 'agendar_visita', apptId: jaExiste.id });
+        return {
+          sucesso: true, id: jaExiste.id, data: dateStr, horario, status: appointmentStatus,
+          ja_existia: true,
+          mensagem: `Essa visita já estava agendada para ${dateStr} às ${horario}. NÃO diga que agendou de novo — confirme que está de pé e siga a conversa.`,
+        };
+      }
+
+      const { data: remarcada, error: erroUp } = await supabase
+        .from('appointments')
+        .update({ appointment_time: horario, status: appointmentStatus, car_id: carId ?? jaExiste.car_id })
+        .eq('id', jaExiste.id)
+        .select()
+        .single();
+
+      if (!erroUp && remarcada) {
+        log.info('visita remarcada em vez de duplicada', {
+          action: 'agendar_visita', apptId: jaExiste.id,
+          de: jaExiste.appointment_time, para: horario,
+        });
+        return {
+          sucesso: true, id: remarcada.id, data: dateStr, horario, status: appointmentStatus,
+          remarcada: true,
+          mensagem: `Visita remarcada para ${dateStr} às ${horario}. Era ${String(jaExiste.appointment_time).slice(0, 5)}. Confirme o horário novo com o cliente.`,
+        };
+      }
+      log.warn('falha ao remarcar — seguindo para insert', { action: 'agendar_visita', error: erroUp?.message });
+    }
+
     log.info('inserindo', { action: 'agendar_visita', insertData });
 
     const { data: appt, error } = await supabase
