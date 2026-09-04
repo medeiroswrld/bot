@@ -813,6 +813,11 @@ export const AppProvider = ({ children }) => {
       delete dbUpdates.car_images;
       delete dbUpdates.specsImage;
       delete dbUpdates.video;
+      // `status_real` é derivado na leitura, não é coluna. O formulário faz
+      // `...car`, então tudo que a gente acrescenta ao objeto mapeado viaja de
+      // volta no update — e uma coluna inexistente derruba a gravação INTEIRA,
+      // não só o campo dela. Foi assim que editar veículo parou de salvar.
+      delete dbUpdates.status_real;
 
       // Resolve mídias do bot (mantém URL existente, sobe arquivo novo, ou null se removida)
       dbUpdates.specs_image_url = await uploadCarMedia(updates.specsImage, 'car-images');
