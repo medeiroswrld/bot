@@ -48,6 +48,43 @@ function initials(name: string | null, phone: string): string {
   return phone.slice(-2);
 }
 
+// ─── AtendenteBadge ───────────────────────────────────────────────────────────
+//
+// Qual vendedor está nesta conversa. A loja atende pelo mesmo WhatsApp em três
+// celulares, então "Humano" sozinho não diz nada — o dono precisa saber QUAL
+// humano. O nome vem da assinatura que a equipe já escreve ("me chamo rodrigo"),
+// lida pelo webhook, ou de uma escolha à mão quando ela falha.
+//
+// Cor derivada do nome, não sorteada: o mesmo vendedor precisa ter sempre a
+// mesma cor pra ser reconhecido de relance ao correr a lista.
+const CORES_ATENDENTE = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6'];
+
+function corDoNome(nome: string): string {
+  let h = 0;
+  for (let i = 0; i < nome.length; i++) h = (h * 31 + nome.charCodeAt(i)) >>> 0;
+  return CORES_ATENDENTE[h % CORES_ATENDENTE.length];
+}
+
+const AtendenteBadge = React.memo(function AtendenteBadge({ nome }: { nome?: string | null }) {
+  const limpo = String(nome ?? '').trim();
+  if (!limpo) return null;
+  const cor = corDoNome(limpo);
+  const ini = limpo.split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  return (
+    <span
+      title={`Atendido por ${limpo}`}
+      style={{
+        fontSize: '0.6rem', fontWeight: 700, lineHeight: 1,
+        width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        background: cor, color: '#fff',
+      }}
+    >
+      {ini}
+    </span>
+  );
+});
+
 // ─── StatusBadge ──────────────────────────────────────────────────────────────
 
 const StatusBadge = React.memo(function StatusBadge({ status }: { status: Conversation['status'] }) {
@@ -120,6 +157,7 @@ const ConvItem = React.memo(function ConvItem({
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
           <StatusBadge status={conv.status} />
+          <AtendenteBadge nome={(conv as { atendente?: string | null }).atendente} />
           {lastMsg && (
             <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
               {lastMsg.role !== 'customer' ? '← ' : ''}{lastMsg.content.substring(0, 50)}
@@ -342,6 +380,45 @@ export default function Conversations() {
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [lastMessages, setLastMessages]   = useState<Record<string, Message>>({});
+
+  // Equipe cadastrada em Configurações. Serve pro seletor manual de atendente
+  // — o mesmo cadastro que o webhook usa pra reconhecer a assinatura.
+  const [equipe, setEquipe] = useState<string[]>([]);
+  useEffect(() => {
+    if (!user?.id) return;
+    let vivo = true;
+    supabase
+      .from('company_settings')
+      .select('team_members')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!vivo) return;
+        const lista = Array.isArray(data?.team_members) ? data.team_members : [];
+        setEquipe(
+          lista
+            .map((m: unknown) => (typeof m === 'string' ? m : String((m as { nome?: string })?.nome ?? '')))
+            .filter(Boolean),
+        );
+      });
+    return () => { vivo = false; };
+  }, [user?.id]);
+
+  // Quem atende esta conversa, escolhido à mão.
+  //
+  // Grava `atendente_auto: false` de propósito: a partir daí o webhook para de
+  // sobrescrever. A pessoa que clicou sabe mais do que a heurística de
+  // assinatura, e ser corrigida por um robô depois seria irritante.
+  const definirAtendente = async (nome: string) => {
+    if (!selectedId) return;
+    const valor = nome.trim() || null;
+    const { error } = await supabase
+      .from('conversations')
+      .update({ atendente: valor, atendente_em: new Date().toISOString(), atendente_auto: false })
+      .eq('id', selectedId);
+    if (error) { console.error('[Conversations] erro ao definir atendente', error); return; }
+    setConversations((prev) => prev.map((c) => (c.id === selectedId ? { ...c, atendente: valor } as Conversation : c)));
+  };
   const [selectedId, setSelectedId]       = useState<string | null>(null);
   const [messages, setMessages]           = useState<Message[]>([]);
   // id da campanha → nome + slug do template, pra etiquetar a bolha.
@@ -1256,6 +1333,27 @@ export default function Conversations() {
                 </p>
               </div>
               <StatusBadge status={selectedConv.status} />
+              {/* Quem está atendendo. Fica ao lado do status porque é a mesma
+                  pergunta: "Humano" diz que saiu do bot, isto diz qual pessoa.
+                  Só aparece quando a loja cadastrou a equipe. */}
+              {equipe.length > 0 && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <AtendenteBadge nome={(selectedConv as { atendente?: string | null }).atendente} />
+                  <select
+                    value={(selectedConv as { atendente?: string | null }).atendente ?? ''}
+                    onChange={(e) => definirAtendente(e.target.value)}
+                    title="Quem está atendendo este cliente"
+                    style={{
+                      fontSize: '0.72rem', padding: '2px 6px', borderRadius: 6,
+                      border: '1px solid var(--border)', background: 'var(--input-bg)',
+                      color: 'var(--text-primary)', maxWidth: 130,
+                    }}
+                  >
+                    <option value="">Sem atendente</option>
+                    {equipe.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               {/* "Assumir" aparece para bot e pending; "Devolver" aparece para human e pending */}

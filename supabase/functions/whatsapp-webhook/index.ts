@@ -4,6 +4,7 @@ import { timingSafeEqual } from 'https://deno.land/std@0.224.0/crypto/timing_saf
 import { parseInboundMessage, sendMessage, resolveWhatsAppToken, variantesTelefoneBR } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 import { botPodeResponder, numeroBloqueado, COLUNAS_GUARDA } from '../_shared/botGuards.ts';
+import { detectarAtendente } from '../_shared/atendente.ts';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -403,7 +404,10 @@ serve(async (req) => {
   // incidente — e não podem terminar no mesmo lugar.
   let { data: settings, error: settingsErr } = await supabase
     .from('company_settings')
-    .select(`user_id, ${COLUNAS_GUARDA}`)
+    // team_members entra aqui, e não numa consulta separada: com a loja
+    // respondendo pelos celulares, quase toda mensagem é um eco, e uma ida a
+    // mais ao banco por mensagem não se paga.
+    .select(`user_id, team_members, ${COLUNAS_GUARDA}`)
     .eq('whatsapp_phone_number_id', phoneNumberId)
     .maybeSingle();
 
@@ -599,6 +603,31 @@ ${legendaEco}` : `${marcador} ${url}`;
       wa_message_id: waMessageId,
     });
     if (ecoErr) console.error('[WH] erro ao salvar eco:', ecoErr);
+
+    // Quem da equipe está atendendo?
+    //
+    // Os três celulares compartilham o mesmo número, então o eco não diz quem
+    // digitou. Mas a equipe se apresenta por hábito ("me chamo rodrigo"), e é
+    // isso que a gente lê. Escolha feita à mão no CRM (atendente_auto = false)
+    // NUNCA é sobrescrita — a pessoa sabe mais do que a heurística.
+    const marcado = (upsertedConv as { atendente?: string | null; atendente_auto?: boolean | null });
+    const podeCarimbar = !marcado.atendente || marcado.atendente_auto === true;
+
+    if (podeCarimbar) {
+      const equipe = Array.isArray((settings as { team_members?: unknown })?.team_members)
+        ? ((settings as { team_members: Array<{ nome?: string } | string> }).team_members)
+            .map((m) => (typeof m === 'string' ? m : String(m?.nome ?? '')))
+            .filter(Boolean)
+        : [];
+
+      const quem = detectarAtendente(text, equipe);
+      if (quem && quem !== marcado.atendente) {
+        await supabase.from('conversations')
+          .update({ atendente: quem, atendente_em: now, atendente_auto: true })
+          .eq('id', upsertedConv.id);
+        console.log(`[WH] atendente detectado pela assinatura: ${quem}`);
+      }
+    }
 
     await supabase.from('conversations')
       .update({ status: 'human', last_message_at: now })
