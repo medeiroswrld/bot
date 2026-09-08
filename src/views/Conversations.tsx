@@ -387,7 +387,7 @@ export default function Conversations() {
   useEffect(() => {
     if (!user?.id) return;
     let vivo = true;
-    supabase
+    supabaseTyped
       .from('company_settings')
       .select('team_members')
       .eq('user_id', user.id)
@@ -412,7 +412,15 @@ export default function Conversations() {
   const definirAtendente = async (nome: string) => {
     if (!selectedId) return;
     const valor = nome.trim() || null;
-    const { error } = await supabase
+    // Cast porque database.types.ts ainda não foi regerado com as colunas da
+    // migration 080. O runtime aceita; o tipo é que está desatualizado.
+    const { error } = await (supabaseTyped as unknown as {
+      from: (t: string) => {
+        update: (v: Record<string, unknown>) => {
+          eq: (c: string, v: string) => Promise<{ error: unknown }>;
+        };
+      };
+    })
       .from('conversations')
       .update({ atendente: valor, atendente_em: new Date().toISOString(), atendente_auto: false })
       .eq('id', selectedId);
