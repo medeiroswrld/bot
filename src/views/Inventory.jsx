@@ -4,7 +4,7 @@ import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
     X, Gauge, Tag, CheckCircle2, ShoppingCart, Package, Camera,
     Video, Loader2
-, CalendarDays, Printer, ArrowLeftRight } from 'lucide-react';
+, CalendarDays, Printer, ArrowLeftRight, Lock } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import { MODELO_PADRAO, montarContrato, dadosDoContrato, imprimirContrato, formatarCPF, cpfValido } from '../lib/contrato.js';
 import { supabase } from '../lib/supabase.js';
@@ -26,7 +26,9 @@ const StatusBadge = ({ status }) => {
     return <span className="inv-status-badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>;
 };
 
-const EMPTY_CAR = { brand: '', model: '', version: '', year: '', model_year: '', purchase_price: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', description: '', chassi: '', renavam: '', images: [], specsImage: null, video: null };
+const EMPTY_CAR = { brand: '', model: '', version: '', year: '', model_year: '', purchase_price: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', description: '', chassi: '', renavam: '', images: [], specsImage: null, video: null,
+    // Ficha de compra — nunca sai no feed nem para o bot. Ver migration 082.
+    purchase_date: '', purchase_from: '', purchase_financed: false, purchase_notes: '' };
 
 // Parse preço no formato brasileiro ("198.000" ou "198.000,00" ou "198000") → número
 const parsePriceBR = (value) => {
@@ -497,6 +499,56 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
                         <div className="form-group"><label>Chassi</label><input type="text" value={form.chassi} onChange={e => handleChange('chassi', e.target.value.toUpperCase())} placeholder="Vem da consulta por placa" style={{ fontFamily: 'monospace' }} /></div>
                         <div className="form-group"><label>Renavam</label><input type="text" value={form.renavam} onChange={e => handleChange('renavam', e.target.value)} placeholder="Preenchimento manual" /></div>
                     </div>
+
+                    {/* ── Ficha de compra ────────────────────────────────────
+                        Bloco separado e visualmente marcado de propósito. O
+                        campo "Descrição" logo acima é lido pelo bot E publicado
+                        no site — escrever "comprei do Zé, tem financiamento no
+                        Bradesco" ali faria o bot contar isso pro comprador.
+                        Aqui não sai de dentro do CRM. */}
+                    <div style={{
+                        border: '1px solid var(--border)', borderLeft: '3px solid #64748b',
+                        borderRadius: 10, padding: '0.9rem 1rem', margin: '0.75rem 0',
+                        background: 'var(--input-bg)',
+                    }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: '0.75rem' }}>
+                            <Lock size={14} style={{ color: '#64748b' }} />
+                            <strong style={{ fontSize: '0.82rem' }}>Ficha de compra</strong>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                                só a loja vê — não aparece no site nem para o bot
+                            </span>
+                        </div>
+
+                        <div className="form-row">
+                            <div className="form-group">
+                                <label>Data da compra</label>
+                                <input type="date" value={form.purchase_date || ''}
+                                    onChange={e => handleChange('purchase_date', e.target.value)} />
+                            </div>
+                            <div className="form-group">
+                                <label>Comprado de</label>
+                                <input type="text" value={form.purchase_from || ''}
+                                    onChange={e => handleChange('purchase_from', e.target.value)}
+                                    placeholder="Nome de quem vendeu" />
+                            </div>
+                        </div>
+
+                        <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                                <input type="checkbox" checked={!!form.purchase_financed}
+                                    onChange={e => handleChange('purchase_financed', e.target.checked)}
+                                    style={{ width: 'auto', margin: 0 }} />
+                                Tem financiamento ou gravame em aberto
+                            </label>
+                        </div>
+
+                        <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                            <label>Observações da compra</label>
+                            <textarea rows={2} value={form.purchase_notes || ''}
+                                onChange={e => handleChange('purchase_notes', e.target.value)}
+                                placeholder="Banco, parcelas em aberto, combinados, estado na entrada..." />
+                        </div>
+                    </div>
                     <div className="modal-footer" style={{ marginTop: '1rem' }}>
                         <button className="btn-secondary" onClick={onClose} disabled={saving}>Cancelar</button>
                         <button className="btn-primary" onClick={handleSubmit} disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: saving ? 0.7 : 1 }}>
@@ -922,6 +974,56 @@ const DetailDrawer = ({ car, onClose }) => {
                             </div>
                         ))}
                     </div>
+
+                    {/* Ficha de compra. Só aparece quando tem algo preenchido —
+                        bloco vazio em toda ficha vira ruído e some da atenção,
+                        justamente onde precisa ser notado. */}
+                    {(car.purchase_date || car.purchase_from || car.purchase_financed || car.purchase_notes) && (
+                        <div style={{
+                            marginTop: '1.25rem', padding: '0.9rem 1rem', borderRadius: 10,
+                            background: 'var(--input-bg)', borderLeft: '3px solid #64748b',
+                        }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: '0.7rem' }}>
+                                <Lock size={13} style={{ color: '#64748b' }} />
+                                <strong style={{ fontSize: '0.78rem' }}>Ficha de compra</strong>
+                                <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>interno</span>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                                {car.purchase_date && (
+                                    <div>
+                                        <p className="text-muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Comprado em</p>
+                                        <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>
+                                            {new Date(`${car.purchase_date}T12:00`).toLocaleDateString('pt-BR')}
+                                        </p>
+                                    </div>
+                                )}
+                                {car.purchase_from && (
+                                    <div>
+                                        <p className="text-muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Comprado de</p>
+                                        <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{car.purchase_from}</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {car.purchase_financed && (
+                                <p style={{
+                                    marginTop: '0.6rem', fontSize: '0.8rem', fontWeight: 600,
+                                    color: '#b45309', background: '#fef3c7',
+                                    padding: '4px 8px', borderRadius: 6, display: 'inline-block',
+                                }}>
+                                    Tem financiamento ou gravame em aberto
+                                </p>
+                            )}
+
+                            {car.purchase_notes && (
+                                <p style={{ marginTop: '0.6rem', fontSize: '0.85rem', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
+                                    {car.purchase_notes}
+                                </p>
+                            )}
+                        </div>
+                    )}
+
                     <CustosDoVeiculo car={car} />
                 </div>
             </div>

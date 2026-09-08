@@ -20,6 +20,17 @@ const base64UrlParaBytes = (b64: string): Uint8Array => {
 };
 import type { Tables } from '../lib/database.types';
 
+// Atalho para colunas que existem no banco mas ainda não em database.types.ts.
+//
+// O arquivo de tipos é gerado e não foi regerado desde várias migrations —
+// `team_members`, `atendente` e as colunas da ficha de compra estão no Postgres
+// e não no tipo. Sem isto, cada consulta a elas exigiria um cast inline, e foi
+// exatamente por escrever um desses errado que /conversas ficou em branco.
+//
+// Regerar os tipos resolve de verdade; até lá, um ponto só de escape.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const db = supabaseTyped as any;
+
 type Conversation = Tables<'conversations'>;
 type Message      = Tables<'messages'>;
 
@@ -387,12 +398,12 @@ export default function Conversations() {
   useEffect(() => {
     if (!user?.id) return;
     let vivo = true;
-    supabaseTyped
+    db
       .from('company_settings')
       .select('team_members')
       .eq('user_id', user.id)
       .maybeSingle()
-      .then(({ data }) => {
+      .then(({ data }: { data: { team_members?: unknown } | null }) => {
         if (!vivo) return;
         const lista = Array.isArray(data?.team_members) ? data.team_members : [];
         setEquipe(
@@ -412,15 +423,7 @@ export default function Conversations() {
   const definirAtendente = async (nome: string) => {
     if (!selectedId) return;
     const valor = nome.trim() || null;
-    // Cast porque database.types.ts ainda não foi regerado com as colunas da
-    // migration 080. O runtime aceita; o tipo é que está desatualizado.
-    const { error } = await (supabaseTyped as unknown as {
-      from: (t: string) => {
-        update: (v: Record<string, unknown>) => {
-          eq: (c: string, v: string) => Promise<{ error: unknown }>;
-        };
-      };
-    })
+    const { error } = await db
       .from('conversations')
       .update({ atendente: valor, atendente_em: new Date().toISOString(), atendente_auto: false })
       .eq('id', selectedId);

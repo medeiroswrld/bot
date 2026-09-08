@@ -752,6 +752,12 @@ export const AppProvider = ({ children }) => {
         // Documento do veiculo. Sem estes tres o contrato de venda sai com
         // linha em branco justamente onde ele identifica o bem.
         purchase_price: car.purchase_price ? Number(car.purchase_price) : null,
+        // Ficha de compra (migration 082). Privada: o bot e o feed selecionam
+        // colunas por lista explícita, então nada daqui chega ao cliente.
+        purchase_date: car.purchase_date || null,
+        purchase_from: car.purchase_from || null,
+        purchase_financed: car.purchase_financed === true,
+        purchase_notes: car.purchase_notes || null,
         plate: car.plate || null,
         chassi: car.chassi || null,
         renavam: car.renavam || null,
