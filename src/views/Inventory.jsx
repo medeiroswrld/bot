@@ -28,7 +28,7 @@ const StatusBadge = ({ status }) => {
 
 const EMPTY_CAR = { brand: '', model: '', version: '', year: '', model_year: '', purchase_price: '', price: '', km: '', transmission: 'Automático', fuel: 'Flex', color: '', vehicle_type: 'carro', status: 'disponivel', description: '', chassi: '', renavam: '', images: [], specsImage: null, video: null,
     // Ficha de compra — nunca sai no feed nem para o bot. Ver migration 082.
-    purchase_date: '', purchase_from: '', purchase_financed: false, purchase_notes: '' };
+    purchase_date: '', purchase_from: '', purchase_phone: '', purchase_financed: false, purchase_notes: '' };
 
 // Parse preço no formato brasileiro ("198.000" ou "198.000,00" ou "198000") → número
 const parsePriceBR = (value) => {
@@ -531,6 +531,12 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
                                     onChange={e => handleChange('purchase_from', e.target.value)}
                                     placeholder="Nome de quem vendeu" />
                             </div>
+                            <div className="form-group">
+                                <label>Telefone</label>
+                                <input type="tel" value={form.purchase_phone || ''}
+                                    onChange={e => handleChange('purchase_phone', e.target.value)}
+                                    placeholder="(15) 99999-9999" />
+                            </div>
                         </div>
 
                         <div className="form-group" style={{ marginTop: '0.5rem' }}>
@@ -1002,6 +1008,18 @@ const DetailDrawer = ({ car, onClose }) => {
                                     <div>
                                         <p className="text-muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Comprado de</p>
                                         <p style={{ fontWeight: 600, fontSize: '0.9rem' }}>{car.purchase_from}</p>
+                                    </div>
+                                )}
+                                {car.purchase_phone && (
+                                    <div>
+                                        <p className="text-muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Telefone</p>
+                                        {/* Link de ligar: a razão de guardar esse telefone é
+                                            precisar dele com pressa — documento atrasado,
+                                            chave reserva, recompra. */}
+                                        <a href={`tel:${String(car.purchase_phone).replace(/\D/g, '')}`}
+                                            style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--primary)' }}>
+                                            {car.purchase_phone}
+                                        </a>
                                     </div>
                                 )}
                             </div>

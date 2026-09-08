@@ -25,6 +25,7 @@
 alter table public.cars
   add column if not exists purchase_date     date,
   add column if not exists purchase_from     text,
+  add column if not exists purchase_phone    text,
   add column if not exists purchase_financed boolean not null default false,
   add column if not exists purchase_notes    text;
 
@@ -32,6 +33,8 @@ comment on column public.cars.purchase_date is
   'Quando a loja comprou o veículo. Privado — nunca sai no feed nem para o bot.';
 comment on column public.cars.purchase_from is
   'De quem a loja comprou. Privado.';
+comment on column public.cars.purchase_phone is
+  'Telefone de quem vendeu o veículo para a loja. Privado — é o contato para pendência de documento, chave reserva ou recompra.';
 comment on column public.cars.purchase_financed is
   'Veículo tem financiamento/gravame em aberto. Privado, mas decisivo na negociação.';
 comment on column public.cars.purchase_notes is
@@ -67,7 +70,7 @@ begin
   insert into public.cars (
     user_id, brand, model, year, model_year, color, mileage,
     plate, chassi, renavam,
-    purchase_price, purchase_date, purchase_from, purchase_notes,
+    purchase_price, purchase_date, purchase_from, purchase_phone, purchase_notes,
     price, status, vehicle_type,
     origem_troca_de, description
   )
@@ -86,6 +89,7 @@ begin
     coalesce(new.sold_at::date, current_date),
     -- De quem veio: o comprador do carro vendido entregou este na troca.
     nullif(new.buyer_name, ''),
+    nullif(new.buyer_phone, ''),
     'Recebido na troca da venda de ' ||
       coalesce(nullif(new.brand, '') || ' ', '') ||
       coalesce(nullif(new.model, ''), 'veículo') ||

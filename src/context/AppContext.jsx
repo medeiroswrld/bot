@@ -756,6 +756,7 @@ export const AppProvider = ({ children }) => {
         // colunas por lista explícita, então nada daqui chega ao cliente.
         purchase_date: car.purchase_date || null,
         purchase_from: car.purchase_from || null,
+        purchase_phone: car.purchase_phone || null,
         purchase_financed: car.purchase_financed === true,
         purchase_notes: car.purchase_notes || null,
         plate: car.plate || null,
