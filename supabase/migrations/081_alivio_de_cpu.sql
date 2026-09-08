@@ -30,10 +30,16 @@ delete from net._http_response where created < now() - interval '1 hour';
 -- pra sempre. Duas semanas bastam pra investigar qualquer coisa.
 delete from cron.job_run_details where end_time < now() - interval '14 days';
 
--- Sem isto o espaço das linhas apagadas continua sendo varrido nas próximas
--- consultas, e o alívio demoraria a aparecer.
-vacuum (analyze) net._http_response;
-vacuum (analyze) cron.job_run_details;
+-- O VACUUM que recupera o espaço das linhas apagadas NÃO está aqui: ele não
+-- roda dentro de transação, e o editor SQL envolve o script inteiro em uma.
+-- Precisa ser executado sozinho, depois deste arquivo:
+--
+--   vacuum (analyze) net._http_response;
+--   vacuum (analyze) cron.job_run_details;
+--
+-- Sem ele o alívio ainda acontece — o autovacuum chega lá —, só demora mais.
+-- O ANALYZE no fim deste arquivo já atualiza as estatísticas do planejador,
+-- que é a metade que funciona dentro de transação.
 
 -- ── 2. Reduzir a frequência do que não precisa ser tão rápido ───────────────
 --
