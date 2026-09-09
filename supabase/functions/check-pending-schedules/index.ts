@@ -125,7 +125,7 @@ serve(async (req) => {
 
   const { data: convs } = await supabase
     .from('conversations')
-    .select('id, user_id, customer_phone, customer_name, status, pending_schedule_check')
+    .select('id, user_id, customer_phone, customer_name, status, pending_schedule_check, phone_number_id')
     .not('pending_schedule_check', 'is', null);
 
   let processed = 0, fitted = 0, alts = 0, skipped = 0;
@@ -163,7 +163,10 @@ serve(async (req) => {
       .single();
     if (!settings) { console.error(`[pending] ${conv.id}: sem company_settings`); continue; }
 
-    const pid = String(settings.whatsapp_phone_number_id ?? '');
+    // Responde pelo numero da CONVERSA. Esta funcao fala no meio de um
+    // atendimento em andamento — sair pelo numero principal aqui seria o
+    // cliente receber a continuacao de outro numero.
+    const pid = String((conv as { phone_number_id?: string | null }).phone_number_id || settings.whatsapp_phone_number_id || '');
     const token = await resolveWhatsAppToken(supabase, conv.user_id);
     const nome = conv.customer_name ? String(conv.customer_name).split(' ')[0] : null;
     const greet = nome ? `${nome}, ` : '';

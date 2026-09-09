@@ -2897,7 +2897,16 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
       .single();
 
     const companyName = String(wSettings?.company_name ?? 'nossa concessionária');
-    const wPid        = String(wSettings?.whatsapp_phone_number_id ?? '');
+    // Sai pelo número da CONVERSA, não pelo principal da loja.
+    //
+    // Com três números, usar o principal aqui fazia o cliente escrever pro
+    // número 2 e receber a primeira resposta do número 1 — no pior lugar
+    // possível, que é a abertura do atendimento.
+    const wPid        = String(
+      (conv as { phone_number_id?: string | null })?.phone_number_id
+      || wSettings?.whatsapp_phone_number_id
+      || '',
+    );
     const wToken      = await resolveWhatsAppToken(supabase, userId);
 
     // No Instagram e no Messenger o nome vem no proprio webhook, do perfil da
