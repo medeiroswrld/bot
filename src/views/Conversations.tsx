@@ -1285,46 +1285,61 @@ export default function Conversations() {
       {/* ── lista ──────────────────────────────────────────────────────────── */}
       <div className="conv-lista" style={{ width: 320, flexShrink: 0, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--bg-main)' }}>
         <div style={{ padding: '16px 16px 8px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <MessageCircle size={20} style={{ color: 'var(--primary)' }} />
-            <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, flex: 1 }}>Conversas WhatsApp</h2>
-          </div>
-          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-            <button
-              type="button"
-              title={`Notificações: ${notifPerm}`}
-              onClick={requestNotifPermission}
-              style={{
-                flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
-                padding: '4px 8px', fontSize: '0.7rem', borderRadius: 5, cursor: 'pointer',
-                border: '1px solid var(--border)',
-                background: notifPerm === 'denied' ? '#fef2f2'
-                  : notifPerm === 'granted' ? (pushInscrito ? '#ecfdf5' : '#fffbeb') : 'transparent',
-                color: notifPerm === 'denied' ? '#ef4444'
-                  : notifPerm === 'granted' ? (pushInscrito ? '#10b981' : '#b45309') : 'var(--text-secondary)',
-                fontWeight: 600,
-              }}
-            >
-              {notifPerm === 'granted' && pushInscrito ? <Bell size={12} /> : <BellOff size={12} />}
-              {notifPerm === 'denied' ? 'Bloqueadas'
-                : notifPerm !== 'granted' ? 'Ativar Notificações'
-                : pushInscrito === null ? 'Verificando…'
-                : pushInscrito ? 'Notificações ativas'
-                : 'Registrar este aparelho'}
-            </button>
-            <button
-              type="button"
-              disabled={testandoPush}
-              title="Envia um push de verdade: servidor, Google/Apple e de volta no aparelho"
-              onClick={testarPushReal}
-              style={{
-                padding: '4px 8px', fontSize: '0.7rem', borderRadius: 5, cursor: 'pointer',
-                border: '1px solid var(--border)', background: 'transparent',
-                color: 'var(--text-secondary)', fontWeight: 600,
-              }}
-            >
-              Testar
-            </button>
+          {/* Cabeçalho enxuto.
+              Antes: título + uma faixa inteira só pro estado das notificações
+              ("Notificações ativas" + "Testar"), somando quatro linhas de
+              controle antes da primeira conversa. Numa tela de 320px de largura,
+              isso empurrava a lista — que é o conteúdo — pra metade de baixo.
+              O estado do push agora é a COR do sino: verde funcionando, âmbar
+              precisa registrar, vermelho bloqueado. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <MessageCircle size={19} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+            <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>Conversas</h2>
+            {filtered.length > 0 && (
+              <span style={{
+                fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)',
+                background: 'var(--input-bg)', padding: '1px 7px', borderRadius: 999,
+              }}>
+                {filtered.length}
+              </span>
+            )}
+
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+              <button
+                type="button"
+                title={notifPerm === 'denied' ? 'Notificações bloqueadas no navegador'
+                  : notifPerm !== 'granted' ? 'Ativar notificações'
+                  : pushInscrito === null ? 'Verificando…'
+                  : pushInscrito ? 'Notificações ativas neste aparelho'
+                  : 'Registrar este aparelho para receber notificações'}
+                onClick={requestNotifPermission}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 28, height: 28, borderRadius: 7, cursor: 'pointer',
+                  border: '1px solid var(--border)',
+                  background: notifPerm === 'denied' ? '#fef2f2'
+                    : notifPerm === 'granted' ? (pushInscrito ? '#ecfdf5' : '#fffbeb') : 'transparent',
+                  color: notifPerm === 'denied' ? '#ef4444'
+                    : notifPerm === 'granted' ? (pushInscrito ? '#10b981' : '#b45309') : 'var(--text-secondary)',
+                }}
+              >
+                {notifPerm === 'granted' && pushInscrito ? <Bell size={14} /> : <BellOff size={14} />}
+              </button>
+              <button
+                type="button"
+                disabled={testandoPush}
+                title="Envia um push de verdade: servidor, Google/Apple e de volta no aparelho"
+                onClick={testarPushReal}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 28, height: 28, borderRadius: 7, cursor: 'pointer',
+                  border: '1px solid var(--border)', background: 'transparent',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <Send size={13} />
+              </button>
+            </div>
           </div>
           <div style={{ position: 'relative', marginBottom: 8 }}>
             <Search size={14} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
@@ -1334,30 +1349,55 @@ export default function Conversations() {
               style={{ width: '100%', boxSizing: 'border-box', paddingLeft: 28, paddingRight: 8, paddingTop: 6, paddingBottom: 6, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-card)', fontSize: '0.8rem', color: 'var(--text-primary)' }}
             />
           </div>
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {/* Situação do atendimento. Segmentado, sem borda por item: cinco
+              caixinhas contornadas lado a lado viravam ruído visual num
+              espaço de 320px. */}
+          <div style={{
+            display: 'flex', gap: 2, padding: 2, borderRadius: 8,
+            background: 'var(--input-bg)', border: '1px solid var(--border)',
+          }}>
             {FILTER_OPTIONS.map((opt) => (
               <button key={opt.value} type="button" onClick={() => setFilter(opt.value)}
-                style={{ padding: '3px 8px', fontSize: '0.7rem', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--border)', background: filter === opt.value ? 'var(--primary)' : 'transparent', color: filter === opt.value ? '#fff' : 'var(--text-secondary)', fontWeight: filter === opt.value ? 600 : 400 }}>
+                style={{
+                  flex: 1, padding: '4px 2px', fontSize: '0.68rem', borderRadius: 6,
+                  cursor: 'pointer', border: 'none', whiteSpace: 'nowrap',
+                  background: filter === opt.value ? 'var(--bg-card)' : 'transparent',
+                  color: filter === opt.value ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  fontWeight: filter === opt.value ? 700 : 500,
+                  boxShadow: filter === opt.value ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                }}>
                 {opt.label}
               </button>
             ))}
           </div>
 
           {/* Canais. Só aparece quando a loja tem mais de um — numa loja só de
-              WhatsApp, o filtro seria um controle inútil ocupando espaço. */}
+              WhatsApp, o filtro seria um controle inútil ocupando espaço.
+              Cada canal usa a PRÓPRIA cor quando ativo, a mesma da etiqueta na
+              conversa: o olho liga os dois sem precisar ler. */}
           {temMaisDeUmCanal && (
-            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 4 }}>
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 7 }}>
               {[
-                { v: 'todos',     l: 'Todos os canais' },
-                { v: 'whatsapp',  l: 'WhatsApp' },
-                { v: 'instagram', l: 'Instagram' },
-                { v: 'messenger', l: 'Messenger' },
-              ].map((opt) => (
-                <button key={opt.v} type="button" onClick={() => setFiltroCanal(opt.v)}
-                  style={{ padding: '3px 8px', fontSize: '0.7rem', borderRadius: 4, cursor: 'pointer', border: '1px solid var(--border)', background: filtroCanal === opt.v ? 'var(--primary)' : 'transparent', color: filtroCanal === opt.v ? '#fff' : 'var(--text-secondary)', fontWeight: filtroCanal === opt.v ? 600 : 400 }}>
-                  {opt.l}
-                </button>
-              ))}
+                { v: 'todos',     l: 'Todos',     cor: 'var(--primary)', fundo: 'var(--primary)' },
+                { v: 'whatsapp',  l: 'WhatsApp',  cor: '#15803d',        fundo: '#dcfce7' },
+                { v: 'instagram', l: 'Instagram', cor: CANAIS.instagram.cor, fundo: CANAIS.instagram.fundo },
+                { v: 'messenger', l: 'Messenger', cor: CANAIS.messenger.cor, fundo: CANAIS.messenger.fundo },
+              ].map((opt) => {
+                const ativo = filtroCanal === opt.v;
+                const ehTodos = opt.v === 'todos';
+                return (
+                  <button key={opt.v} type="button" onClick={() => setFiltroCanal(opt.v)}
+                    style={{
+                      padding: '3px 9px', fontSize: '0.68rem', borderRadius: 999,
+                      cursor: 'pointer', fontWeight: ativo ? 700 : 500,
+                      border: `1px solid ${ativo ? (ehTodos ? opt.cor : opt.fundo) : 'var(--border)'}`,
+                      background: ativo ? (ehTodos ? opt.cor : opt.fundo) : 'transparent',
+                      color: ativo ? (ehTodos ? '#fff' : opt.cor) : 'var(--text-secondary)',
+                    }}>
+                    {opt.l}
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
