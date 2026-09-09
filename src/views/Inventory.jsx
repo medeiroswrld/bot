@@ -750,9 +750,22 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                                 <input type="date"
                                     value={comprador.buyer_birth_date}
                                     onChange={e => setC('buyer_birth_date', e.target.value)} />
-                                <small style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                                    Usado na mensagem de aniversário
-                                </small>
+                                {/* O telefone é o que amarra o comprador ao
+                                    cadastro de clientes: é por ele que o sistema
+                                    acha o lead que já existia, ou cria um novo.
+                                    Sem telefone, a data de aniversário não tem
+                                    pra quem ser enviada — e isso falharia em
+                                    silêncio, meses depois. */}
+                                {comprador.buyer_birth_date && !comprador.buyer_phone ? (
+                                    <small style={{ fontSize: '0.72rem', color: '#b45309', fontWeight: 600 }}>
+                                        Preencha o telefone, senão o cliente não é cadastrado
+                                        e a mensagem não tem pra onde ir.
+                                    </small>
+                                ) : (
+                                    <small style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                                        Usado na mensagem de aniversário
+                                    </small>
+                                )}
                             </div>
                             <div className="form-group" style={{ flex: '1 1 170px' }}>
                                 <label>Forma de pagamento</label>
