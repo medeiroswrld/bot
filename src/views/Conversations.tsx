@@ -443,11 +443,26 @@ export default function Conversations() {
       .then(({ data }: { data: { team_members?: unknown } | null }) => {
         if (!vivo) return;
         const lista = Array.isArray(data?.team_members) ? data.team_members : [];
-        setEquipe(
-          lista
-            .map((m: unknown) => (typeof m === 'string' ? m : String((m as { nome?: string })?.nome ?? '')))
-            .filter(Boolean),
-        );
+
+        const membros = lista
+          .map((m: unknown) => (typeof m === 'string'
+            ? { nome: m, funcao: '' }
+            : { nome: String((m as { nome?: string })?.nome ?? ''), funcao: String((m as { funcao?: string })?.funcao ?? '') }))
+          .filter((m) => m.nome.trim());
+
+        // Só quem vende aparece pra ser escolhido: quem atende cliente é o
+        // vendedor, não o mecânico nem o financeiro.
+        //
+        // A função é texto livre, então casa com o que a loja realmente
+        // escreve — "Vendedor", "vendedora", "Consultor de vendas",
+        // "Comercial". E se o filtro esvaziar a lista (loja que não preencheu
+        // função, ou escreveu de um jeito que eu não previ), volta a equipe
+        // inteira. Lista vazia seria pior que uma lista com um nome a mais:
+        // impediria marcar qualquer pessoa.
+        const ehVendedor = /vend|vendas|comercial|consultor/i;
+        const vendedores = membros.filter((m) => ehVendedor.test(m.funcao));
+
+        setEquipe((vendedores.length ? vendedores : membros).map((m) => m.nome.trim()));
       });
     return () => { vivo = false; };
   }, [user?.id]);
