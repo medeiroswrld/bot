@@ -899,8 +899,12 @@ export const AppProvider = ({ children }) => {
 
       if (error) throw error;
 
+      // Tira das duas listas: a mesma função remove carro do estoque e carro
+      // vendido, e filtrar só o estoque deixaria a venda excluída visível até
+      // alguém recarregar a página.
       setInventory(prev => prev.filter(c => c.id !== id));
-      addToast('Veículo removido do estoque.', 'info');
+      setSoldCars(prev => prev.filter(c => c.id !== id));
+      addToast('Veículo removido.', 'info');
     } catch (error) {
       console.error('Erro ao remover', error);
       addToast('Erro ao remover veículo.', 'error');

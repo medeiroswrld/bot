@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, TrendingUp, ShoppingCart, X, Package, Camera, FileText, Printer, RefreshCw } from 'lucide-react';
+import { Search, TrendingUp, ShoppingCart, X, Package, Camera, FileText, Printer, RefreshCw, Trash2 } from 'lucide-react';
 import { useAppContext, formatDateStr } from '../context/AppContext.jsx';
 import { MODELO_PADRAO, montarContrato, dadosDoContrato, imprimirContrato, formatarCPF } from '../lib/contrato.js';
 import CustosDoVeiculo from './CustosDoVeiculo.jsx';
@@ -66,9 +66,20 @@ const ContratoDaVenda = ({ car, onClose }) => {
 };
 
 const DetailDrawer = ({ car, onClose }) => {
+    const { removeInventoryCar } = useAppContext();
     const images = car.images || (car.image ? [car.image] : []);
     const [activeImg, setActiveImg] = useState(0);
     const [verContrato, setVerContrato] = useState(false);
+    const [confirmarExclusao, setConfirmarExclusao] = useState(false);
+    const [excluindo, setExcluindo] = useState(false);
+
+    const excluir = async () => {
+        setExcluindo(true);
+        await removeInventoryCar(car.id);
+        setExcluindo(false);
+        setConfirmarExclusao(false);
+        onClose();
+    };
     // Contrato so faz sentido com nome e CPF — mesma regra da tela de venda.
     const temContrato = Boolean(car?.buyer_name && car?.buyer_cpf);
 
@@ -166,9 +177,74 @@ const DetailDrawer = ({ car, onClose }) => {
                         (multa atrasada, acerto de documentacao) entra aqui e refaz o
                         lucro. Sem isso o numero congelaria no dia da venda. */}
                     <CustosDoVeiculo car={car} />
+
+                    {/* Excluir venda. Fica no FIM da ficha, e não no card da
+                        lista: numa grade de vendas, um ícone de lixeira ao lado
+                        da foto é clique acidental esperando acontecer.
+                        Aqui a pessoa já abriu, leu e desceu. */}
+                    <div style={{ marginTop: 26, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+                        <button
+                            type="button"
+                            onClick={() => setConfirmarExclusao(true)}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: 7,
+                                padding: '7px 12px', borderRadius: 8, cursor: 'pointer',
+                                border: '1px solid #fecaca', background: 'transparent',
+                                color: '#dc2626', fontSize: '0.82rem', fontWeight: 600,
+                            }}
+                        >
+                            <Trash2 size={15} /> Excluir esta venda
+                        </button>
+                    </div>
                 </div>
             </div>
             {verContrato && <ContratoDaVenda car={car} onClose={() => setVerContrato(false)} />}
+
+            {/* Confirmação que diz a VERDADE do que acontece.
+                Excluir venda não é como excluir carro do estoque: tem dinheiro
+                amarrado. As chaves estrangeiras são todas `on delete set null`,
+                então nada some do caixa — mas os lançamentos perdem o vínculo
+                com o veículo, e o lucro por carro deixa de fechar. Quem clica
+                precisa saber disso antes, não depois. */}
+            {confirmarExclusao && (
+                <div className="modal-overlay" onClick={() => setConfirmarExclusao(false)}>
+                    <div className="modal-content modal-sm" onClick={e => e.stopPropagation()}>
+                        <div style={{ padding: '1.5rem' }}>
+                            <p style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.75rem' }}>
+                                Excluir a venda do {car.brand} {car.model}?
+                            </p>
+
+                            <p style={{ fontSize: '0.86rem', lineHeight: 1.55, marginBottom: '0.75rem' }}>
+                                O veículo sai do histórico de vendas e o contrato não poderá mais
+                                ser reimpresso.
+                            </p>
+
+                            <div style={{
+                                fontSize: '0.82rem', lineHeight: 1.55, padding: '0.75rem 0.9rem',
+                                background: '#fffbeb', color: '#92400e', borderRadius: 8,
+                                marginBottom: '1.25rem',
+                            }}>
+                                Os lançamentos no financeiro <strong>não são apagados</strong> — a
+                                receita da venda e os gastos continuam no caixa, mas deixam de
+                                estar ligados a este veículo. O lucro por carro perde essa linha.
+                                {car.buyer_name && <> O lead de <strong>{car.buyer_name}</strong> também
+                                deixa de constar como comprador.</>}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                                <button className="btn-secondary" disabled={excluindo}
+                                    onClick={() => setConfirmarExclusao(false)}>
+                                    Cancelar
+                                </button>
+                                <button className="btn-primary" disabled={excluindo}
+                                    style={{ background: '#dc2626' }} onClick={excluir}>
+                                    {excluindo ? 'Excluindo…' : 'Excluir venda'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
