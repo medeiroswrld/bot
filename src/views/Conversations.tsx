@@ -1146,11 +1146,31 @@ export default function Conversations() {
 
   // ── actions ───────────────────────────────────────────────────────────────
 
+  // Perguntar quem assumiu — uma vez por conversa.
+  //
+  // A escolha manual no seletor existe pra conversa que nunca passou pelo bot,
+  // mas depender dela é depender de alguém lembrar. Aqui a pergunta vem no
+  // único momento em que a pessoa JÁ está agindo sobre a conversa.
+  //
+  // Só quando ainda não há atendente: devolver pro bot e assumir de novo não
+  // reabre o pop-up. Perguntar duas vezes a mesma coisa é o caminho mais curto
+  // pra alguém começar a fechar sem ler.
+  const [perguntandoQuem, setPerguntandoQuem] = useState(false);
+
   const takeOver = async () => {
     if (!selectedId) return;
+    const conv = conversations.find((c) => c.id === selectedId);
+    const semAtendente = !String((conv as { atendente?: string | null })?.atendente ?? '').trim();
+
+    // Assume PRIMEIRO, pergunta depois. O que urge é o bot parar de responder;
+    // segurar isso atrás de um pop-up faria o bot falar por cima do vendedor
+    // enquanto ele escolhe o próprio nome.
     const { error } = await supabaseTyped
       .from('conversations').update({ status: 'human' }).eq('id', selectedId);
-    if (!error) setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, status: 'human' } : c));
+    if (error) return;
+    setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, status: 'human' } : c));
+
+    if (semAtendente && equipe.length > 0) setPerguntandoQuem(true);
   };
 
   const returnToBot = async () => {
@@ -1565,6 +1585,54 @@ export default function Conversations() {
         </div>
       )}
     </div>
+
+    {/* Quem assumiu — aparece uma vez por conversa, logo após o "Assumir".
+        A conversa JÁ está assumida quando isto abre: fechar sem escolher não
+        desfaz nada, só deixa sem nome. Nunca vale travar o atendimento pra
+        cobrar um campo. */}
+    {perguntandoQuem && (
+      <div className="modal-overlay" onClick={() => setPerguntandoQuem(false)}>
+        <div className="modal-content modal-sm" onClick={(e) => e.stopPropagation()}>
+          <div style={{ padding: '1.4rem 1.5rem' }}>
+            <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '0.35rem' }}>
+              Quem vai atender?
+            </p>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '1.1rem', lineHeight: 1.45 }}>
+              Fica marcado na conversa pra equipe saber com quem o cliente está falando.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {equipe.map((nome) => (
+                <button
+                  key={nome}
+                  type="button"
+                  onClick={async () => { await definirAtendente(nome); setPerguntandoQuem(false); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '9px 12px', borderRadius: 8, cursor: 'pointer',
+                    border: '1px solid var(--border)', background: 'var(--input-bg)',
+                    color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 600,
+                    textAlign: 'left', width: '100%',
+                  }}
+                >
+                  <AtendenteBadge nome={nome} />
+                  {nome}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setPerguntandoQuem(false)}
+              style={{ marginTop: '1rem', width: '100%' }}
+            >
+              Agora não
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {confirmDeleteId && (
       <div className="modal-overlay" onClick={() => setConfirmDeleteId(null)}>
