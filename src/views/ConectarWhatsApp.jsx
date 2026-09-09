@@ -26,6 +26,39 @@ const ConectarWhatsApp = () => {
 
     const jaConectado = Boolean(companySettings?.whatsapp_phone_number_id);
 
+    // ── Números da loja ─────────────────────────────────────────────────────
+    //
+    // Uma loja pode ter vários (a Leadrinho tem três). O rótulo é o que aparece
+    // na conversa pro vendedor saber por qual número o cliente falou — sem ele
+    // a lista vira três ids iguais e ninguém se acha.
+    const [numeros, setNumeros] = useState([]);
+    const [salvandoId, setSalvandoId] = useState(null);
+
+    const carregarNumeros = useCallback(async () => {
+        const { data, error } = await supabase
+            .from('whatsapp_numbers')
+            .select('id, phone_number_id, numero, rotulo, principal, ativo')
+            .order('principal', { ascending: false })
+            .order('created_at', { ascending: true });
+        // Tabela ausente (migration 083 pendente) não é erro de tela: some a
+        // seção e o resto continua funcionando como antes.
+        if (!error) setNumeros(data ?? []);
+    }, []);
+
+    useEffect(() => { carregarNumeros(); }, [carregarNumeros, jaConectado]);
+
+    const salvarNumero = async (id, campos) => {
+        setSalvandoId(id);
+        const { error } = await supabase.from('whatsapp_numbers').update(campos).eq('id', id);
+        setSalvandoId(null);
+        if (error) { setErro(error.message); return; }
+        setErro('');
+        await carregarNumeros();
+        // O número principal é espelhado em company_settings por trigger; o
+        // resto do app lê de lá.
+        if ('principal' in campos) await refreshCompanySettings();
+    };
+
     // ── SDK do Facebook, carregado só quando esta tela abre ──────────────────
     useEffect(() => {
         if (window.FB) { setSdkPronto(true); return; }
@@ -133,15 +166,83 @@ const ConectarWhatsApp = () => {
             </div>
             <div className="settings-form">
 
-                {jaConectado && estado !== 'erro' ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '1rem' }}>
-                        <CheckCircle size={20} style={{ color: '#16a34a' }} />
-                        <div>
-                            <strong style={{ color: '#16a34a' }}>WhatsApp conectado</strong>
-                            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-                                Número: {companySettings.whatsapp_phone_number_id}
-                            </p>
+                {numeros.length > 0 && estado !== 'erro' ? (
+                    <div style={{ marginBottom: '1rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: '0.75rem' }}>
+                            <CheckCircle size={18} style={{ color: '#16a34a' }} />
+                            <strong style={{ color: '#16a34a' }}>
+                                {numeros.length === 1 ? 'WhatsApp conectado' : `${numeros.length} números conectados`}
+                            </strong>
                         </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {numeros.map((n) => (
+                                <div key={n.id} style={{
+                                    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                                    padding: '0.6rem 0.8rem', borderRadius: 10,
+                                    border: '1px solid var(--border)',
+                                    background: n.ativo ? 'var(--input-bg)' : 'transparent',
+                                    opacity: n.ativo ? 1 : 0.55,
+                                }}>
+                                    {/* O rótulo é o que aparece na conversa. Editável no lugar,
+                                        sem modal: é um texto curto que a loja ajusta uma vez. */}
+                                    <input
+                                        type="text"
+                                        defaultValue={n.rotulo ?? ''}
+                                        placeholder="Vendas, Rodrigo, Loja Centro…"
+                                        onBlur={(e) => {
+                                            const v = e.target.value.trim();
+                                            if (v !== (n.rotulo ?? '')) salvarNumero(n.id, { rotulo: v || null });
+                                        }}
+                                        style={{
+                                            flex: '1 1 150px', minWidth: 120, padding: '4px 8px',
+                                            borderRadius: 6, border: '1px solid var(--border)',
+                                            background: 'var(--input-bg)', color: 'var(--text-primary)',
+                                            fontSize: '0.85rem', fontWeight: 600,
+                                        }}
+                                    />
+
+                                    <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontFamily: 'monospace' }}>
+                                        {n.numero || `…${String(n.phone_number_id).slice(-6)}`}
+                                    </span>
+
+                                    {n.principal ? (
+                                        <span style={{
+                                            fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase',
+                                            padding: '2px 7px', borderRadius: 999,
+                                            background: '#eef2ff', color: '#4338ca',
+                                        }}>principal</span>
+                                    ) : (
+                                        <button
+                                            type="button"
+                                            className="btn-outline"
+                                            disabled={salvandoId === n.id || !n.ativo}
+                                            onClick={() => salvarNumero(n.id, { principal: true })}
+                                            style={{ fontSize: '0.7rem', padding: '2px 8px' }}
+                                        >
+                                            tornar principal
+                                        </button>
+                                    )}
+
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.75rem', cursor: 'pointer' }}>
+                                        <input
+                                            type="checkbox"
+                                            checked={n.ativo}
+                                            disabled={salvandoId === n.id || n.principal}
+                                            onChange={(e) => salvarNumero(n.id, { ativo: e.target.checked })}
+                                            style={{ width: 'auto', margin: 0 }}
+                                        />
+                                        ativo
+                                    </label>
+                                </div>
+                            ))}
+                        </div>
+
+                        <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 8, lineHeight: 1.5 }}>
+                            O rótulo aparece na conversa, pra saber por qual número o cliente falou.
+                            Desativar um número para de receber por ele — o principal não pode ser
+                            desativado; troque o principal antes.
+                        </p>
                     </div>
                 ) : (
                     <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>
@@ -175,8 +276,12 @@ const ConectarWhatsApp = () => {
                 >
                     {estado === 'conectando'
                         ? <><RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> Conectando…</>
-                        : estado === 'erro'  ? <><RefreshCw size={18} /> Tentar novamente</>
-                        : jaConectado        ? <><RefreshCw size={18} /> Reconectar</>
+                        : estado === 'erro'   ? <><RefreshCw size={18} /> Tentar novamente</>
+                        // Com número já conectado o botão vira ADICIONAR, não
+                        // "reconectar": desde a 083 conectar de novo acrescenta
+                        // um número em vez de trocar o que existe.
+                        : numeros.length > 0  ? <><MessageSquare size={18} /> Conectar outro número</>
+                        : jaConectado         ? <><RefreshCw size={18} /> Reconectar</>
                         : <><MessageSquare size={18} /> Conectar WhatsApp</>}
                 </button>
 

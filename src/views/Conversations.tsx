@@ -121,13 +121,16 @@ const StatusBadge = React.memo(function StatusBadge({ status }: { status: Conver
 // ─── ConvItem ─────────────────────────────────────────────────────────────────
 
 const ConvItem = React.memo(function ConvItem({
-  conv, lastMsg, active, isAlert, onClick,
+  conv, lastMsg, active, isAlert, onClick, rotuloNumero,
 }: {
   conv: Conversation;
   lastMsg: Message | null;
   active: boolean;
   isAlert: boolean;
   onClick: () => void;
+  // Qual número NOSSO recebeu esta conversa. Só chega preenchido quando a loja
+  // tem mais de um — com um só, seria a mesma etiqueta em toda linha.
+  rotuloNumero?: string;
 }) {
   const showAlert = isAlert && !active;
   return (
@@ -169,6 +172,18 @@ const ConvItem = React.memo(function ConvItem({
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
           <StatusBadge status={conv.status} />
           <AtendenteBadge nome={(conv as { atendente?: string | null }).atendente} />
+          {rotuloNumero && (
+            <span
+              title={`Cliente falou com o número ${rotuloNumero}`}
+              style={{
+                fontSize: '0.62rem', fontWeight: 700, padding: '1px 6px', borderRadius: 999,
+                background: 'var(--input-bg)', color: 'var(--text-secondary)',
+                border: '1px solid var(--border)', flexShrink: 0, whiteSpace: 'nowrap',
+              }}
+            >
+              {rotuloNumero}
+            </span>
+          )}
           {lastMsg && (
             <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
               {lastMsg.role !== 'customer' ? '← ' : ''}{lastMsg.content.substring(0, 50)}
@@ -391,6 +406,28 @@ export default function Conversations() {
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [lastMessages, setLastMessages]   = useState<Record<string, Message>>({});
+
+  // Rótulo de cada número da loja, pra dizer na lista por qual deles o cliente
+  // falou. Só vale a pena mostrar quando existe mais de um — com um número só,
+  // a etiqueta apareceria igual em toda linha e viraria ruído.
+  const [rotulosNumero, setRotulosNumero] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!user?.id) return;
+    let vivo = true;
+    db.from('whatsapp_numbers')
+      .select('phone_number_id, rotulo, numero')
+      .eq('ativo', true)
+      .then(({ data }: { data: Array<{ phone_number_id: string; rotulo: string | null; numero: string | null }> | null }) => {
+        if (!vivo || !data || data.length < 2) return;
+        const mapa: Record<string, string> = {};
+        for (const n of data) {
+          const nome = (n.rotulo ?? '').trim() || (n.numero ?? '').trim();
+          if (nome) mapa[n.phone_number_id] = nome;
+        }
+        setRotulosNumero(mapa);
+      });
+    return () => { vivo = false; };
+  }, [user?.id]);
 
   // Equipe cadastrada em Configurações. Serve pro seletor manual de atendente
   // — o mesmo cadastro que o webhook usa pra reconhecer a assinatura.
@@ -1300,6 +1337,7 @@ export default function Conversations() {
                 active={conv.id === selectedId}
                 isAlert={alertConvIds.has(conv.id)}
                 onClick={() => selectConversation(conv.id)}
+                rotuloNumero={rotulosNumero[String((conv as { phone_number_id?: string | null }).phone_number_id ?? '')]}
               />
             ))}
         </div>
