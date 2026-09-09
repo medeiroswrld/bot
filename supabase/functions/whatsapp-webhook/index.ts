@@ -248,6 +248,7 @@ type ConvRow = {
 async function acharOuCriarConversa(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: any, userId: string, from: string, senderName: string, now: string,
+  phoneNumberId: string,
 ): Promise<ConvRow | null> {
   const variantes = variantesTelefoneBR(from);
 
@@ -261,6 +262,11 @@ async function acharOuCriarConversa(
       // numero longo, e sem isto uma mensagem de WhatsApp poderia se agarrar
       // numa conversa de outro canal.
       .eq('channel', 'whatsapp')
+      // E filtra o NOSSO número: com a loja tendo três, o mesmo cliente pode
+      // falar com dois. Sem isto, a mensagem que chegou no número de vendas se
+      // agarraria na conversa do pós-venda, e a resposta sairia pelo número
+      // errado.
+      .eq('phone_number_id', phoneNumberId)
       .in('customer_phone', variantes)
       .order('last_message_at', { ascending: false, nullsFirst: false })
       .limit(1)
@@ -300,14 +306,45 @@ async function acharOuCriarConversa(
         customer_phone: from,
         customer_name: senderName || null,
         last_message_at: now,
+        // Por qual dos nossos números esta conversa entrou. Define por onde a
+        // resposta sai.
+        phone_number_id: phoneNumberId,
       },
-      { onConflict: 'user_id,channel,customer_phone' },
+      // Tem que casar EXATAMENTE com a chave única da 083. Se não casar, o
+      // Postgres devolve 42P10, o upsert falha e a mensagem do cliente é
+      // DESCARTADA — foi o que derrubou o WhatsApp em 21/08 quando a 037
+      // trocou a chave e este parâmetro ficou pra trás.
+      { onConflict: 'user_id,channel,customer_phone,phone_number_id' },
     )
     .select()
     .single();
 
   if (error || !nova) {
     console.error('[WH] Erro ao upsert conversa:', error);
+
+    // Plano B: migration 083 ainda não rodou, a coluna não existe, e insistir
+    // deixaria a loja muda. Tenta do jeito antigo antes de desistir — perder o
+    // vínculo com o número é ruim; perder a mensagem é inaceitável.
+    const ehSchema = String(error?.message ?? '').match(/phone_number_id|42P10|42703/i);
+    if (ehSchema) {
+      console.warn('[WH] upsert com phone_number_id falhou — caindo no formato antigo (rodar a migration 083)');
+      const { data: legado, error: erroLegado } = await supabase
+        .from('conversations')
+        .upsert(
+          {
+            user_id: userId,
+            channel: 'whatsapp',
+            customer_phone: from,
+            customer_name: senderName || null,
+            last_message_at: now,
+          },
+          { onConflict: 'user_id,channel,customer_phone' },
+        )
+        .select()
+        .single();
+      if (!erroLegado && legado) return legado as ConvRow;
+      console.error('[WH] formato antigo tambem falhou:', erroLegado);
+    }
     return null;
   }
   return nova as ConvRow;
@@ -402,14 +439,44 @@ serve(async (req) => {
   // mensagem do cliente, em silêncio. Aconteceu em 20/08 com bot_enabled.
   // São duas situações opostas: número desconhecido é normal, select quebrado é
   // incidente — e não podem terminar no mesmo lugar.
-  let { data: settings, error: settingsErr } = await supabase
-    .from('company_settings')
-    // team_members entra aqui, e não numa consulta separada: com a loja
-    // respondendo pelos celulares, quase toda mensagem é um eco, e uma ida a
-    // mais ao banco por mensagem não se paga.
-    .select(`user_id, team_members, ${COLUNAS_GUARDA}`)
-    .eq('whatsapp_phone_number_id', phoneNumberId)
+  // Qual loja é dona deste número?
+  //
+  // A tabela `whatsapp_numbers` (083) é a fonte nova: uma loja pode ter vários
+  // números, então o vínculo deixou de caber numa coluna de company_settings.
+  //
+  // A consulta antiga fica como plano B de propósito. Se a migration ainda não
+  // rodou, ou se um número foi conectado por um caminho que não gravou lá, o
+  // roteamento cai no jeito antigo em vez de descartar a mensagem do cliente —
+  // que é a única falha realmente inaceitável neste arquivo.
+  let userIdDoNumero: string | null = null;
+  const { data: numeroCad, error: numeroErr } = await supabase
+    .from('whatsapp_numbers')
+    .select('user_id')
+    .eq('phone_number_id', phoneNumberId)
+    .eq('ativo', true)
     .maybeSingle();
+
+  if (numeroErr) {
+    // Tabela ainda não existe: não é incidente, é migration pendente.
+    console.warn('[WH] whatsapp_numbers indisponível, usando company_settings:', numeroErr.message);
+  } else if (numeroCad?.user_id) {
+    userIdDoNumero = String(numeroCad.user_id);
+  }
+
+  let { data: settings, error: settingsErr } = await (userIdDoNumero
+    ? supabase
+        .from('company_settings')
+        .select(`user_id, team_members, ${COLUNAS_GUARDA}`)
+        .eq('user_id', userIdDoNumero)
+        .maybeSingle()
+    : supabase
+        .from('company_settings')
+        // team_members entra aqui, e não numa consulta separada: com a loja
+        // respondendo pelos celulares, quase toda mensagem é um eco, e uma ida a
+        // mais ao banco por mensagem não se paga.
+        .select(`user_id, team_members, ${COLUNAS_GUARDA}`)
+        .eq('whatsapp_phone_number_id', phoneNumberId)
+        .maybeSingle());
 
   if (settingsErr) {
     console.error('[WH] select de company_settings falhou:', settingsErr.message);
@@ -437,7 +504,7 @@ serve(async (req) => {
 
   // 6. Acha ou cria a conversa
   const now = new Date().toISOString();
-  const upsertedConv = await acharOuCriarConversa(supabase, userId, from, senderName, now);
+  const upsertedConv = await acharOuCriarConversa(supabase, userId, from, senderName, now, phoneNumberId);
 
   if (!upsertedConv) {
     console.error('[WH] Erro ao upsert conversa');

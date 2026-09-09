@@ -59,7 +59,7 @@ serve(async (req) => {
   // ── valida que o usuário é dono da conversa (via RLS) ──────────────────────
   const { data: conv, error: convErr } = await userClient
     .from('conversations')
-    .select('id, user_id, customer_phone, status, channel')
+    .select('id, user_id, customer_phone, status, channel, phone_number_id')
     .eq('id', conversation_id)
     .single();
 
@@ -130,7 +130,9 @@ serve(async (req) => {
       .select('whatsapp_phone_number_id')
       .eq('user_id', conv.user_id)
       .single();
-    const pid = String(cfg?.whatsapp_phone_number_id ?? '');
+    // Sai pelo mesmo numero que recebeu (ver 083). Cai no da loja quando a
+    // conversa e anterior a migration.
+    const pid = String((conv as { phone_number_id?: string | null }).phone_number_id || cfg?.whatsapp_phone_number_id || '');
     const tk  = await resolveWhatsAppToken(adminClient, conv.user_id);
     const fone = conv.customer_phone as string;
 
@@ -213,7 +215,7 @@ serve(async (req) => {
     .eq('user_id', conv.user_id)
     .single();
 
-  const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
+  const phoneNumberId = String((conv as { phone_number_id?: string | null }).phone_number_id || settings?.whatsapp_phone_number_id || '');
   const token = await resolveWhatsAppToken(adminClient, conv.user_id);
 
   const sent = await enviarTexto(conv.customer_phone as string, text.trim(), phoneNumberId, token);

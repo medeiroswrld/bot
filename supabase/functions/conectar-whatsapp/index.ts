@@ -137,10 +137,48 @@ serve(async (req) => {
     //    whatsapp_phone_number_id é o ID da Cloud API — é por ele que o webhook
     //    descobre de qual loja é cada mensagem. Não confundir com phone_number,
     //    que é o telefone da loja em texto, usado no prompt do bot.
+    // A loja pode ter VÁRIOS números (083). Grava na tabela de números, que é
+    // por onde o webhook roteia desde então.
+    //
+    // O primeiro número conectado vira o principal; os seguintes entram como
+    // adicionais. Sem esse cuidado, conectar o segundo número sobrescreveria o
+    // primeiro em company_settings e as conversas dele parariam de chegar — sem
+    // erro em lugar nenhum.
+    const { count: jaTem } = await admin
+      .from('whatsapp_numbers')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .eq('ativo', true);
+
+    const ehPrimeiro = !jaTem;
+
+    const { error: numErr } = await admin
+      .from('whatsapp_numbers')
+      .upsert(
+        {
+          user_id: user.id,
+          phone_number_id: phoneId,
+          waba_id: wabaId,
+          principal: ehPrimeiro,
+          ativo: true,
+        },
+        { onConflict: 'phone_number_id' },
+      );
+
+    if (numErr) {
+      // Migration 083 ainda não rodou: segue pelo caminho antigo em vez de
+      // impedir a conexão. Um número conectado é melhor que nenhum.
+      console.warn('[conectar] whatsapp_numbers indisponível, usando só company_settings:', numErr.message);
+    }
+
+    // company_settings continua sendo atualizado: seis funções ainda leem
+    // daqui, e o trigger da 083 mantém isto igual ao número principal. Só
+    // escreve quando for o principal, pra não trocar o padrão da loja sem
+    // querer ao conectar um número secundário.
     const { error: cfgErr } = await admin
       .from('company_settings')
       .update({
-        whatsapp_phone_number_id: phoneId,
+        ...(ehPrimeiro || numErr ? { whatsapp_phone_number_id: phoneId } : {}),
         whatsapp_business_account_id: wabaId,
       })
       .eq('user_id', user.id);

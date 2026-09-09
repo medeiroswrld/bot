@@ -3122,7 +3122,20 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   history.push({ role: 'user', content: notaDeHorario((settings ?? {}) as Record<string, unknown>) });
 
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
-  const phoneNumberId = String(settings?.whatsapp_phone_number_id ?? '');
+  // Responde pelo MESMO número que recebeu.
+  //
+  // Com a loja tendo três números (Leadrinho), usar o da company_settings faria
+  // toda resposta sair pelo principal — o cliente escreveria pro pós-venda e
+  // receberia resposta do número de vendas. Além de confuso, quebraria o
+  // histórico dele no WhatsApp.
+  //
+  // Cai no número da loja quando a conversa é antiga (antes da 083) ou quando a
+  // coluna ainda não existe.
+  const phoneNumberId = String(
+    (conv as { phone_number_id?: string | null })?.phone_number_id
+    || settings?.whatsapp_phone_number_id
+    || '',
+  );
   const waToken = await resolveWhatsAppToken(supabase, userId);
   // Credenciais sociais resolvidas uma vez por turno: buscar o token dentro da
   // tool faria uma consulta ao Vault por foto enviada.
