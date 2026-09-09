@@ -143,6 +143,11 @@ junto ao órgão de trânsito competente no prazo legal.</p>
 </div>`;
 
 export const CAMPOS = [
+  // Marcadores de LAYOUT, no topo porque são os que a loja mais procura ao
+  // colar o contrato dela do Word — e os únicos que texto puro não consegue
+  // fazer sozinho.
+  ['logo', 'Logo da loja (imagem)'],
+  ['assinaturas', 'Bloco de assinaturas (duas colunas)'],
   ['loja_nome', 'Nome da loja'], ['loja_cnpj', 'CNPJ da loja'],
   ['loja_endereco', 'Endereço da loja'], ['loja_telefone', 'Telefone da loja'],
   ['loja_cidade', 'Cidade da loja'],
@@ -176,7 +181,7 @@ export const montarContrato = (modelo, dados) => {
   // que ninguém usaria o campo. Se não parece HTML, converte: linha em branco
   // separa parágrafo, quebra simples vira <br>.
   const pareceHtml = /<\s*(p|div|h[1-6]|ul|ol|table|br|strong|em)\b/i.test(bruto);
-  const html = pareceHtml
+  let html = pareceHtml
     ? bruto
     : bruto
         .split(/\n\s*\n/)
@@ -184,6 +189,43 @@ export const montarContrato = (modelo, dados) => {
         .filter(Boolean)
         .map((par) => `<p>${par.replace(/\n/g, '<br>')}</p>`)
         .join('\n');
+
+  // ── Marcadores de LAYOUT ────────────────────────────────────────────────
+  //
+  // `{{logo}}` e `{{assinaturas}}` não são dados, são estrutura. Passassem pelo
+  // substituidor comum, virariam "________" — que foi exatamente o que saiu no
+  // contrato da Leandrinho: dois traços e "ASS VENDEDOR ASS COMPRADOR"
+  // espremidos numa linha só, porque o lojista digitou os underscores no Word e
+  // texto puro não faz coluna.
+  //
+  // O CSS de impressão já tem `.assinaturas` em duas colunas desde sempre; o
+  // que faltava era alguém emitir esse HTML.
+  const blocoAssinaturas = () => {
+    const col = (rotulo, nome) => `<div class="assinatura">`
+      + `<div class="linha"></div>`
+      + `<p>${rotulo}</p>`
+      + (nome ? `<p><small>${nome}</small></p>` : '')
+      + `</div>`;
+    // O nome embaixo da linha é o que o contrato de papel não tinha: quem lê
+    // depois não precisa adivinhar de quem é a assinatura.
+    return `<div class="assinaturas">`
+      + col('ASS. VENDEDOR', dados.loja_nome)
+      + col('ASS. COMPRADOR', dados.comprador_nome)
+      + `</div>`;
+  };
+
+  const blocoLogo = () => (dados.loja_logo
+    ? `<div class="logo"><img src="${dados.loja_logo}" alt=""></div>`
+    // Sem logo cadastrada não deixa buraco nem traço: some.
+    : '');
+
+  html = html
+    // Consome o <p> em volta: o bloco é de nível superior, e um <div> dentro de
+    // <p> faz o navegador fechar o parágrafo antes da hora, bagunçando o espaço.
+    .replace(/<p>\s*\{\{\s*assinaturas\s*\}\}\s*<\/p>/gi, blocoAssinaturas)
+    .replace(/\{\{\s*assinaturas\s*\}\}/gi, blocoAssinaturas)
+    .replace(/<p>\s*\{\{\s*logo\s*\}\}\s*<\/p>/gi, blocoLogo)
+    .replace(/\{\{\s*logo\s*\}\}/gi, blocoLogo);
 
   return html.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, campo) => {
     const v = dados[campo];
@@ -200,6 +242,8 @@ export const dadosDoContrato = ({ loja, carro, venda }) => ({
   // Cidade sai do endereço quando não há campo próprio: melhor aproximar do que
   // deixar em branco no fecho do contrato.
   loja_cidade: (loja?.address ?? '').split(',').slice(-2, -1)[0]?.trim() || (loja?.address ?? ''),
+  // Usada pelo marcador {{logo}}. Não é campo de texto: vira <img>.
+  loja_logo: loja?.logo_url ?? '',
 
   comprador_nome: venda?.buyer_name ?? '',
   comprador_cpf: venda?.buyer_cpf ? formatarCPF(venda.buyer_cpf) : '',
@@ -256,11 +300,15 @@ export const imprimirContrato = (html) => {
   ul { margin: 6px 0 0 18px; padding: 0; }
   li { margin-bottom: 3px; }
   p { margin: 0 0 10px; text-align: justify; }
-  .assinaturas { display: flex; gap: 40px; margin-top: 54px; }
+  .assinaturas { display: flex; gap: 40px; margin-top: 54px; page-break-inside: avoid; }
   .assinatura { flex: 1; text-align: center; }
   .linha { border-top: 1px solid #111; margin-bottom: 6px; }
   .assinatura p { text-align: center; margin: 0; }
   small { color: #444; }
+  /* Logo da loja. Altura limitada e largura automática: a loja sobe o arquivo
+     que tem, e um PNG grande demais empurraria o contrato pra segunda página. */
+  .logo { margin: 0 0 14px; }
+  .logo img { max-height: 60px; max-width: 45%; object-fit: contain; }
 </style></head><body>${html}</body></html>`);
   w.document.close();
   // Espera o layout assentar: chamar print() antes disso imprime página em branco

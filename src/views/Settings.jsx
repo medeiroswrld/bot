@@ -469,6 +469,41 @@ const Settings = () => {
     // ── Contrato de venda ─────────────────────────────────────────────────────
     const [cnpj, setCnpj] = useState('');
     const [modeloContrato, setModeloContrato] = useState('');
+
+    // Logo da loja, usada pelo marcador {{logo}} do contrato.
+    const [logoUrl, setLogoUrl] = useState('');
+    const [subindoLogo, setSubindoLogo] = useState(false);
+
+    const enviarLogo = async (arquivo) => {
+        if (!arquivo || !user?.id) return;
+        // Limite modesto de propósito: logo é imagem pequena, e arquivo grande
+        // só serve pra estourar a primeira página do contrato e demorar a
+        // carregar na hora de imprimir.
+        if (arquivo.size > 2 * 1024 * 1024) {
+            alert('A logo precisa ter menos de 2 MB.');
+            return;
+        }
+        setSubindoLogo(true);
+        try {
+            const ext = (arquivo.name.split('.').pop() || 'png').toLowerCase();
+            // Caminho fixo por loja: subir de novo SUBSTITUI, em vez de deixar
+            // arquivos órfãos acumulando no Storage a cada troca de logo.
+            const caminho = `logos/${user.id}.${ext}`;
+            const { error } = await supabase.storage
+                .from('whatsapp-profiles')
+                .upload(caminho, arquivo, { upsert: true, contentType: arquivo.type });
+            if (error) throw error;
+
+            const { data: pub } = supabase.storage.from('whatsapp-profiles').getPublicUrl(caminho);
+            // `?v=` derrota o cache do navegador: sem isso, trocar a logo
+            // continuaria imprimindo a antiga até alguém limpar o cache.
+            setLogoUrl(`${pub.publicUrl}?v=${Date.now()}`);
+        } catch (e) {
+            alert(`Não consegui enviar a logo: ${e.message}`);
+        } finally {
+            setSubindoLogo(false);
+        }
+    };
     const [savingCtr, setSavingCtr] = useState(false);
     const [savedCtr, setSavedCtr] = useState(false);
 
@@ -505,6 +540,7 @@ const Settings = () => {
                 // Vazio grava NULL, nao string vazia: NULL significa "usa o
                 // padrao do sistema", string vazia geraria contrato em branco.
                 contract_template: modeloContrato.trim() || null,
+                logo_url: logoUrl || null,
                 updated_at: new Date().toISOString(),
             })
             .eq('user_id', user.id);
@@ -709,6 +745,7 @@ const Settings = () => {
         // Contrato
         setCnpj(s.cnpj ?? '');
         setModeloContrato(s.contract_template ?? '');
+        setLogoUrl(s.logo_url ?? '');
         // Funcionamento do bot
         setBotCfg({
             enabled:  s.bot_enabled !== false,
@@ -1474,10 +1511,56 @@ const Settings = () => {
                         </div>
 
                         <div className="form-group">
+                            {/* Logo. Fica junto do contrato, e não em "dados da
+                                empresa", porque é aqui que ela é usada — quem
+                                sobe a logo está pensando no papel que vai
+                                imprimir. */}
+                            <label>Logo da loja</label>
+                            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: '0 0 8px', lineHeight: 1.5 }}>
+                                Aparece no contrato onde você escrever <code>{'{{logo}}'}</code>.
+                                PNG ou JPG, até 2 MB.
+                            </p>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 18, flexWrap: 'wrap' }}>
+                                {logoUrl ? (
+                                    <img src={logoUrl} alt="Logo da loja"
+                                        style={{
+                                            maxHeight: 56, maxWidth: 180, objectFit: 'contain',
+                                            border: '1px solid var(--border)', borderRadius: 8, padding: 6,
+                                            background: '#fff',
+                                        }} />
+                                ) : (
+                                    <div style={{
+                                        height: 56, width: 120, display: 'flex', alignItems: 'center',
+                                        justifyContent: 'center', border: '1px dashed var(--border)',
+                                        borderRadius: 8, fontSize: '0.72rem', color: 'var(--color-text-muted)',
+                                    }}>
+                                        sem logo
+                                    </div>
+                                )}
+
+                                <label className="btn-outline" style={{ cursor: 'pointer', margin: 0 }}>
+                                    {subindoLogo ? 'Enviando…' : logoUrl ? 'Trocar logo' : 'Enviar logo'}
+                                    <input type="file" accept="image/png,image/jpeg,image/webp" hidden
+                                        disabled={subindoLogo}
+                                        onChange={(e) => { enviarLogo(e.target.files?.[0]); e.target.value = ''; }} />
+                                </label>
+
+                                {logoUrl && (
+                                    <button type="button" className="btn-secondary"
+                                        onClick={() => setLogoUrl('')}
+                                        style={{ fontSize: '0.78rem' }}>
+                                        Remover
+                                    </button>
+                                )}
+                            </div>
+
                             <label>Modelo do contrato</label>
                             <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: '0 0 8px', lineHeight: 1.5 }}>
                                 Cole aqui o contrato da sua loja — pode ser texto simples, copiado
                                 direto do Word. Em branco, o sistema usa o modelo genérico.
+                                Use <code>{'{{logo}}'}</code> no topo e <code>{'{{assinaturas}}'}</code> no
+                                fim: o sistema desenha a imagem e as duas colunas de assinatura,
+                                que texto puro não consegue fazer.
                             </p>
                             <textarea
                                 ref={contratoRef}
