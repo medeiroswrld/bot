@@ -595,7 +595,7 @@ const SellModal = ({ car, onClose, onConfirm }) => {
     const [comprador, setComprador] = useState({
         buyer_name: '', buyer_cpf: '', buyer_rg: '',
         buyer_address: '', buyer_phone: '', payment_terms: '',
-        buyer_email: '',
+        buyer_email: '', buyer_birth_date: '',
         trade_in_plate: '', trade_in_brand: '', trade_in_model: '', trade_in_year: '',
         trade_in_color: '', trade_in_chassi: '', trade_in_renavam: '',
         trade_in_km: '', trade_in_value: '',
@@ -739,6 +739,20 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                                 <input type="email" placeholder="opcional"
                                     value={comprador.buyer_email}
                                     onChange={e => setC('buyer_email', e.target.value)} />
+                            </div>
+                            {/* Aniversário. A venda é o único momento em que a
+                                loja tem o documento do cliente na mão — depois
+                                ninguém liga pra perguntar data de nascimento.
+                                Vai pro cadastro do cliente e é de lá que a
+                                campanha de aniversário dispara. */}
+                            <div className="form-group" style={{ flex: '1 1 160px' }}>
+                                <label>Aniversário</label>
+                                <input type="date"
+                                    value={comprador.buyer_birth_date}
+                                    onChange={e => setC('buyer_birth_date', e.target.value)} />
+                                <small style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                                    Usado na mensagem de aniversário
+                                </small>
                             </div>
                             <div className="form-group" style={{ flex: '1 1 170px' }}>
                                 <label>Forma de pagamento</label>

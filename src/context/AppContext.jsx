@@ -1086,6 +1086,9 @@ export const AppProvider = ({ children }) => {
             buyer_phone: comprador.buyer_phone || null,
             payment_terms: comprador.payment_terms || null,
             buyer_email: comprador.buyer_email || null,
+            // Fica no registro da venda além de ir pro lead: alguns contratos
+            // pedem a data de nascimento na qualificação do comprador.
+            buyer_birth_date: comprador.buyer_birth_date || null,
           } : {}),
           // Correcoes feitas na tela de venda entram no cadastro do carro. A
           // venda e o unico momento em que a loja tem o documento do veiculo na
@@ -1156,9 +1159,41 @@ export const AppProvider = ({ children }) => {
       // duas vezes), e escolher um no chute marcaria a pessoa errada como
       // compradora. Nesse caso nao mexe em nada.
       const tel = comprador?.buyer_name ? comprador?.buyer_phone : null;
+      const nascimento = comprador?.buyer_birth_date || null;
       if (tel) {
         const candidatos = leads.filter(l => mesmoTelefone(l.phone, tel) && l.status !== 'vendido');
-        if (candidatos.length === 1) {
+
+        // Comprador que NUNCA foi lead — entrou na loja e comprou no mesmo dia.
+        //
+        // Sem isto ele não existe no CRM depois da venda: não aparece na base,
+        // não entra em campanha, e a data de aniversário que a loja acabou de
+        // coletar não serve pra nada. Justamente o cliente mais valioso, porque
+        // já comprou.
+        if (candidatos.length === 0 && !leads.some(l => mesmoTelefone(l.phone, tel))) {
+          const { data: novoLead, error: erroNovo } = await supabase
+            .from('leads')
+            .insert({
+              user_id: user.id,
+              name: comprador.buyer_name,
+              phone: tel,
+              email: comprador.buyer_email || null,
+              birth_date: nascimento,
+              status: 'vendido',
+              sold_car_id: inventoryId,
+              sold_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
+              source: 'venda',
+              notes: 'Cadastrado automaticamente ao registrar a venda',
+            })
+            .select('*')
+            .maybeSingle();
+
+          if (erroNovo) {
+            console.warn('[VENDA] nao consegui cadastrar o comprador como lead:', erroNovo.message);
+          } else if (novoLead) {
+            setLeads(prev => [{ ...novoLead, birth_date: novoLead.birth_date || '' }, ...prev]);
+            addToast(`${comprador.buyer_name} cadastrado como cliente.`, 'success');
+          }
+        } else if (candidatos.length === 1) {
           const lead = candidatos[0];
           const { error: erroLead } = await supabase
             .from('leads')
@@ -1166,6 +1201,9 @@ export const AppProvider = ({ children }) => {
               status: 'vendido',
               sold_car_id: inventoryId,
               sold_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
+              // Só preenche o aniversário se veio agora E o lead não tinha.
+              // Sobrescrever com vazio apagaria uma data que alguém já digitou.
+              ...(nascimento ? { birth_date: nascimento } : {}),
             })
             .eq('id', lead.id)
             .eq('user_id', user.id);
@@ -1175,7 +1213,7 @@ export const AppProvider = ({ children }) => {
             console.warn('[VENDA] nao consegui marcar o lead:', erroLead.message);
           } else {
             setLeads(prev => prev.map(l => l.id === lead.id
-              ? { ...l, status: 'vendido', sold_car_id: inventoryId }
+              ? { ...l, status: 'vendido', sold_car_id: inventoryId, ...(nascimento ? { birth_date: nascimento } : {}) }
               : l));
             addToast('Lead ' + lead.name + ' marcado como comprador.', 'success');
           }

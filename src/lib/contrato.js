@@ -154,6 +154,7 @@ export const CAMPOS = [
   ['comprador_nome', 'Nome do comprador'], ['comprador_cpf', 'CPF'],
   ['comprador_rg', 'RG'], ['comprador_endereco', 'Endereço do comprador'],
   ['comprador_telefone', 'Telefone do comprador'], ['comprador_email', 'E-mail do comprador'],
+  ['comprador_nascimento', 'Data de nascimento do comprador'],
   ['marca', 'Marca'], ['modelo', 'Modelo'], ['versao', 'Versão'], ['ano', 'Ano'],
   ['cor', 'Cor'], ['placa', 'Placa'], ['chassi', 'Chassi'], ['km', 'Quilometragem'],
   ['renavam', 'Renavam'], ['ano_modelo', 'Ano do modelo'],
@@ -251,6 +252,10 @@ export const dadosDoContrato = ({ loja, carro, venda }) => ({
   comprador_endereco: venda?.buyer_address ?? '',
   comprador_telefone: venda?.buyer_phone ?? '',
   comprador_email: venda?.buyer_email ?? '',
+  // Alguns contratos pedem a data de nascimento na qualificacao do comprador.
+  comprador_nascimento: venda?.buyer_birth_date
+    ? new Date(`${venda.buyer_birth_date}T12:00`).toLocaleDateString('pt-BR')
+    : '',
 
   marca: carro?.brand ?? '',
   modelo: carro?.model ?? '',
