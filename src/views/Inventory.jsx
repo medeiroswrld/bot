@@ -8,6 +8,7 @@ import {
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import { MODELO_PADRAO, montarContrato, dadosDoContrato, imprimirContrato, formatarCPF, cpfValido } from '../lib/contrato.js';
 import { supabase } from '../lib/supabase.js';
+import { prepararImagem, ehHeic } from '../lib/imagem.js';
 import MatchFoundModal from './MatchFoundModal.jsx';
 
 const CarPlaceholder = () => (
@@ -195,18 +196,41 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
             return;
         }
 
-        files.forEach(file => {
-            if (!ALLOWED_TYPES.includes(file.type)) {
-                addToast(`Formato não suportado (${file.name}). Use JPEG, PNG ou WEBP.`, 'error');
-                return;
+        // Sequencial e assíncrono por causa do HEIC: a conversão é pesada e
+        // roda no navegador, então converter oito fotos ao mesmo tempo travaria
+        // a aba. Uma de cada vez chega mais devagar e não congela nada.
+        (async () => {
+            for (const bruto of files) {
+                let file = bruto;
+
+                if (ehHeic(bruto)) {
+                    // O aviso importa: converter uma foto de iPhone leva alguns
+                    // segundos, e sem ele parece que o clique não funcionou.
+                    addToast(`Convertendo ${bruto.name} (foto de iPhone)…`, 'info');
+                    try {
+                        file = await prepararImagem(bruto);
+                    } catch (err) {
+                        console.error('[foto] falha ao converter HEIC', err);
+                        addToast(`Não consegui converter ${bruto.name}. Tente enviar como JPEG.`, 'error');
+                        continue;
+                    }
+                }
+
+                // Validação DEPOIS da conversão: o HEIC nem passaria no teste de
+                // tipo, e o tamanho que importa é o do arquivo que vai subir.
+                if (!ALLOWED_TYPES.includes(file.type)) {
+                    addToast(`Formato não suportado (${file.name}). Use JPEG, PNG, WEBP ou HEIC.`, 'error');
+                    continue;
+                }
+                if (file.size > MAX_SIZE_BYTES) {
+                    addToast(`Imagem muito grande (${file.name}). Máx 5 MB.`, 'error');
+                    continue;
+                }
+
+                const preview = URL.createObjectURL(file);
+                setForm(prev => ({ ...prev, images: [...(prev.images || []), { preview, file }] }));
             }
-            if (file.size > MAX_SIZE_BYTES) {
-                addToast(`Imagem muito grande (${file.name}). Máx 5 MB.`, 'error');
-                return;
-            }
-            const preview = URL.createObjectURL(file);
-            setForm(prev => ({ ...prev, images: [...(prev.images || []), { preview, file }] }));
-        });
+        })();
     };
 
     const removeImage = (index) => {
@@ -218,11 +242,19 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
 
     // ── Foto de especificações (JPG/PNG/WEBP até 5MB) ──────────────────────────
     const SPECS_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    const handleSpecsUpload = (e) => {
-        const file = e.target.files?.[0];
+    const handleSpecsUpload = async (e) => {
+        const bruto = e.target.files?.[0];
         e.target.value = '';
-        if (!file) return;
-        if (!SPECS_TYPES.includes(file.type)) { addToast('Formato inválido. Use JPEG, PNG ou WEBP.', 'error'); return; }
+        if (!bruto) return;
+
+        let file = bruto;
+        if (ehHeic(bruto)) {
+            addToast('Convertendo foto de iPhone…', 'info');
+            try { file = await prepararImagem(bruto); }
+            catch { addToast('Não consegui converter essa foto. Tente enviar como JPEG.', 'error'); return; }
+        }
+
+        if (!SPECS_TYPES.includes(file.type)) { addToast('Formato inválido. Use JPEG, PNG, WEBP ou HEIC.', 'error'); return; }
         if (file.size > 5 * 1024 * 1024) { addToast('Imagem muito grande. Máximo 5MB.', 'error'); return; }
         setForm(prev => ({ ...prev, specsImage: { file, preview: URL.createObjectURL(file) } }));
     };
@@ -339,7 +371,7 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
                                 <div className="upload-card-btn" onClick={() => document.getElementById('car-images-upload').click()}>
                                     <Plus size={24} />
                                     <span style={{ fontSize: '0.7rem', fontWeight: 600 }}>Adicionar</span>
-                                    <input id="car-images-upload" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" multiple style={{ display: 'none' }} onChange={handleImageUpload} />
+                                    <input id="car-images-upload" type="file" accept="image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.heic,.heif" multiple style={{ display: 'none' }} onChange={handleImageUpload} />
                                 </div>
                             )}
                         </div>
@@ -367,7 +399,7 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
                                 <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>Enviar foto de specs</span>
                             </div>
                         )}
-                        <input id="specs-upload" type="file" accept="image/jpeg,image/jpg,image/png,image/webp" style={{ display: 'none' }} onChange={handleSpecsUpload} />
+                        <input id="specs-upload" type="file" accept="image/jpeg,image/jpg,image/png,image/webp,image/heic,image/heif,.heic,.heif" style={{ display: 'none' }} onChange={handleSpecsUpload} />
                         <p className="text-muted" style={{ fontSize: '0.75rem', marginTop: 6 }}>
                             Esta é a foto que o bot vai enviar quando o cliente perguntar sobre este veículo. Use um card com as especificações (preço, ano, km, câmbio, etc.).
                         </p>

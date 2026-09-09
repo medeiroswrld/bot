@@ -7,6 +7,7 @@ import {
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
 import { MODELO_PADRAO, CAMPOS, formatarCNPJ } from '../lib/contrato.js';
+import { prepararImagem, ehHeic } from '../lib/imagem.js';
 import { detectar, aplicar } from '../lib/marcadores.js';
 
 // ─── Assistente de marcadores ────────────────────────────────────────────────
@@ -474,8 +475,15 @@ const Settings = () => {
     const [logoUrl, setLogoUrl] = useState('');
     const [subindoLogo, setSubindoLogo] = useState(false);
 
-    const enviarLogo = async (arquivo) => {
-        if (!arquivo || !user?.id) return;
+    const enviarLogo = async (bruto) => {
+        if (!bruto || !user?.id) return;
+        // Logo tirada de print no iPhone chega em HEIC igual foto de carro.
+        let arquivo = bruto;
+        if (ehHeic(bruto)) {
+            setSubindoLogo(true);
+            try { arquivo = await prepararImagem(bruto); }
+            catch { setSubindoLogo(false); alert('Não consegui converter essa imagem. Tente enviar como JPEG ou PNG.'); return; }
+        }
         // Limite modesto de propósito: logo é imagem pequena, e arquivo grande
         // só serve pra estourar a primeira página do contrato e demorar a
         // carregar na hora de imprimir.
@@ -1540,7 +1548,7 @@ const Settings = () => {
 
                                 <label className="btn-outline" style={{ cursor: 'pointer', margin: 0 }}>
                                     {subindoLogo ? 'Enviando…' : logoUrl ? 'Trocar logo' : 'Enviar logo'}
-                                    <input type="file" accept="image/png,image/jpeg,image/webp" hidden
+                                    <input type="file" accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.heic,.heif" hidden
                                         disabled={subindoLogo}
                                         onChange={(e) => { enviarLogo(e.target.files?.[0]); e.target.value = ''; }} />
                                 </label>
