@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase.js';
+import { kmInteiro } from '../lib/numero.js';
 
 const AppContext = createContext();
 
@@ -743,7 +744,7 @@ export const AppProvider = ({ children }) => {
         version: car.version || '',
         year: Number(car.year),
         price: Number(car.price),
-        mileage: Number(car.km) || 0,
+        mileage: kmInteiro(car.km) ?? 0,
         transmission: car.transmission || 'Automático',
         fuel: car.fuel || 'Flex',
         color: car.color || '',
@@ -831,7 +832,7 @@ export const AppProvider = ({ children }) => {
       dbUpdates.video_url       = await uploadCarMedia(updates.video, 'car-videos');
 
       if (dbUpdates.km !== undefined) {
-        dbUpdates.mileage = Number(dbUpdates.km) || 0;
+        dbUpdates.mileage = kmInteiro(dbUpdates.km) ?? 0;
         delete dbUpdates.km;
       }
       if (dbUpdates.year !== undefined) dbUpdates.year = Number(dbUpdates.year);
@@ -1101,7 +1102,7 @@ export const AppProvider = ({ children }) => {
             renavam:    veiculo.renavam || null,
             chassi:     veiculo.chassi || null,
             color:      veiculo.color || null,
-            mileage:    veiculo.km !== '' && veiculo.km != null ? Number(veiculo.km) : undefined,
+            mileage:    veiculo.km !== '' && veiculo.km != null ? kmInteiro(veiculo.km) : undefined,
           } : {}),
           // Troca entra separada do comprador: existe venda com troca e sem
           // dado de comprador preenchido, e o inverso tambem. Amarrar as duas
@@ -1114,7 +1115,7 @@ export const AppProvider = ({ children }) => {
             trade_in_color:  comprador.trade_in_color || null,
             trade_in_chassi: comprador.trade_in_chassi || null,
             trade_in_renavam: comprador.trade_in_renavam || null,
-            trade_in_km:     comprador.trade_in_km ? Number(comprador.trade_in_km) : null,
+            trade_in_km:     kmInteiro(comprador.trade_in_km),
             trade_in_value:  comprador.trade_in_value ? Number(comprador.trade_in_value) : null,
           } : {}),
         })
@@ -1225,7 +1226,11 @@ export const AppProvider = ({ children }) => {
       addToast('Venda registrada com sucesso! Analise o histórico.', 'success');
     } catch (error) {
       console.error('Erro ao vender', error);
-      addToast('Erro ao vender veículo.', 'error');
+      // A mensagem generica escondeu a causa por dois dias: o erro real era
+      // 'invalid input syntax for type integer: "14.699"' e a tela so dizia
+      // "Erro ao vender veiculo". Quem atende precisa conseguir ler o motivo
+      // ou mandar print de algo util.
+      addToast(`Erro ao vender veículo: ${error?.message ?? 'motivo desconhecido'}`, 'error');
     }
   };
 
