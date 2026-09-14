@@ -19,6 +19,7 @@ const SoldCars     = lazy(() => import('./views/SoldCars.jsx'));
 const SettingsView = lazy(() => import('./views/Settings.jsx'));
 const Login        = lazy(() => import('./views/Login.jsx'));
 const DesafioMFA   = lazy(() => import('./views/DesafioMFA.jsx'));
+const NovaSenha    = lazy(() => import('./views/NovaSenha.jsx'));
 const Conversations = lazy(() => import('./views/Conversations.tsx'));
 const BotSettings  = lazy(() => import('./views/BotSettings.jsx'));
 const WaitingList  = lazy(() => import('./views/WaitingList.jsx'));
@@ -323,7 +324,7 @@ const LoadingScreen = () => (
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 const AppContent = () => {
-  const { isAuthenticated, isLoading } = useAppContext();
+  const { isAuthenticated, isLoading, precisaNovaSenha } = useAppContext();
 
   // Portao do segundo fator.
   //
@@ -353,6 +354,13 @@ const AppContent = () => {
     return (
       <Suspense fallback={<LoadingScreen />}>
         <Login />
+      </Suspense>
+    );
+  }
+  if (precisaNovaSenha) {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <NovaSenha />
       </Suspense>
     );
   }

@@ -83,6 +83,11 @@ export const AppProvider = ({ children }) => {
   // ========== Derived State ==========
   const isAuthenticated = !!session;
 
+  // Quem chega por link de "esqueci minha senha" tem sessao valida, mas NAO
+  // pode simplesmente cair no CRM: ele veio justamente porque nao sabe a senha.
+  // Este estado segura a pessoa numa tela de definir senha nova.
+  const [precisaNovaSenha, setPrecisaNovaSenha] = useState(false);
+
   // Company: companySettings do Supabase tem prioridade, fallback para local
   const company = {
     name: companySettings?.company_name || profile?.company_name || data.company.name,
@@ -502,6 +507,13 @@ export const AppProvider = ({ children }) => {
           }
           if (mounted) setIsLoading(false);
 
+        } else if (event === 'PASSWORD_RECOVERY') {
+          // Disparado quando o link do e-mail de recuperacao e consumido.
+          setSession(newSession);
+          setUser(newSession?.user ?? null);
+          setPrecisaNovaSenha(true);
+          if (mounted) setIsLoading(false);
+
         } else if (event === 'SIGNED_OUT') {
           console.log('[AUTH] Limpando estado local...');
           setSession(null);
@@ -573,6 +585,35 @@ export const AppProvider = ({ children }) => {
     // Se precisa confirmar email
     addToast('Conta criada! Verifique seu e-mail.', 'info');
     return { success: true, needsConfirmation: true };
+  };
+
+  // Dispara o e-mail de "esqueci minha senha".
+  //
+  // A resposta NAO diz se o e-mail existe, de proposito: responder "essa conta
+  // nao existe" transforma a tela de recuperacao num verificador de cadastro,
+  // e alguem com uma lista de e-mails descobre quais sao clientes do Amply.
+  const recuperarSenha = async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: window.location.origin,
+    });
+    if (error) return { success: false, error: translateAuthError(error) };
+    return { success: true };
+  };
+
+  // Reenvia a confirmacao de cadastro. Existe porque e-mail se perde: cai no
+  // spam, o cliente apaga sem ver, digita errado e corrige depois.
+  const reenviarConfirmacao = async (email) => {
+    const { error } = await supabase.auth.resend({ type: 'signup', email: email.trim() });
+    if (error) return { success: false, error: translateAuthError(error) };
+    return { success: true };
+  };
+
+  // Grava a senha nova de quem veio pelo link de recuperacao.
+  const definirNovaSenha = async (senha) => {
+    const { error } = await supabase.auth.updateUser({ password: senha });
+    if (error) return { success: false, error: translateAuthError(error) };
+    setPrecisaNovaSenha(false);
+    return { success: true };
   };
 
   const logout = useCallback(async () => {
@@ -2014,6 +2055,10 @@ export const AppProvider = ({ children }) => {
 
     // Auth
     isAuthenticated,
+    precisaNovaSenha,
+    recuperarSenha,
+    reenviarConfirmacao,
+    definirNovaSenha,
     isLoading,
     user,
     profile,

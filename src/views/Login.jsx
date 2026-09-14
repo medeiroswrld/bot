@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Mail, Lock, Eye, EyeOff, AlertCircle, Loader2, User } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, AlertCircle, Loader2, User, MailCheck, ArrowLeft } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 
 const Login = () => {
-  const { login, signup } = useAppContext();
+  const { login, signup, recuperarSenha, reenviarConfirmacao } = useAppContext();
   
   const [isSignUp, setIsSignUp] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -12,13 +12,19 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // Modo "esqueci minha senha": o link existia na tela desde sempre, mas
+  // apontava para `#esqueceu` e nao fazia absolutamente nada.
+  const [modoEsqueci, setModoEsqueci] = useState(false);
+  // Painel de "confirme seu e-mail", mostrado depois de criar a conta.
+  const [aguardandoConfirmacao, setAguardandoConfirmacao] = useState(false);
+  const [aviso, setAviso] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
 
     // Validações básicas
-    if (!email || !password) {
+    if (!email || (!password && !modoEsqueci)) {
       setError('Por favor, preencha todos os campos.');
       return;
     }
@@ -34,8 +40,23 @@ const Login = () => {
       return;
     }
 
-    if (password.length < 6) {
+    if (!modoEsqueci && password.length < 6) {
       setError('A senha deve ter pelo menos 6 caracteres.');
+      return;
+    }
+
+    // Recuperação de senha: só precisa do e-mail.
+    //
+    // A mensagem é a MESMA exista a conta ou não, de propósito. Dizer "esse
+    // e-mail não está cadastrado" transformaria esta tela num verificador de
+    // clientes: com uma lista de e-mails, qualquer um descobriria quem usa o
+    // Amply.
+    if (modoEsqueci) {
+      setIsLoading(true);
+      const r = await recuperarSenha(email);
+      setIsLoading(false);
+      if (!r.success) { setError(r.error); return; }
+      setAviso('Se existir uma conta com esse e-mail, o link para criar uma nova senha já está a caminho. Confira também a caixa de spam.');
       return;
     }
 
@@ -51,8 +72,19 @@ const Login = () => {
       if (!result.success) {
         setError(result.error);
         setIsLoading(false);
+        return;
       }
-      // Se sucesso, o onAuthStateChange no context redireciona automaticamente
+
+      // Cadastro que exige confirmação NÃO cria sessão, então o
+      // onAuthStateChange nunca dispara e a tela ficaria com o botão girando
+      // pra sempre. Era exatamente o que acontecia desde que a confirmação de
+      // e-mail foi ligada.
+      if (result.needsConfirmation) {
+        setIsLoading(false);
+        setAguardandoConfirmacao(true);
+        return;
+      }
+      // Login normal: o onAuthStateChange no context redireciona sozinho.
     } catch {
       setError('Ocorreu um erro inesperado. Tente novamente.');
       setIsLoading(false);
@@ -78,10 +110,50 @@ const Login = () => {
 
       {/* Direita: Formulário */}
       <div className="login-form-container">
+        {aguardandoConfirmacao ? (
+          <div className="login-card">
+            <div style={{ textAlign: 'center' }}>
+              <MailCheck size={42} style={{ color: 'var(--accent)' }} />
+              <h2 style={{ margin: '1rem 0 0.5rem' }}>Confirme seu e-mail</h2>
+              <p style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                Enviamos um link para <strong>{email}</strong>. Abra a mensagem e
+                clique no botão para ativar sua conta.
+              </p>
+              <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', marginTop: '1rem', lineHeight: 1.6 }}>
+                Não chegou? Olhe no spam — é o primeiro e-mail que você recebe da gente,
+                e alguns provedores desconfiam da estreia.
+              </p>
+
+              {aviso && <p style={{ fontSize: '0.82rem', color: '#15803d', marginTop: '1rem' }}>{aviso}</p>}
+              {error && <p style={{ fontSize: '0.82rem', color: '#dc2626', marginTop: '1rem' }}>{error}</p>}
+
+              <button className="btn-primary" style={{ width: '100%', marginTop: '1.25rem' }}
+                disabled={isLoading}
+                onClick={async () => {
+                  setError(''); setAviso(''); setIsLoading(true);
+                  const r = await reenviarConfirmacao(email);
+                  setIsLoading(false);
+                  if (r.success) setAviso('Enviamos de novo. Pode levar um minuto.');
+                  else setError(r.error);
+                }}>
+                {isLoading ? 'Enviando...' : 'Reenviar e-mail'}
+              </button>
+
+              <button
+                onClick={() => { setAguardandoConfirmacao(false); setIsSignUp(false); setPassword(''); setAviso(''); setError(''); }}
+                style={{ width: '100%', marginTop: '1rem', background: 'none', border: 'none', cursor: 'pointer',
+                         color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+                Voltar para o login
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="login-card">
           <div className="login-header">
-            <h2>{isSignUp ? 'Criar sua conta' : 'Bem-vindo de volta'}</h2>
-            <p>{isSignUp ? 'Preencha os dados para começar' : 'Acesse sua conta para continuar'}</p>
+            <h2>{modoEsqueci ? 'Recuperar acesso' : isSignUp ? 'Criar sua conta' : 'Bem-vindo de volta'}</h2>
+            <p>{modoEsqueci
+              ? 'Informe seu e-mail e enviamos um link para criar uma nova senha'
+              : isSignUp ? 'Preencha os dados para começar' : 'Acesse sua conta para continuar'}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="login-form">
@@ -92,7 +164,7 @@ const Login = () => {
               </div>
             )}
 
-            {isSignUp && (
+            {isSignUp && !modoEsqueci && (
               <div className="form-group">
                 <label htmlFor="fullName">Nome completo</label>
                 <div className="input-with-icon">
@@ -124,6 +196,7 @@ const Login = () => {
               </div>
             </div>
 
+            {!modoEsqueci && (
             <div className="form-group">
               <label htmlFor="password">Senha</label>
               <div className="input-with-icon">
@@ -146,10 +219,18 @@ const Login = () => {
               </div>
               {!isSignUp && (
                 <div className="forgot-password">
-                  <a href="#esqueceu">Esqueceu sua senha?</a>
+                  <a href="#esqueceu" onClick={(e) => {
+                    e.preventDefault();
+                    setModoEsqueci(true); setError(''); setAviso(''); setPassword('');
+                  }}>Esqueceu sua senha?</a>
                 </div>
               )}
             </div>
+            )}
+
+            {aviso && (
+              <p style={{ fontSize: '0.85rem', color: '#15803d', lineHeight: 1.5, margin: '4px 0' }}>{aviso}</p>
+            )}
 
             <button 
               type="submit" 
@@ -158,23 +239,33 @@ const Login = () => {
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="spinner" size={20} /> {isSignUp ? 'Criando conta...' : 'Entrando...'}
+                  <Loader2 className="spinner" size={20} /> {modoEsqueci ? 'Enviando...' : isSignUp ? 'Criando conta...' : 'Entrando...'}
                 </>
               ) : (
-                isSignUp ? 'Criar conta' : 'Entrar'
+                modoEsqueci ? 'Enviar link de recuperação' : isSignUp ? 'Criar conta' : 'Entrar'
               )}
             </button>
           </form>
           
           <div className="login-footer">
-            <p>
-              {isSignUp ? 'Já tem uma conta? ' : 'Ainda não tem conta? '}
-              <a href="#toggle" onClick={(e) => { e.preventDefault(); toggleMode(); }}>
-                {isSignUp ? 'Entrar' : 'Criar conta'}
-              </a>
-            </p>
+            {modoEsqueci ? (
+              <p>
+                <a href="#voltar" onClick={(e) => { e.preventDefault(); setModoEsqueci(false); setError(''); setAviso(''); }}
+                   style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  <ArrowLeft size={14} /> Voltar para o login
+                </a>
+              </p>
+            ) : (
+              <p>
+                {isSignUp ? 'Já tem uma conta? ' : 'Ainda não tem conta? '}
+                <a href="#toggle" onClick={(e) => { e.preventDefault(); toggleMode(); }}>
+                  {isSignUp ? 'Entrar' : 'Criar conta'}
+                </a>
+              </p>
+            )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
