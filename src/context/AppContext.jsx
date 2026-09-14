@@ -600,6 +600,25 @@ export const AppProvider = ({ children }) => {
     return { success: true };
   };
 
+  // Confirma o cadastro pelo CODIGO de 6 digitos que veio no e-mail.
+  //
+  // O link continua funcionando, mas o codigo e o caminho principal por um
+  // motivo pratico: o lojista le o e-mail no celular e costuma estar cadastrando
+  // no computador. Com link, ele confirma no aparelho errado e a tela onde ele
+  // esta continua parada esperando. Com codigo, ele digita onde ja esta.
+  //
+  // O `type: 'signup'` e o que diferencia do codigo de recuperacao de senha.
+  const confirmarCadastro = async (email, codigo) => {
+    const { error } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: String(codigo).replace(/\D/g, ''),
+      type: 'signup',
+    });
+    if (error) return { success: false, error: translateAuthError(error) };
+    // Deu certo: o verifyOtp ja cria a sessao e o onAuthStateChange leva pro CRM.
+    return { success: true };
+  };
+
   // Reenvia a confirmacao de cadastro. Existe porque e-mail se perde: cai no
   // spam, o cliente apaga sem ver, digita errado e corrige depois.
   const reenviarConfirmacao = async (email) => {
@@ -2057,6 +2076,7 @@ export const AppProvider = ({ children }) => {
     isAuthenticated,
     precisaNovaSenha,
     recuperarSenha,
+    confirmarCadastro,
     reenviarConfirmacao,
     definirNovaSenha,
     isLoading,

@@ -3,7 +3,7 @@ import { Mail, Lock, Eye, EyeOff, AlertCircle, Loader2, User, MailCheck, ArrowLe
 import { useAppContext } from '../context/AppContext.jsx';
 
 const Login = () => {
-  const { login, signup, recuperarSenha, reenviarConfirmacao } = useAppContext();
+  const { login, signup, recuperarSenha, reenviarConfirmacao, confirmarCadastro } = useAppContext();
   
   const [isSignUp, setIsSignUp] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -18,6 +18,7 @@ const Login = () => {
   // Painel de "confirme seu e-mail", mostrado depois de criar a conta.
   const [aguardandoConfirmacao, setAguardandoConfirmacao] = useState(false);
   const [aviso, setAviso] = useState('');
+  const [codigo, setCodigo] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -116,31 +117,70 @@ const Login = () => {
               <MailCheck size={42} style={{ color: 'var(--accent)' }} />
               <h2 style={{ margin: '1rem 0 0.5rem' }}>Confirme seu e-mail</h2>
               <p style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-                Enviamos um link para <strong>{email}</strong>. Abra a mensagem e
-                clique no botão para ativar sua conta.
+                Enviamos um código de 6 dígitos para <strong>{email}</strong>.
+                Digite ele abaixo para ativar sua conta.
               </p>
-              <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', marginTop: '1rem', lineHeight: 1.6 }}>
+
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                setError(''); setAviso('');
+                const limpo = codigo.replace(/\D/g, '');
+                if (limpo.length !== 6) { setError('O código tem 6 dígitos.'); return; }
+                setIsLoading(true);
+                const r = await confirmarCadastro(email, limpo);
+                if (!r.success) {
+                  setIsLoading(false);
+                  setError(r.error);
+                  setCodigo('');
+                  return;
+                }
+                // Sucesso: o verifyOtp cria a sessão e o App troca pro CRM sozinho.
+              }}>
+                <input
+                  value={codigo}
+                  onChange={(ev) => setCodigo(ev.target.value)}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  maxLength={7}
+                  placeholder="000000"
+                  style={{
+                    width: '100%', textAlign: 'center', fontSize: '1.7rem',
+                    letterSpacing: '0.45rem', padding: '0.65rem', fontFamily: 'monospace',
+                    marginTop: '1.25rem',
+                  }}
+                />
+                <button className="btn-primary" type="submit" disabled={isLoading}
+                  style={{ width: '100%', marginTop: '0.9rem' }}>
+                  {isLoading ? 'Confirmando...' : 'Confirmar e entrar'}
+                </button>
+              </form>
+              <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', marginTop: '1.25rem', lineHeight: 1.6 }}>
                 Não chegou? Olhe no spam — é o primeiro e-mail que você recebe da gente,
-                e alguns provedores desconfiam da estreia.
+                e alguns provedores desconfiam da estreia. O código vale por 1 hora.
               </p>
 
               {aviso && <p style={{ fontSize: '0.82rem', color: '#15803d', marginTop: '1rem' }}>{aviso}</p>}
               {error && <p style={{ fontSize: '0.82rem', color: '#dc2626', marginTop: '1rem' }}>{error}</p>}
 
-              <button className="btn-primary" style={{ width: '100%', marginTop: '1.25rem' }}
+              <button
                 disabled={isLoading}
                 onClick={async () => {
-                  setError(''); setAviso(''); setIsLoading(true);
+                  setError(''); setAviso(''); setCodigo(''); setIsLoading(true);
                   const r = await reenviarConfirmacao(email);
                   setIsLoading(false);
-                  if (r.success) setAviso('Enviamos de novo. Pode levar um minuto.');
+                  if (r.success) setAviso('Enviamos um código novo. O anterior deixou de valer.');
                   else setError(r.error);
-                }}>
-                {isLoading ? 'Enviando...' : 'Reenviar e-mail'}
+                }}
+                style={{ width: '100%', marginTop: '0.75rem', background: 'none',
+                         border: '1px solid var(--border-color, #d9d9e3)', borderRadius: 9,
+                         padding: '0.6rem', cursor: 'pointer', fontSize: '0.85rem',
+                         color: 'var(--color-text-muted)' }}>
+                {isLoading ? 'Enviando...' : 'Reenviar código'}
               </button>
 
               <button
-                onClick={() => { setAguardandoConfirmacao(false); setIsSignUp(false); setPassword(''); setAviso(''); setError(''); }}
+                onClick={() => { setAguardandoConfirmacao(false); setIsSignUp(false); setPassword(''); setAviso(''); setError(''); setCodigo(''); }}
                 style={{ width: '100%', marginTop: '1rem', background: 'none', border: 'none', cursor: 'pointer',
                          color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
                 Voltar para o login
