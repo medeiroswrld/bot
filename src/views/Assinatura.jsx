@@ -30,6 +30,7 @@ const ESTADOS = {
 const Assinatura = () => {
   const { companySettings, refreshCompanySettings } = useAppContext();
   const [carregando, setCarregando] = useState(false);
+  const [uso, setUso] = useState(null);
   const [erro, setErro] = useState('');
   const [aviso, setAviso] = useState('');
 
@@ -57,6 +58,20 @@ const Assinatura = () => {
     if (r === 'expirada')  setAviso('O link expirou. Gere um novo abaixo.');
     window.history.replaceState({}, '', window.location.pathname);
   }, [refreshCompanySettings]);
+
+  // Consumo do mês. Vem de uma função no banco, e não de uma consulta direta,
+  // porque a tabela de uso guarda CUSTO — o lojista vê quantas conversas usou,
+  // não quanto cada uma custou.
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const { data, error } = await supabase.rpc('meu_uso_do_mes');
+      if (!vivo || error) return;
+      const linha = Array.isArray(data) ? data[0] : data;
+      if (linha) setUso(linha);
+    })();
+    return () => { vivo = false; };
+  }, [companySettings?.plano]);
 
   const abrirCheckout = async () => {
     setErro(''); setAviso(''); setCarregando(true);
@@ -142,6 +157,48 @@ const Assinatura = () => {
             )}
           </div>
         </div>
+
+        {/* Consumo do mês.
+            A barra existe pra conversa comercial acontecer ANTES do estouro: o
+            limite nunca corta o bot (isso seria o lojista perdendo venda por
+            causa do nosso plano), então o aviso é a única coisa que separa uma
+            conversa tranquila de uma fatura surpresa. */}
+        {uso && uso.limite > 0 && (() => {
+          const usadas = Number(uso.usadas || 0);
+          const limite = Number(uso.limite);
+          const pct = Math.min(100, Math.round((usadas / limite) * 100));
+          const perto = pct >= 80;
+          const cor = pct >= 100 ? '#b45309' : perto ? '#b45309' : '#5B5BFF';
+          return (
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', color: '#52525b' }}>
+                <span>Plano <strong>{uso.plano_nome}</strong> — conversas deste mês</span>
+                <span style={{ fontWeight: 600, color: cor }}>{usadas} de {limite}</span>
+              </div>
+              <div style={{ height: 7, background: '#eeeef3', borderRadius: 99, marginTop: 6, overflow: 'hidden' }}>
+                <div style={{ width: `${pct}%`, height: '100%', background: cor, transition: 'width .3s' }} />
+              </div>
+              {pct >= 100 ? (
+                <p style={{ fontSize: '0.8rem', color: '#b45309', marginTop: 8, lineHeight: 1.5 }}>
+                  Você passou do limite do plano. <strong>O atendimento continua funcionando normalmente</strong> —
+                  nada foi desligado. Vale conversarmos sobre subir de plano.
+                </p>
+              ) : perto ? (
+                <p style={{ fontSize: '0.8rem', color: '#b45309', marginTop: 8, lineHeight: 1.5 }}>
+                  Você já usou {pct}% das conversas do mês. Se passar, nada é desligado —
+                  só vale a gente conversar sobre o próximo plano.
+                </p>
+              ) : null}
+            </div>
+          );
+        })()}
+
+        {uso && uso.limite === null && uso.plano_slug === 'personalizado' && (
+          <p style={{ fontSize: '0.82rem', color: '#52525b', marginBottom: '1rem' }}>
+            Plano <strong>personalizado</strong>, sem limite de conversas.
+            Você fez <strong>{Number(uso.usadas || 0)}</strong> este mês.
+          </p>
+        )}
 
         {aviso && <p style={{ fontSize: '0.84rem', color: '#15803d', marginBottom: 10 }}>{aviso}</p>}
         {erro &&  <p style={{ fontSize: '0.84rem', color: '#dc2626', marginBottom: 10 }}>{erro}</p>}
