@@ -70,9 +70,23 @@ Deno.serve(async (req) => {
   //
   // Aqui SIM vale recusar: requisição sem token não é o Asaas, e devolver 401
   // pra um desconhecido não afeta a fila deles.
-  const esperado = Deno.env.get('ASAAS_WEBHOOK_TOKEN') ?? '';
+  // Dois tokens aceitos ao mesmo tempo, um por ambiente.
+  //
+  // Diferente da chave de API — onde escolhemos UMA e a de sandbox tem
+  // prioridade — aqui o webhook RECEBE dos dois lados. Aceitar os dois deixa
+  // produção e sandbox rodando em paralelo, sem precisar mexer no webhook de
+  // produção que já está configurado e funcionando.
+  //
+  // Saber QUAL bateu não é enfeite: é o que diz, no log, se um pagamento veio
+  // de teste ou de dinheiro de verdade.
   const recebido = req.headers.get('asaas-access-token') ?? '';
-  if (!esperado || recebido !== esperado) {
+  const tokens: Array<[string, string]> = [
+    ['producao', Deno.env.get('ASAAS_WEBHOOK_TOKEN') ?? ''],
+    ['sandbox',  Deno.env.get('ASAAS_WEBHOOK_TOKEN_SANDBOX') ?? ''],
+  ];
+  const origem = tokens.find(([, t]) => t && t === recebido)?.[0];
+
+  if (!origem) {
     console.warn('[asaas] requisição recusada: token ausente ou diferente');
     return new Response(JSON.stringify({ error: 'nao autorizado' }), { status: 401 });
   }
@@ -123,7 +137,7 @@ Deno.serve(async (req) => {
 
     const novoEstado = estadoDoEvento(evento);
     if (!novoEstado) {
-      console.log('[asaas] evento sem efeito no acesso:', evento);
+      console.log('[asaas] evento sem efeito no acesso:', evento, `(${origem})`);
       return ok({ registrado: true });
     }
 
@@ -175,7 +189,7 @@ Deno.serve(async (req) => {
 
     await admin.from('asaas_eventos').update({ user_id: userId }).eq('id', eventoId);
 
-    console.log('[asaas] conta atualizada', { evento, userId, estado: novoEstado });
+    console.log('[asaas] conta atualizada', { origem, evento, userId, estado: novoEstado });
     return ok({ ok: true, estado: novoEstado });
 
   } catch (e) {
