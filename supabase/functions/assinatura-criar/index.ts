@@ -96,15 +96,25 @@ Deno.serve(async (req) => {
       return json({ error: 'Esta conta é cobrada por fora e não precisa de assinatura no cartão.' }, 409);
     }
 
-    // O valor NUNCA é inventado aqui. Vem do plano da loja quando o
-    // administrador já definiu, e do padrão do sistema quando é cadastro novo.
-    // Sem nenhum dos dois, a função recusa em vez de cobrar um número chutado.
+    // O valor NUNCA é inventado aqui.
+    //
+    // O preço do Amply é NEGOCIADO loja a loja — não existe tabela. Quem manda
+    // é o `billing_amount`, que o administrador define no painel ao fechar a
+    // venda. O secret ASSINATURA_VALOR_PADRAO é só uma rede de segurança, para
+    // o dia em que existir um plano de entrada com preço fixo; enquanto não
+    // existir, ele fica vazio e nunca é usado.
+    //
+    // Sem preço definido a função NÃO cobra um número chutado. E a mensagem é
+    // escrita para o LOJISTA, não para o desenvolvedor: quem vai ler isso é o
+    // dono de uma revenda que acabou de se cadastrar, e "configure o secret"
+    // não significa nada pra ele.
     const padrao = Number(Deno.env.get('ASSINATURA_VALOR_PADRAO') ?? '');
     const valor = Number(loja?.billing_amount) || (Number.isFinite(padrao) && padrao > 0 ? padrao : 0);
     if (!valor) {
       return json({
-        error: 'Valor da assinatura não definido. Configure o secret ASSINATURA_VALOR_PADRAO ou o plano desta loja.',
-      }, 501);
+        error: 'Seu plano ainda está sendo configurado. Assim que combinarmos o valor, a assinatura aparece aqui para você ativar.',
+        aguardando_plano: true,
+      }, 409);
     }
 
     const { url: api, ambiente } = baseDoAsaas(chave);
