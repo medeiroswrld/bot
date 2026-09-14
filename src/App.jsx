@@ -8,6 +8,7 @@ import {
 import './App.css';
 
 import { AppProvider, useAppContext } from './context/AppContext.jsx';
+import { precisaDesafio } from './lib/doisFatores.js';
 
 const Dashboard    = lazy(() => import('./views/Dashboard.jsx'));
 const AdminPanel   = lazy(() => import('./views/AdminPanel.jsx'));
@@ -17,6 +18,7 @@ const Agenda       = lazy(() => import('./views/Agenda.jsx'));
 const SoldCars     = lazy(() => import('./views/SoldCars.jsx'));
 const SettingsView = lazy(() => import('./views/Settings.jsx'));
 const Login        = lazy(() => import('./views/Login.jsx'));
+const DesafioMFA   = lazy(() => import('./views/DesafioMFA.jsx'));
 const Conversations = lazy(() => import('./views/Conversations.tsx'));
 const BotSettings  = lazy(() => import('./views/BotSettings.jsx'));
 const WaitingList  = lazy(() => import('./views/WaitingList.jsx'));
@@ -322,11 +324,43 @@ const LoadingScreen = () => (
 
 const AppContent = () => {
   const { isAuthenticated, isLoading } = useAppContext();
+
+  // Portao do segundo fator.
+  //
+  // O Supabase considera o usuario LOGADO assim que a senha confere — so que
+  // numa sessao de nivel 'aal1'. Quem cadastrou aplicativo autenticador precisa
+  // chegar em 'aal2', e sem este portao o sistema abriria inteiro com a senha
+  // sozinha: o 2FA viraria enfeite.
+  //
+  // 'verificando' e o estado inicial de proposito. Assumir 'liberado' mostraria
+  // o CRM por um instante antes de trocar pela tela do codigo — vazamento curto,
+  // mas vazamento.
+  const [etapa, setEtapa] = useState('verificando');
+
+  useEffect(() => {
+    if (!isAuthenticated) { setEtapa('verificando'); return; }
+    let vivo = true;
+    precisaDesafio()
+      .then((precisa) => { if (vivo) setEtapa(precisa ? 'desafio' : 'liberado'); })
+      // Falha aqui nao pode trancar ninguem do lado de fora: quem nao tem fator
+      // cadastrado (a maioria) passaria a nao conseguir entrar por um erro de rede.
+      .catch(() => { if (vivo) setEtapa('liberado'); });
+    return () => { vivo = false; };
+  }, [isAuthenticated]);
+
   if (isLoading) return <LoadingScreen />;
   if (!isAuthenticated) {
     return (
       <Suspense fallback={<LoadingScreen />}>
         <Login />
+      </Suspense>
+    );
+  }
+  if (etapa === 'verificando') return <LoadingScreen />;
+  if (etapa === 'desafio') {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <DesafioMFA onConfirmado={() => setEtapa('liberado')} />
       </Suspense>
     );
   }

@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase.js';
 import { MODELO_PADRAO, CAMPOS, formatarCNPJ } from '../lib/contrato.js';
 import { prepararImagem, ehHeic } from '../lib/imagem.js';
 import { detectar, aplicar } from '../lib/marcadores.js';
+import DoisFatores from './DoisFatores.jsx';
 
 // ─── Assistente de marcadores ────────────────────────────────────────────────
 // A loja cola o contrato de uma venda real; aqui ela confirma o que virou campo.
@@ -1678,6 +1679,11 @@ const Settings = () => {
                         </button>
                     </div>
                 </section>
+            </div>
+
+            {/* -- Verificacao em duas etapas ----------------------------------- */}
+            <div style={{ marginTop: '2rem' }}>
+                <DoisFatores />
             </div>
 
             {/* ── Funcionamento do Bot ───────────────────────────────────────── */}

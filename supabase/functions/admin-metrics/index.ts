@@ -136,6 +136,38 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
+  // ── Remover a verificação em duas etapas de uma loja ───────────────────────
+  //
+  // O caminho de volta pra quem perdeu o celular. O Supabase NÃO gera códigos
+  // de recuperação, e desligar o 2FA pela tela exige uma sessão aal2 — ou seja,
+  // exige justamente o aplicativo que a pessoa perdeu. Sem esta ação, um lojista
+  // que troca de telefone fica trancado pra fora da própria conta e só sai de lá
+  // com alguém editando o banco à mão.
+  //
+  // Fica no painel do administrador de propósito: é a única parte do fluxo onde
+  // existe verificação de identidade de verdade — você conhece o cliente.
+  if (acao === 'remover_2fa') {
+    const { user_id } = body as { user_id?: string };
+    if (!user_id) return json({ error: 'user_id obrigatório' }, 400);
+
+    const { data: lista, error: erroLista } =
+      await admin.auth.admin.mfa.listFactors({ userId: user_id });
+    if (erroLista) return json({ error: `Falha ao listar fatores: ${erroLista.message}` }, 500);
+
+    const fatores = lista?.factors ?? [];
+    if (!fatores.length) return json({ ok: true, removidos: 0, mensagem: 'Esta conta não tem verificação em duas etapas ativa.' });
+
+    for (const f of fatores) {
+      const { error } = await admin.auth.admin.mfa.deleteFactor({ id: f.id, userId: user_id });
+      if (error) return json({ error: `Falha ao remover: ${error.message}` }, 500);
+    }
+
+    // Log com quem autorizou: remover 2FA é derrubar uma proteção, e isso
+    // precisa deixar rastro.
+    console.warn(`[admin-metrics] REMOVEU 2FA de ${user_id} (${fatores.length} fator(es), por ${email})`);
+    return json({ ok: true, removidos: fatores.length });
+  }
+
   // ── Salvar o plano da loja (dia e valor) ───────────────────────────────────
   if (acao === 'salvar_plano') {
     const { user_id, billing_day, billing_amount } = body as {

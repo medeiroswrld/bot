@@ -602,6 +602,32 @@ const Painel = ({ onSair }) => {
     finally { setSalvandoId(null); }
   };
 
+  // Devolver o acesso a quem perdeu o celular.
+  //
+  // O Supabase nao gera codigos de recuperacao, e desativar a verificacao pela
+  // tela do lojista exige uma sessao que so o proprio aplicativo autenticador
+  // concede. Ou seja: sem este botao, perder o telefone tranca a pessoa pra fora
+  // da conta de forma definitiva.
+  //
+  // A confirmacao e dura de proposito. Isto derruba uma protecao de seguranca, e
+  // quem pede "perdi meu celular" por mensagem pode nao ser quem diz ser.
+  const removerDoisFatores = async (loja) => {
+    if (!window.confirm(
+      `Remover a verificacao em duas etapas de ${loja.empresa || loja.email}?\n\n` +
+      'A conta volta a ser protegida so pela senha, e a pessoa vai conseguir ' +
+      'entrar sem o aplicativo autenticador.\n\n' +
+      'Confirme por telefone que e realmente o titular antes de continuar.'
+    )) return;
+    setSalvandoId(loja.user_id);
+    try {
+      const r = await chamar({ acao: 'remover_2fa', user_id: loja.user_id });
+      window.alert(r?.removidos
+        ? 'Verificacao em duas etapas removida. Avise que a pessoa ja pode entrar so com a senha.'
+        : (r?.mensagem || 'Esta conta nao tinha verificacao em duas etapas.'));
+    } catch (e) { setErro(e.message); }
+    finally { setSalvandoId(null); }
+  };
+
   const card = { background: '#15151c', border: '1px solid #26262f', borderRadius: 12, padding: '13px 16px', flex: '1 1 160px' };
   const th   = { padding: '9px 10px', textAlign: 'left', fontSize: '0.7rem', color: '#8b8b96', fontWeight: 600, whiteSpace: 'nowrap' };
   const td   = { padding: '11px 10px', fontSize: '0.83rem', color: '#e4e4e7', whiteSpace: 'nowrap' };
@@ -843,6 +869,16 @@ const Painel = ({ onSair }) => {
                               textDecoration: l.capi_enabled ? 'none' : 'line-through',
                             }}>
                             anúncios
+                          </button>
+                          <button type="button" onClick={() => removerDoisFatores(l)}
+                            disabled={salvandoId === l.user_id}
+                            title="Perdeu o celular? Remove a verificação em duas etapas desta conta."
+                            style={{
+                              padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+                              fontSize: '0.68rem', fontWeight: 600,
+                              border: '1px solid #3f3f46', background: '#18181b', color: '#a1a1aa',
+                            }}>
+                            2FA
                           </button>
                         </div>
                         {!l.bot_enabled && !l.suspenso && l.bot_contratado && (
