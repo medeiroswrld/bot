@@ -34,11 +34,28 @@ const ok = (corpo: Record<string, unknown> = { ok: true }) =>
  * sistema por um mês.
  */
 function estadoDoEvento(evento: string): string | null {
+  // Pagou.
   if (evento === 'PAYMENT_CONFIRMED' || evento === 'PAYMENT_RECEIVED') return 'ativa';
+
+  // Não pagou — e a renovação recusada é o caso mais comum de todos.
+  //
+  // Assinatura raramente morre porque alguém cancelou; ela morre porque o
+  // cartão venceu, estourou o limite ou foi trocado e ninguém avisou. Sem
+  // tratar CAPTURE_REFUSED, uma conta assim continuaria marcada como 'ativa'
+  // para sempre, usando o sistema de graça enquanto o Asaas tenta cobrar.
   if (evento === 'PAYMENT_OVERDUE') return 'atrasada';
-  if (evento === 'PAYMENT_REFUNDED' || evento === 'PAYMENT_CHARGEBACK_REQUESTED') return 'cancelada';
-  // Evento que não muda acesso (PAYMENT_CREATED, PAYMENT_UPDATED e o resto)
-  // ainda é gravado no histórico, mas não mexe no estado da conta.
+  if (evento === 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED') return 'atrasada';
+  if (evento === 'PAYMENT_REPROVED_BY_RISK_ANALYSIS') return 'atrasada';
+
+  // Acabou.
+  if (evento === 'PAYMENT_REFUNDED') return 'cancelada';
+  if (evento === 'PAYMENT_CHARGEBACK_REQUESTED') return 'cancelada';
+  if (evento === 'PAYMENT_DELETED') return 'cancelada';
+
+  // Tudo o mais (PAYMENT_CREATED, PAYMENT_UPDATED, análise de risco em
+  // andamento, eventos de boleto e split) fica gravado no histórico e não mexe
+  // no acesso. Em especial AWAITING_RISK_ANALYSIS é espera, não recusa:
+  // derrubar a conta ali cortaria quem ainda pode ser aprovado em seguida.
   return null;
 }
 
