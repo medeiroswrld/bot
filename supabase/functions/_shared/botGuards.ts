@@ -15,14 +15,37 @@ export interface GuardasDoBot {
   bot_end?: string | null;
   suspenso?: boolean | null;
   bot_contratado?: boolean | null;
+  assinatura_status?: string | null;
+}
+
+/**
+ * A assinatura esta em dia?
+ *
+ * Passam dois casos, e so dois:
+ *
+ *   'ativa'  — pagou pelo cartao, confirmado pelo webhook do Asaas
+ *   'isento' — cobrado por fora. E o caso da DSC e da Leandrinho, que pagam
+ *              por transferencia e nunca terao assinatura no Asaas. Sem este
+ *              estado, ligar a cobranca cortaria justamente os clientes que
+ *              pagam.
+ *
+ * Coluna ausente tambem passa. Isso nao e descuido: e o que mantem o sistema
+ * de pe se esta funcao rodar antes da migration chegar ao banco, ou se alguem
+ * esquecer `assinatura_status` no select. Neste projeto ja derrubamos producao
+ * duas vezes por ordem de migration — a falha aqui tem que ser para o lado de
+ * ATENDER o cliente, nunca para o lado de calar o bot de todo mundo.
+ */
+export function assinaturaEmDia(status?: string | null): boolean {
+  if (status === null || status === undefined || status === '') return true;
+  return status === 'ativa' || status === 'isento';
 }
 
 /** Colunas que qualquer webhook precisa ler para decidir. */
 export const COLUNAS_GUARDA =
-  'bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso, bot_contratado, bot_blocked_numbers';
+  'bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso, bot_contratado, bot_blocked_numbers, assinatura_status';
 
 /** Colunas necessárias para checar disparo em massa. */
-export const COLUNAS_DISPARO = 'suspenso, disparos_contratado';
+export const COLUNAS_DISPARO = 'suspenso, disparos_contratado, assinatura_status';
 
 /**
  * A loja pode ENVIAR em massa (campanha, aniversário, template)?
@@ -34,8 +57,11 @@ export const COLUNAS_DISPARO = 'suspenso, disparos_contratado';
  *
  * Suspensão continua cortando tudo — inadimplente não dispara.
  */
-export function podeDisparar(s: { suspenso?: boolean | null; disparos_contratado?: boolean | null } | null | undefined): boolean {
+export function podeDisparar(
+  s: { suspenso?: boolean | null; disparos_contratado?: boolean | null; assinatura_status?: string | null } | null | undefined,
+): boolean {
   if (s?.suspenso === true) return false;
+  if (!assinaturaEmDia(s?.assinatura_status)) return false;
   return s?.disparos_contratado !== false;
 }
 
@@ -56,6 +82,12 @@ export function botPodeResponder(s: GuardasDoBot | null | undefined): boolean {
   // propósito: aquela é do lojista, esta é do dono do sistema — senão o
   // inadimplente se reativaria sozinho.
   if (s?.suspenso === true) return false;
+
+  // Assinatura vencida cala o bot, pelo mesmo motivo da suspensão: é decisão do
+  // dono do sistema, não do lojista. A diferença é que aqui quem decide não é
+  // uma pessoa clicando um botão, e sim o pagamento entrar ou não.
+  if (!assinaturaEmDia(s?.assinatura_status)) return false;
+
   if (s?.bot_enabled === false) return false;
   if (s?.bot_schedule_enabled !== true) return true;
 
