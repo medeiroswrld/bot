@@ -373,15 +373,21 @@ Deno.serve(async (req) => {
   // Plano de cada loja. Vem por consulta separada em vez de entrar na funcao
   // SQL: mudar o `returns table` do admin_metricas exige DROP + CREATE, e
   // recriar a funcao de metricas pra carregar um booleano nao se paga.
-  const planos = new Map<string, { bot: boolean; disparos: boolean; capiOn: boolean; dataset: string | null }>();
+  const planos = new Map<string, {
+    bot: boolean; disparos: boolean; capiOn: boolean; dataset: string | null;
+    assinatura: string | null; vencimento: string | null;
+  }>();
   try {
     const { data: linhas } = await admin
-      .from('company_settings').select('user_id, bot_contratado, disparos_contratado, capi_enabled, capi_dataset_id');
+      .from('company_settings')
+      .select('user_id, bot_contratado, disparos_contratado, capi_enabled, capi_dataset_id, assinatura_status, proximo_vencimento');
     for (const l of linhas ?? []) planos.set(String(l.user_id), {
       bot: l.bot_contratado === true,
       disparos: l.disparos_contratado === true,
       capiOn: l.capi_enabled === true,
       dataset: l.capi_dataset_id ?? null,
+      assinatura: (l as { assinatura_status?: string }).assinatura_status ?? null,
+      vencimento: (l as { proximo_vencimento?: string }).proximo_vencimento ?? null,
     });
   } catch (e) {
     console.warn('[admin-metrics] planos indisponiveis:', (e as Error)?.message);
@@ -398,6 +404,11 @@ Deno.serve(async (req) => {
       // não deve começar mandando conversão pra dataset nenhum.
       capi_enabled: planos.get(uid)?.capiOn ?? false,
       capi_dataset_id: planos.get(uid)?.dataset ?? null,
+      // Estado da cobranca no cartao. Diferente dos outros, o padrao aqui e
+      // 'isento': conta sem coluna preenchida e conta anterior a cobranca
+      // automatica, e tratar como inadimplente cortaria cliente pagante.
+      assinatura_status: planos.get(uid)?.assinatura ?? 'isento',
+      proximo_vencimento: planos.get(uid)?.vencimento ?? null,
     };
   });
 

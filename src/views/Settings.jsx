@@ -10,6 +10,7 @@ import { MODELO_PADRAO, CAMPOS, formatarCNPJ } from '../lib/contrato.js';
 import { prepararImagem, ehHeic } from '../lib/imagem.js';
 import { detectar, aplicar } from '../lib/marcadores.js';
 import DoisFatores from './DoisFatores.jsx';
+import Assinatura from './Assinatura.jsx';
 
 // ─── Assistente de marcadores ────────────────────────────────────────────────
 // A loja cola o contrato de uma venda real; aqui ela confirma o que virou campo.
@@ -1679,6 +1680,11 @@ const Settings = () => {
                         </button>
                     </div>
                 </section>
+            </div>
+
+            {/* -- Assinatura ---------------------------------------------------- */}
+            <div style={{ marginTop: '2rem' }}>
+                <Assinatura />
             </div>
 
             {/* -- Verificacao em duas etapas ----------------------------------- */}

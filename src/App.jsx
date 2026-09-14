@@ -253,16 +253,51 @@ const PageTabs = () => {
 // abriria chamado achando que quebrou.
 const AvisoSuspensao = () => {
   const { companySettings } = useAppContext();
-  if (!companySettings?.suspenso) return null;
+  const navigate = useNavigate();
+
+  // Duas causas diferentes param o atendimento, e o lojista precisa saber QUAL
+  // — porque a saida de cada uma e outra. Suspensao se resolve falando com o
+  // suporte; assinatura se resolve com um clique dele mesmo.
+  const suspenso = companySettings?.suspenso === true;
+  const assinatura = companySettings?.assinatura_status;
+  const devendo = assinatura === 'atrasada' || assinatura === 'cancelada' || assinatura === 'sem_assinatura';
+
+  if (!suspenso && !devendo) return null;
+
+  const podeResolverSozinho = !suspenso && devendo;
+
   return (
     <div style={{
       margin: '10px 20px 0', padding: '10px 14px', borderRadius: 10,
       background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c',
       fontSize: '0.85rem', lineHeight: 1.5,
     }}>
-      <strong>Conta suspensa.</strong> O atendimento automático está pausado. As mensagens
-      dos seus clientes continuam chegando e ficam em Conversas — nada se perde. Fale com o
-      suporte para reativar.
+      {suspenso ? (
+        <>
+          <strong>Conta suspensa.</strong> O atendimento automático está pausado. As mensagens
+          dos seus clientes continuam chegando e ficam em Conversas — nada se perde. Fale com o
+          suporte para reativar.
+        </>
+      ) : (
+        <>
+          <strong>
+            {assinatura === 'atrasada' ? 'Pagamento pendente.' : 'Assinatura inativa.'}
+          </strong>{' '}
+          O atendimento automático está pausado. As mensagens dos seus clientes continuam
+          chegando e ficam em Conversas — nada se perde.
+        </>
+      )}
+      {podeResolverSozinho && (
+        <button
+          onClick={() => navigate('/configuracoes')}
+          style={{
+            marginLeft: 8, background: 'none', border: 'none', padding: 0,
+            color: '#b91c1c', fontWeight: 700, textDecoration: 'underline',
+            cursor: 'pointer', fontSize: '0.85rem',
+          }}>
+          Regularizar agora
+        </button>
+      )}
     </div>
   );
 };

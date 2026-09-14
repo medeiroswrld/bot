@@ -870,6 +870,34 @@ const Painel = ({ onSair }) => {
                             }}>
                             anúncios
                           </button>
+                          {(() => {
+                            // Estado da cobranca no cartao, ao lado do plano.
+                            // 'isento' aparece discreto de proposito: e o normal
+                            // de quem paga por fora, nao um alerta.
+                            const a = l.assinatura_status || 'isento';
+                            const cores = {
+                              ativa:          ['#14532d', '#052e16', '#86efac'],
+                              isento:         ['#3f3f46', '#18181b', '#a1a1aa'],
+                              atrasada:       ['#78350f', '#271707', '#fcd34d'],
+                              cancelada:      ['#7f1d1d', '#2a1215', '#fca5a5'],
+                              sem_assinatura: ['#3f3f46', '#18181b', '#71717a'],
+                            };
+                            const [borda, fundo, texto] = cores[a] ?? cores.sem_assinatura;
+                            const rotulo = a === 'sem_assinatura' ? 'sem assinatura' : a;
+                            return (
+                              <span
+                                title={l.proximo_vencimento
+                                  ? `Proxima cobranca em ${dataCurta(l.proximo_vencimento)}`
+                                  : 'Cobranca no cartao pelo Asaas'}
+                                style={{
+                                  padding: '2px 8px', borderRadius: 999,
+                                  fontSize: '0.68rem', fontWeight: 600,
+                                  border: `1px solid ${borda}`, background: fundo, color: texto,
+                                }}>
+                                {rotulo}
+                              </span>
+                            );
+                          })()}
                           <button type="button" onClick={() => removerDoisFatores(l)}
                             disabled={salvandoId === l.user_id}
                             title="Perdeu o celular? Remove a verificação em duas etapas desta conta."
