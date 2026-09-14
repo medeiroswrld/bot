@@ -52,6 +52,12 @@ function estadoDoEvento(evento: string): string | null {
   if (evento === 'PAYMENT_CHARGEBACK_REQUESTED') return 'cancelada';
   if (evento === 'PAYMENT_DELETED') return 'cancelada';
 
+  // A assinatura inteira acabou, e nao so uma cobranca dela. Sem isto, uma
+  // assinatura removida no painel do Asaas pararia de gerar cobranca e a conta
+  // ficaria 'ativa' para sempre — ninguem cobra, ninguem corta.
+  if (evento === 'SUBSCRIPTION_DELETED') return 'cancelada';
+  if (evento === 'SUBSCRIPTION_INACTIVATED') return 'cancelada';
+
   // Tudo o mais (PAYMENT_CREATED, PAYMENT_UPDATED, análise de risco em
   // andamento, eventos de boleto e split) fica gravado no histórico e não mexe
   // no acesso. Em especial AWAITING_RISK_ANALYSIS é espera, não recusa:
@@ -81,7 +87,10 @@ Deno.serve(async (req) => {
 
   const eventoId = String(corpo?.id ?? '');
   const evento   = String(corpo?.event ?? '');
-  const pagamento = (corpo?.payment ?? {}) as Record<string, unknown>;
+  // Evento de cobranca traz `payment`; evento de assinatura traz `subscription`.
+  // Sem ler os dois, SUBSCRIPTION_DELETED chegaria sem dono e seria descartado.
+  const pagamento  = (corpo?.payment ?? {}) as Record<string, unknown>;
+  const assinatura = (corpo?.subscription ?? {}) as Record<string, unknown>;
 
   try {
     const admin = createClient(
@@ -100,7 +109,7 @@ Deno.serve(async (req) => {
           id: eventoId,
           tipo: evento,
           payment_id: pagamento?.id ?? null,
-          subscription_id: pagamento?.subscription ?? null,
+          subscription_id: pagamento?.subscription ?? assinatura?.id ?? null,
           payload: corpo,
         });
 
@@ -122,8 +131,10 @@ Deno.serve(async (req) => {
     // Primeiro pelo `externalReference`, que carregamos com o user_id na criação
     // do checkout. O id do cliente é o caminho alternativo, pra quando o evento
     // vier de uma cobrança criada fora deste fluxo.
-    const referencia = String(pagamento?.externalReference ?? corpo?.externalReference ?? '');
-    const clienteAsaas = String(pagamento?.customer ?? '');
+    const referencia = String(
+      pagamento?.externalReference ?? assinatura?.externalReference ?? corpo?.externalReference ?? '',
+    );
+    const clienteAsaas = String(pagamento?.customer ?? assinatura?.customer ?? '');
 
     let userId = '';
     if (referencia) {
@@ -149,7 +160,8 @@ Deno.serve(async (req) => {
       assinatura_status: novoEstado,
       assinatura_atualizada_em: agora,
     };
-    if (pagamento?.subscription) atualizacao.asaas_subscription_id = pagamento.subscription;
+    const idAssinatura = pagamento?.subscription ?? assinatura?.id;
+    if (idAssinatura) atualizacao.asaas_subscription_id = idAssinatura;
     if (clienteAsaas)            atualizacao.asaas_customer_id     = clienteAsaas;
     if (novoEstado === 'ativa')  atualizacao.ultimo_pagamento_em   = agora;
     if (pagamento?.dueDate)      atualizacao.proximo_vencimento    = pagamento.dueDate;
