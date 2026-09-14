@@ -151,7 +151,18 @@ Deno.serve(async (req) => {
     const clienteAsaas = String(pagamento?.customer ?? assinatura?.customer ?? '');
 
     let userId = '';
-    if (referencia) {
+
+    // A sessão de checkout vem primeiro porque é a única ponta confiável no
+    // PRIMEIRO pagamento: o externalReference chega null e o cliente só passa a
+    // existir depois que o pagador preenche o formulário.
+    const sessao = String(pagamento?.checkoutSession ?? '');
+    if (sessao) {
+      const { data } = await admin.from('company_settings')
+        .select('user_id').eq('asaas_checkout_id', sessao).maybeSingle();
+      if (data?.user_id) userId = data.user_id;
+    }
+
+    if (!userId && referencia) {
       const { data } = await admin.from('company_settings')
         .select('user_id').eq('user_id', referencia).maybeSingle();
       if (data?.user_id) userId = data.user_id;

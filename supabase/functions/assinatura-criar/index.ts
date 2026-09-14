@@ -185,6 +185,16 @@ Deno.serve(async (req) => {
     const link = checkout?.link ?? checkout?.url ?? '';
     if (!link) return json({ error: 'O Asaas não devolveu o link do checkout.' }, 502);
 
+    // Guardar o id do checkout é o que permite reconhecer o PRIMEIRO pagamento.
+    // O `externalReference` não desce do checkout pro pagamento, e o id do
+    // cliente só nasce quando o pagador preenche os dados — então esta é a
+    // única ponta que existe dos dois lados antes de alguém pagar.
+    if (checkout?.id) {
+      await admin.from('company_settings')
+        .update({ asaas_checkout_id: checkout.id, assinatura_atualizada_em: new Date().toISOString() })
+        .eq('user_id', user.id);
+    }
+
     console.log(
       ambiente === 'producao'
         ? '[assinatura] ATENCAO: checkout de PRODUCAO (cobranca real)'
