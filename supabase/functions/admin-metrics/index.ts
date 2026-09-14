@@ -168,6 +168,34 @@ Deno.serve(async (req) => {
     return json({ ok: true, removidos: fatores.length });
   }
 
+  // ── Definir o plano contratado ─────────────────────────────────────────────
+  //
+  // Muda a faixa E o valor da mensalidade junto, quando o plano tem preco de
+  // tabela. Separar as duas coisas criaria o estado mais confuso possivel:
+  // loja marcada como Crescimento cobrando o valor do Essencial, e ninguem
+  // sabendo qual dos dois e a verdade.
+  //
+  // 'personalizado' e a excecao: preco null, entao o billing_amount negociado
+  // fica como esta.
+  if (acao === 'definir_plano') {
+    const { user_id, plano } = body as { user_id?: string; plano?: string };
+    if (!user_id || !plano) return json({ error: 'user_id e plano obrigatórios' }, 400);
+
+    const { data: p, error: erroPlano } = await admin
+      .from('planos').select('slug, nome, preco').eq('slug', plano).maybeSingle();
+    if (erroPlano) return json({ error: `Falha ao ler o plano: ${erroPlano.message}` }, 500);
+    if (!p) return json({ error: `Plano desconhecido: ${plano}` }, 400);
+
+    const mudanca: Record<string, unknown> = { plano: p.slug };
+    if (p.preco !== null && p.preco !== undefined) mudanca.billing_amount = p.preco;
+
+    const { error } = await admin.from('company_settings').update(mudanca).eq('user_id', user_id);
+    if (error) return json({ error: `Falha ao definir o plano: ${error.message}` }, 500);
+
+    console.log(`[admin-metrics] plano de ${user_id} -> ${p.slug} (por ${email})`);
+    return json({ ok: true, plano: p.slug, valor: p.preco ?? null });
+  }
+
   // ── Salvar o plano da loja (dia e valor) ───────────────────────────────────
   if (acao === 'salvar_plano') {
     const { user_id, billing_day, billing_amount } = body as {
@@ -375,12 +403,25 @@ Deno.serve(async (req) => {
   // recriar a funcao de metricas pra carregar um booleano nao se paga.
   const planos = new Map<string, {
     bot: boolean; disparos: boolean; capiOn: boolean; dataset: string | null;
-    assinatura: string | null; vencimento: string | null;
+    assinatura: string | null; vencimento: string | null; plano: string | null;
   }>();
+
+  // Consumo do mes de TODAS as lojas numa consulta so, e a tabela de planos
+  // para saber o limite de cada faixa.
+  const uso = new Map<string, number>();
+  const limites = new Map<string, number | null>();
+  try {
+    const { data: linhasUso } = await admin.rpc('admin_uso_do_mes');
+    for (const l of linhasUso ?? []) uso.set(String(l.user_id), Number(l.conversas) || 0);
+    const { data: linhasPlano } = await admin.from('planos').select('slug, limite_conversas');
+    for (const l of linhasPlano ?? []) limites.set(String(l.slug), l.limite_conversas);
+  } catch (e) {
+    console.warn('[admin-metrics] uso do mes indisponivel:', (e as Error)?.message);
+  }
   try {
     const { data: linhas } = await admin
       .from('company_settings')
-      .select('user_id, bot_contratado, disparos_contratado, capi_enabled, capi_dataset_id, assinatura_status, proximo_vencimento');
+      .select('user_id, bot_contratado, disparos_contratado, capi_enabled, capi_dataset_id, assinatura_status, proximo_vencimento, plano');
     for (const l of linhas ?? []) planos.set(String(l.user_id), {
       bot: l.bot_contratado === true,
       disparos: l.disparos_contratado === true,
@@ -388,6 +429,7 @@ Deno.serve(async (req) => {
       dataset: l.capi_dataset_id ?? null,
       assinatura: (l as { assinatura_status?: string }).assinatura_status ?? null,
       vencimento: (l as { proximo_vencimento?: string }).proximo_vencimento ?? null,
+      plano: (l as { plano?: string }).plano ?? null,
     });
   } catch (e) {
     console.warn('[admin-metrics] planos indisponiveis:', (e as Error)?.message);
@@ -409,6 +451,11 @@ Deno.serve(async (req) => {
       // automatica, e tratar como inadimplente cortaria cliente pagante.
       assinatura_status: planos.get(uid)?.assinatura ?? 'isento',
       proximo_vencimento: planos.get(uid)?.vencimento ?? null,
+      plano: planos.get(uid)?.plano ?? 'personalizado',
+      conversas_mes: uso.get(uid) ?? 0,
+      // null = sem limite (personalizado). Nao confundir com 0, que e o plano
+      // CRM: aquele nao tem bot, este nao tem teto.
+      limite_conversas: limites.get(planos.get(uid)?.plano ?? 'personalizado') ?? null,
     };
   });
 

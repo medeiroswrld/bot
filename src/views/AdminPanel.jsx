@@ -20,6 +20,18 @@ const brlDireto = (v) => `R$ ${num(v).toFixed(2)}`;
 const milhares = (v) => num(v).toLocaleString('pt-BR');
 const dataCurta = (d) => (d ? new Date(d).toLocaleDateString('pt-BR') : '—');
 
+// Espelho da tabela `planos` do banco, so pro rotulo e pra confirmacao. A
+// verdade continua sendo o banco: a edge function le o preco de la, nunca daqui
+// — senao um esquecimento nesta lista viraria cobranca errada.
+const PLANOS = [
+  { slug: 'crm',           nome: 'CRM',           limite: 0,    preco: 800 },
+  { slug: 'essencial',     nome: 'Essencial',     limite: 100,  preco: 1497 },
+  { slug: 'crescimento',   nome: 'Crescimento',   limite: 250,  preco: 1997 },
+  { slug: 'performance',   nome: 'Performance',   limite: 500,  preco: 2497 },
+  { slug: 'personalizado', nome: 'Personalizado', limite: null, preco: null },
+];
+const brl0 = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
+
 // Vencimento do mês corrente a partir do dia fixo do plano.
 const vencimento = (dia) => {
   if (!dia) return null;
@@ -611,6 +623,27 @@ const Painel = ({ onSair }) => {
   //
   // A confirmacao e dura de proposito. Isto derruba uma protecao de seguranca, e
   // quem pede "perdi meu celular" por mensagem pode nao ser quem diz ser.
+  // Trocar a faixa contratada. Muda o valor da mensalidade junto, e a confirmacao
+  // diz isso em numero — porque um clique que altera quanto o cliente paga nao
+  // pode acontecer sem a pessoa ler o valor.
+  const definirPlano = async (loja, slug) => {
+    if (!slug || slug === (loja.plano || 'personalizado')) return;
+    const p = PLANOS.find((x) => x.slug === slug);
+    const aviso = p?.preco
+      ? `Mudar ${loja.empresa || loja.email} para o plano ${p.nome}?\n\n` +
+        `A mensalidade passa a ser ${brl0(p.preco)} e o limite, ${p.limite} conversas por mes.`
+      : `Mudar ${loja.empresa || loja.email} para Personalizado?\n\n` +
+        'Sem limite de conversas. A mensalidade atual e mantida como esta.';
+    if (!window.confirm(aviso)) return;
+
+    setSalvandoId(loja.user_id);
+    try {
+      await chamar({ acao: 'definir_plano', user_id: loja.user_id, plano: slug });
+      await buscar();
+    } catch (e) { setErro(e.message); }
+    finally { setSalvandoId(null); }
+  };
+
   const removerDoisFatores = async (loja) => {
     if (!window.confirm(
       `Remover a verificacao em duas etapas de ${loja.empresa || loja.email}?\n\n` +
@@ -898,6 +931,45 @@ const Painel = ({ onSair }) => {
                               </span>
                             );
                           })()}
+                          <select
+                            value={l.plano || 'personalizado'}
+                            disabled={salvandoId === l.user_id}
+                            onChange={(e) => definirPlano(l, e.target.value)}
+                            title="Faixa contratada. Trocar altera a mensalidade."
+                            style={{
+                              padding: '2px 6px', borderRadius: 999, cursor: 'pointer',
+                              fontSize: '0.68rem', fontWeight: 600,
+                              border: '1px solid #3f3f46', background: '#18181b', color: '#d4d4d8',
+                            }}>
+                            {PLANOS.map((p) => (
+                              <option key={p.slug} value={p.slug}>{p.nome}</option>
+                            ))}
+                          </select>
+
+                          {(() => {
+                            // Consumo contra o limite. Passar do teto NAO corta
+                            // nada — o numero em ambar e o gatilho pra voce
+                            // ligar pro cliente, nao pro sistema agir.
+                            const lim = l.limite_conversas;
+                            const usadas = Number(l.conversas_mes || 0);
+                            if (lim === null || lim === undefined) {
+                              return (
+                                <span style={{ fontSize: '0.68rem', color: '#71717a', alignSelf: 'center' }}>
+                                  {usadas} conversas
+                                </span>
+                              );
+                            }
+                            if (lim === 0) return null;
+                            const pct = Math.round((usadas / lim) * 100);
+                            const cor = pct >= 100 ? '#fca5a5' : pct >= 80 ? '#fcd34d' : '#71717a';
+                            return (
+                              <span title={`${pct}% do plano`}
+                                style={{ fontSize: '0.68rem', color: cor, fontWeight: pct >= 80 ? 700 : 400, alignSelf: 'center' }}>
+                                {usadas}/{lim}
+                              </span>
+                            );
+                          })()}
+
                           <button type="button" onClick={() => removerDoisFatores(l)}
                             disabled={salvandoId === l.user_id}
                             title="Perdeu o celular? Remove a verificação em duas etapas desta conta."
