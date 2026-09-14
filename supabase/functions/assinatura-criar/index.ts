@@ -69,7 +69,16 @@ Deno.serve(async (req) => {
     const url        = Deno.env.get('SUPABASE_URL') ?? '';
     const anonKey    = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-    const chave      = Deno.env.get('ASAAS_API_KEY') ?? '';
+    // Duas chaves, uma regra: se a de sandbox existir, ela ganha.
+    //
+    // Assim a chave de produção fica guardada e intocada enquanto se testa, e
+    // ir pra produção é APAGAR o secret de sandbox — não é lembrar de colar a
+    // chave certa de volta, que é o tipo de passo manual que um dia falha.
+    //
+    // O contrário também vale: enquanto o secret de sandbox existir, é
+    // impossível cobrar de verdade sem querer.
+    const chaveSandbox = Deno.env.get('ASAAS_API_KEY_SANDBOX') ?? '';
+    const chave = chaveSandbox || (Deno.env.get('ASAAS_API_KEY') ?? '');
 
     if (!chave) {
       return json({ error: 'Cobrança não configurada: falta o secret ASAAS_API_KEY.' }, 501);
@@ -87,7 +96,7 @@ Deno.serve(async (req) => {
 
     const { data: loja, error: erroLoja } = await admin
       .from('company_settings')
-      .select('company_name, cnpj, phone_number, billing_amount, asaas_customer_id, assinatura_status')
+      .select('company_name, billing_amount, assinatura_status')
       .eq('user_id', user.id)
       .maybeSingle();
     if (erroLoja) return json({ error: `Não consegui ler os dados da loja: ${erroLoja.message}` }, 500);
@@ -120,41 +129,24 @@ Deno.serve(async (req) => {
     const { url: api, ambiente } = baseDoAsaas(chave);
     const cabecalhos = { 'Content-Type': 'application/json', access_token: chave };
 
-    // ── 1. Cliente no Asaas ──────────────────────────────────────────────────
-    // Reaproveita se já existe: criar de novo a cada tentativa encheria a conta
-    // deles de clientes duplicados para a mesma loja.
-    let customerId = loja?.asaas_customer_id ?? '';
-    if (!customerId) {
-      const documento = String(loja?.cnpj ?? '').replace(/\D/g, '');
-      if (!documento) {
-        return json({
-          error: 'Antes de assinar, preencha o CNPJ da loja em Configurações — o Asaas exige o documento do titular.',
-        }, 400);
-      }
-
-      const resCliente = await fetch(`${api}/customers`, {
-        method: 'POST',
-        headers: cabecalhos,
-        body: JSON.stringify({
-          name: loja?.company_name || user.email,
-          email: user.email,
-          cpfCnpj: documento,
-          mobilePhone: String(loja?.phone_number ?? '').replace(/\D/g, '') || undefined,
-          // Amarra o cliente lá ao usuário daqui. Serve de rede de segurança se
-          // algum dia o id se perder.
-          externalReference: user.id,
-        }),
-      });
-      if (!resCliente.ok) return json({ error: await erroDoAsaas(resCliente) }, 502);
-
-      const cliente = await resCliente.json();
-      customerId = String(cliente?.id ?? '');
-      if (!customerId) return json({ error: 'O Asaas não devolveu o id do cliente.' }, 502);
-
-      await admin.from('company_settings')
-        .update({ asaas_customer_id: customerId, assinatura_atualizada_em: new Date().toISOString() })
-        .eq('user_id', user.id);
-    }
+    // ── Por que NÃO criamos o cliente no Asaas antes ─────────────────────────
+    //
+    // A primeira versão criava o cliente e passava o id em `customer`. O Asaas
+    // recusou:
+    //
+    //   "O campo address deve existir para o customer informado"
+    //   (e addressNumber, postalCode, province, city)
+    //
+    // Cobrança em cartão exige endereço completo e estruturado do titular, por
+    // antifraude. Nós guardamos endereço num campo de TEXTO LIVRE, usado no
+    // contrato — quebrar aquilo em logradouro, número, CEP, bairro e cidade
+    // seria adivinhação, e adivinhar aqui vira cobrança recusada no cartão de
+    // um cliente pagante.
+    //
+    // Então quem coleta é o próprio Checkout, que já valida esses campos e é a
+    // razão de existir de uma página hospedada. O vínculo com a loja daqui não
+    // depende disso: vai no `externalReference`, e o webhook guarda o id do
+    // cliente quando o Asaas o cria.
 
     // ── 2. Sessão de checkout ────────────────────────────────────────────────
     const origem = req.headers.get('origin') || 'https://amply.ia.br';
@@ -179,8 +171,6 @@ Deno.serve(async (req) => {
           quantity: 1,
           value: valor,
         }],
-        // `customer` e `customerData` são excludentes: mandar os dois é erro.
-        customer: customerId,
         subscription: {
           cycle: 'MONTHLY',
           // Hoje: a primeira cobrança sai na conclusão do checkout, que é o que
@@ -195,7 +185,12 @@ Deno.serve(async (req) => {
     const link = checkout?.link ?? checkout?.url ?? '';
     if (!link) return json({ error: 'O Asaas não devolveu o link do checkout.' }, 502);
 
-    console.log('[assinatura] checkout criado', { ambiente, user: user.id, valor, checkout: checkout?.id });
+    console.log(
+      ambiente === 'producao'
+        ? '[assinatura] ATENCAO: checkout de PRODUCAO (cobranca real)'
+        : '[assinatura] checkout de sandbox (sem dinheiro real)',
+      { ambiente, user: user.id, valor, checkout: checkout?.id },
+    );
     return json({ link, valor, ambiente });
 
   } catch (e) {
