@@ -164,7 +164,7 @@ const CampaignWizard = ({ onClose }) => {
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 720 }}>
                 <div className="modal-header">
-                    <h2>Nova Campanha — Passo {step} de 4</h2>
+                    <h2>Novo disparo — Passo {step} de 4</h2>
                     <button className="close-btn" onClick={onClose}><X size={24} /></button>
                 </div>
 
@@ -400,11 +400,11 @@ const Campaigns = () => {
         <div className="view-content">
             <header className="view-header-flex">
                 <div className="view-header">
-                    <h1>Campanhas</h1>
+                    <h1>Disparos em massa</h1>
                     <p>Dispare mensagens em massa usando templates aprovados pela Meta.</p>
                 </div>
                 <button className="btn-primary" onClick={() => setWizard(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Plus size={18} /> Nova Campanha
+                    <Plus size={18} /> Novo disparo
                 </button>
             </header>
 
@@ -419,7 +419,7 @@ const Campaigns = () => {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
                         <thead>
                             <tr style={{ borderBottom: '1px solid var(--border)', textAlign: 'left', color: 'var(--text-secondary)' }}>
-                                <th style={{ padding: '12px 16px', fontWeight: 600 }}>Campanha</th>
+                                <th style={{ padding: '12px 16px', fontWeight: 600 }}>Disparo</th>
                                 <th style={{ padding: '12px 16px', fontWeight: 600 }}>Status</th>
                                 <th style={{ padding: '12px 16px', fontWeight: 600 }}>Enviadas</th>
                                 <th style={{ padding: '12px 16px', fontWeight: 600 }}>Lidas</th>

@@ -57,7 +57,7 @@ const NAV_ITEMS = [
   {
     name: 'Marketing', icon: <Megaphone size={18} />,       path: '/campanhas',
     tabs: [
-      { name: 'Campanhas', path: '/campanhas' },
+      { name: 'Disparos em massa', path: '/campanhas' },
       { name: 'Templates', path: '/templates' },
       { name: 'Anúncios',  path: '/anuncios' },
     ],

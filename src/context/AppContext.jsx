@@ -1534,7 +1534,7 @@ export const AppProvider = ({ children }) => {
         addToast(`Erro ao disparar: ${data?.error || error?.message || 'desconhecido'}`, 'error');
         return false;
       }
-      addToast(`Campanha enviada: ${data.sent} enviada(s), ${data.failed} falha(s).`, 'success');
+      addToast(`Disparo concluido: ${data.sent} enviada(s), ${data.failed} falha(s).`, 'success');
       return true;
     } catch (e) {
       console.error('[CAMPAIGNS] send erro:', e);

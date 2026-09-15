@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Check, Loader2, LogOut, AlertCircle, MessageCircle } from 'lucide-react';
+import { Check, Loader2, LogOut, AlertCircle, MessageCircle, ShieldCheck, BadgeCheck, Lock } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
 
@@ -31,7 +31,7 @@ const BENEFICIOS = {
     'Tudo do CRM',
     'Atendimento automático no WhatsApp e Instagram',
     'Agendamento de visita pelo bot',
-    'Campanhas e mensagens de aniversário',
+    'Disparos em massa e mensagens de aniversário',
   ],
   crescimento: [
     'Tudo do Essencial',
@@ -181,7 +181,7 @@ const EscolherPlano = () => {
             </p>
           </div>
           <a
-            href="https://wa.me/5515997642176?text=Quero%20falar%20sobre%20o%20plano%20personalizado%20do%20Amply"
+            href="https://wa.me/5515988372081?text=Quero%20falar%20sobre%20o%20plano%20personalizado%20do%20Amply"
             target="_blank" rel="noopener noreferrer"
             className="btn-secondary"
             style={{ display: 'flex', alignItems: 'center', gap: 8, whiteSpace: 'nowrap' }}>
@@ -189,6 +189,46 @@ const EscolherPlano = () => {
           </a>
         </div>
       )}
+
+      {/* Faixa de confianca.
+          Cada frase aqui e verificavel. NAO existe "Meta Business Partner" nem
+          "parceiro oficial": esse selo vem de um programa formal com diretorio
+          publico, e usar sem estar listado e violacao de marca — com o app
+          derrubado como consequencia, o que tiraria todos os clientes do ar. */}
+      <div className="selos-confianca">
+        <div className="selo-confianca">
+          <BadgeCheck size={19} />
+          <div>
+            <strong>API oficial do WhatsApp Business</strong>
+            <span>
+              Integração direta com a Cloud API da Meta. Não usamos automação de
+              WhatsApp Web nem aparelho conectado no escritório.
+            </span>
+          </div>
+        </div>
+
+        <div className="selo-confianca">
+          <ShieldCheck size={19} />
+          <div>
+            <strong>Seu número não corre risco de banimento</strong>
+            <span>
+              É a diferença que importa: ferramenta não oficial derruba o número da
+              loja, e com ele o histórico de conversa dos seus clientes.
+            </span>
+          </div>
+        </div>
+
+        <div className="selo-confianca">
+          <Lock size={19} />
+          <div>
+            <strong>Pagamento em ambiente certificado</strong>
+            <span>
+              O cartão é digitado numa página do Asaas, instituição de pagamento
+              autorizada pelo Banco Central e certificada PCI-DSS.
+            </span>
+          </div>
+        </div>
+      </div>
 
       <p className="planos-rodape">
         Uma <strong>conversa</strong> é um cliente atendido no mês, não importa quantas mensagens

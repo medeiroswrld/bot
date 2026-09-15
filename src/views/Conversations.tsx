@@ -313,7 +313,7 @@ const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; cam
         {!isCustomer && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.65rem', fontWeight: 700, color: labelColor }}>
-              {campanha ? 'Campanha' : isBot ? 'Bot' : 'Atendente'}
+              {campanha ? 'Disparo' : isBot ? 'Bot' : 'Atendente'}
             </span>
             {campanha && (
               <span

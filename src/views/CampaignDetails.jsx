@@ -68,9 +68,9 @@ const CampaignDetails = () => {
             <header className="view-header-flex">
                 <div className="view-header">
                     <button className="btn-text" onClick={() => navigate('/campanhas')} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
-                        <ArrowLeft size={16} /> Campanhas
+                        <ArrowLeft size={16} /> Disparos em massa
                     </button>
-                    <h1>{campaign?.name || 'Campanha'}</h1>
+                    <h1>{campaign?.name || 'Disparo'}</h1>
                     <p>{campaign?.template?.display_name} • {campaign?.status}</p>
                 </div>
             </header>
