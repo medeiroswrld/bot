@@ -60,6 +60,11 @@ const DesafioMFA = ({ onConfirmado }) => {
             style={{
               width: '100%', textAlign: 'center', fontSize: '1.6rem',
               letterSpacing: '0.4rem', padding: '0.6rem', fontFamily: 'monospace',
+              background: 'var(--card-bg)',
+              color: 'var(--color-text)',
+              caretColor: 'var(--accent)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 10,
             }}
           />
 

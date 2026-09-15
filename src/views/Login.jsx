@@ -117,7 +117,7 @@ const Login = () => {
               <MailCheck size={42} style={{ color: 'var(--accent)' }} />
               <h2 style={{ margin: '1rem 0 0.5rem' }}>Confirme seu e-mail</h2>
               <p style={{ fontSize: '0.9rem', color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-                Enviamos um código de 6 dígitos para <strong>{email}</strong>.
+                Enviamos um código para <strong>{email}</strong>.
                 Digite ele abaixo para ativar sua conta.
               </p>
 
@@ -125,7 +125,15 @@ const Login = () => {
                 e.preventDefault();
                 setError(''); setAviso('');
                 const limpo = codigo.replace(/\D/g, '');
-                if (limpo.length !== 6) { setError('O código tem 6 dígitos.'); return; }
+                // Sem numero fixo aqui. O tamanho do codigo e CONFIGURACAO do
+                // Supabase (mailer_otp_length) e ja veio 8 quando a tela pedia
+                // 6 — o cliente digitava o codigo certo e a tela recusava antes
+                // de mandar. A faixa cobre qualquer valor razoavel que alguem
+                // configure depois.
+                if (limpo.length < 4 || limpo.length > 10) {
+                  setError('Digite o código que chegou no seu e-mail.');
+                  return;
+                }
                 setIsLoading(true);
                 const r = await confirmarCadastro(email, limpo);
                 if (!r.success) {
@@ -142,12 +150,21 @@ const Login = () => {
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   autoFocus
-                  maxLength={7}
+                  maxLength={10}
                   placeholder="000000"
                   style={{
                     width: '100%', textAlign: 'center', fontSize: '1.7rem',
                     letterSpacing: '0.45rem', padding: '0.65rem', fontFamily: 'monospace',
                     marginTop: '1.25rem',
+                    // Cor e fundo EXPLICITOS: sem isto, o campo herda o estilo
+                    // global e no tema escuro o digito sai quase invisivel —
+                    // aconteceu de verdade, com o cliente sem enxergar o que
+                    // estava digitando.
+                    background: 'var(--card-bg)',
+                    color: 'var(--color-text)',
+                    caretColor: 'var(--accent)',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 10,
                   }}
                 />
                 <button className="btn-primary" type="submit" disabled={isLoading}
