@@ -975,3 +975,82 @@
      precisa ser menor pra caber as duas. */
   .lead-kanban-column { max-height: 60vh; }
 }
+
+/* ─── Escolha de plano ────────────────────────────────────────────────────────
+   Página de preços do próprio produto, mostrada a quem se cadastrou e ainda
+   não tem assinatura. Escrita no CSS do projeto de propósito: o componente de
+   referência era Tailwind + shadcn + Next, e trazer aquilo pra cá significaria
+   instalar um segundo sistema de design pra manter — cada tela nova viraria uma
+   decisão de "qual dos dois eu uso aqui".                                     */
+
+.planos-tela {
+  min-height: 100vh;
+  background: var(--bg-app);
+  padding: 48px 20px 64px;
+  overflow-y: auto;
+}
+
+.planos-cabecalho { text-align: center; max-width: 620px; margin: 0 auto 40px; }
+.planos-cabecalho h1 {
+  font-size: 1.9rem; font-weight: 700; letter-spacing: -0.5px; margin: 0 0 10px;
+  color: var(--color-text);
+}
+.planos-cabecalho p { color: var(--color-text-muted); line-height: 1.6; margin: 0; }
+
+.planos-grade {
+  display: grid; gap: 16px; max-width: 1120px; margin: 0 auto;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: start;
+}
+@media (max-width: 1080px) { .planos-grade { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px)  { .planos-grade { grid-template-columns: 1fr; } }
+
+.plano-card {
+  background: var(--card-bg); border: 1px solid var(--border-color);
+  border-radius: 16px; padding: 24px 20px; display: flex; flex-direction: column;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.plano-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md, 0 10px 30px rgba(0,0,0,.08)); }
+
+/* O destacado sobe um degrau e ganha a borda da marca. Sem animação de
+   entrada: a página é a primeira coisa que o cliente novo vê, e ela precisa
+   estar legível no primeiro frame, não depois de uma coreografia. */
+.plano-card.destaque {
+  border-color: var(--accent); border-width: 2px; padding: 26px 20px;
+  position: relative; box-shadow: 0 12px 34px rgba(91, 91, 255, .14);
+}
+@media (min-width: 1081px) { .plano-card.destaque { margin-top: -12px; } }
+
+.plano-selo {
+  position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+  background: var(--accent); color: #fff; font-size: .68rem; font-weight: 700;
+  letter-spacing: .4px; padding: 4px 12px; border-radius: 999px; white-space: nowrap;
+}
+
+.plano-nome {
+  font-size: .78rem; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
+  color: var(--color-text-muted); margin: 0 0 12px;
+}
+.plano-preco { display: flex; align-items: baseline; gap: 4px; margin-bottom: 4px; }
+.plano-preco strong { font-size: 2.1rem; font-weight: 700; letter-spacing: -1px; color: var(--color-text); }
+.plano-preco span { font-size: .85rem; color: var(--color-text-muted); }
+.plano-limite { font-size: .82rem; color: var(--color-text-muted); margin: 0 0 18px; line-height: 1.5; }
+
+.plano-itens { list-style: none; padding: 0; margin: 0 0 20px; display: flex; flex-direction: column; gap: 9px; }
+.plano-itens li { display: flex; gap: 8px; font-size: .86rem; line-height: 1.45; color: var(--color-text); }
+.plano-itens svg { flex-shrink: 0; margin-top: 2px; color: var(--accent); }
+
+.plano-botao { width: 100%; margin-top: auto; justify-content: center; }
+
+.plano-personalizado {
+  max-width: 1120px; margin: 20px auto 0; background: var(--card-bg);
+  border: 1px dashed var(--border-color); border-radius: 16px; padding: 22px 26px;
+  display: flex; gap: 18px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+}
+.plano-personalizado h3 { margin: 0 0 4px; font-size: 1rem; }
+.plano-personalizado p  { margin: 0; font-size: .86rem; color: var(--color-text-muted); line-height: 1.5; }
+
+.planos-rodape {
+  max-width: 1120px; margin: 28px auto 0; text-align: center;
+  font-size: .8rem; color: var(--color-text-muted); line-height: 1.6;
+}

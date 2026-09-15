@@ -94,6 +94,18 @@ Deno.serve(async (req) => {
 
     const admin = createClient(url, serviceKey, { auth: { autoRefreshToken: false, persistSession: false } });
 
+    // O cliente pode escolher a propria faixa na tela de planos.
+    //
+    // Isso NAO contradiz a trava do banco, que impede o lojista de mudar
+    // `plano` pela API. A diferenca e quem escreve: la e o navegador dele; aqui
+    // e o servidor, depois de ler o preco da tabela `planos`. Ele escolhe o
+    // rotulo; o valor vem de um lugar que ele nao alcanca.
+    let escolhido = '';
+    try {
+      const corpo = await req.json();
+      escolhido = String((corpo as { plano?: string })?.plano ?? '').trim();
+    } catch { /* sem corpo: mantem o plano que ja estiver na loja */ }
+
     const { data: loja, error: erroLoja } = await admin
       .from('company_settings')
       .select('company_name, billing_amount, assinatura_status')
@@ -117,8 +129,31 @@ Deno.serve(async (req) => {
     // escrita para o LOJISTA, não para o desenvolvedor: quem vai ler isso é o
     // dono de uma revenda que acabou de se cadastrar, e "configure o secret"
     // não significa nada pra ele.
+    // Plano escolhido agora tem prioridade sobre o que estava gravado.
+    let valorDoPlano = 0;
+    if (escolhido) {
+      const { data: p } = await admin
+        .from('planos').select('slug, nome, preco').eq('slug', escolhido).maybeSingle();
+
+      if (!p) return json({ error: 'Plano desconhecido.' }, 400);
+
+      // 'personalizado' nao tem preco de tabela: e conversa comercial, nao
+      // botao de pagar. Deixar passar geraria cobranca de valor nenhum.
+      if (p.preco === null || p.preco === undefined) {
+        return json({
+          error: 'Esse plano é combinado direto com a gente. Fale com o suporte para fecharmos o valor.',
+        }, 409);
+      }
+
+      valorDoPlano = Number(p.preco);
+      await admin.from('company_settings')
+        .update({ plano: p.slug, billing_amount: valorDoPlano })
+        .eq('user_id', user.id);
+      console.log('[assinatura] plano escolhido pelo lojista', { user: user.id, plano: p.slug });
+    }
+
     const padrao = Number(Deno.env.get('ASSINATURA_VALOR_PADRAO') ?? '');
-    const valor = Number(loja?.billing_amount) || (Number.isFinite(padrao) && padrao > 0 ? padrao : 0);
+    const valor = valorDoPlano || Number(loja?.billing_amount) || (Number.isFinite(padrao) && padrao > 0 ? padrao : 0);
     if (!valor) {
       return json({
         error: 'Seu plano ainda está sendo configurado. Assim que combinarmos o valor, a assinatura aparece aqui para você ativar.',

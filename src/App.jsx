@@ -20,6 +20,7 @@ const SettingsView = lazy(() => import('./views/Settings.jsx'));
 const Login        = lazy(() => import('./views/Login.jsx'));
 const DesafioMFA   = lazy(() => import('./views/DesafioMFA.jsx'));
 const NovaSenha    = lazy(() => import('./views/NovaSenha.jsx'));
+const EscolherPlano = lazy(() => import('./views/EscolherPlano.jsx'));
 const Conversations = lazy(() => import('./views/Conversations.tsx'));
 const BotSettings  = lazy(() => import('./views/BotSettings.jsx'));
 const WaitingList  = lazy(() => import('./views/WaitingList.jsx'));
@@ -359,7 +360,7 @@ const LoadingScreen = () => (
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
 const AppContent = () => {
-  const { isAuthenticated, isLoading, precisaNovaSenha } = useAppContext();
+  const { isAuthenticated, isLoading, precisaNovaSenha, companySettings } = useAppContext();
 
   // Portao do segundo fator.
   //
@@ -399,6 +400,28 @@ const AppContent = () => {
       </Suspense>
     );
   }
+  // Conta NOVA, que nunca pagou, escolhe o plano antes de entrar.
+  //
+  // A regra tem duas metades, e a segunda importa mais que a primeira:
+  //
+  //   nunca pagou      -> escolhe o plano agora (nao ha o que acessar ainda)
+  //   ja pagou um dia  -> NUNCA cai aqui, mesmo em atraso ou cancelada
+  //
+  // Quem ja foi cliente mantem o CRM acessivel com o aviso no topo. Segurar o
+  // estoque e os leads de uma loja como refem de fatura e o tipo de coisa que
+  // vira reclamacao publica — e o bot ja esta pausado, que e pressao suficiente.
+  //
+  // `isento` fica de fora por definicao: e quem paga por fora.
+  const assinatura = companySettings?.assinatura_status;
+  const nuncaPagou = !companySettings?.ultimo_pagamento_em;
+  if (companySettings && assinatura === 'sem_assinatura' && nuncaPagou) {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <EscolherPlano />
+      </Suspense>
+    );
+  }
+
   if (etapa === 'verificando') return <LoadingScreen />;
   if (etapa === 'desafio') {
     return (
