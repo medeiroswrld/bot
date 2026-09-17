@@ -6,7 +6,8 @@ import {
     Video, Loader2
 , CalendarDays, Printer, ArrowLeftRight, Lock } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
-import { MODELO_PADRAO, montarContrato, dadosDoContrato, imprimirContrato, formatarCPF, cpfValido } from '../lib/contrato.js';
+import { montarContrato, dadosDoContrato, imprimirContrato, formatarCPF, cpfValido } from '../lib/contrato.js';
+import { useModelosContrato, SeletorModelo } from '../lib/useModelosContrato.jsx';
 import { supabase } from '../lib/supabase.js';
 import { prepararImagem, ehHeic } from '../lib/imagem.js';
 import MatchFoundModal from './MatchFoundModal.jsx';
@@ -955,14 +956,15 @@ const SellModal = ({ car, onClose, onConfirm }) => {
 // "imprimo amanha" e nao imprime.
 const ContratoModal = ({ carro, venda, onClose }) => {
     const { companySettings } = useAppContext();
-    const modelo = companySettings?.contract_template || MODELO_PADRAO;
-    const html = montarContrato(modelo, dadosDoContrato({ loja: companySettings, carro, venda }));
+    const { modelos, escolhido, setEscolhido, htmlDoModelo } = useModelosContrato();
+    const html = montarContrato(htmlDoModelo, dadosDoContrato({ loja: companySettings, carro, venda }));
 
     return (
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 780 }}>
-                <div className="modal-header">
-                    <h2>Contrato de Compra e Venda</h2>
+                <div className="modal-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                    <h2>Contrato</h2>
+                    <SeletorModelo modelos={modelos} escolhido={escolhido} onEscolher={setEscolhido} />
                 </div>
                 <div className="modal-body" style={{ maxHeight: '60vh', overflowY: 'auto', background: '#fff', color: '#111', padding: 22, borderRadius: 8 }}>
                     <div dangerouslySetInnerHTML={{ __html: html }} />

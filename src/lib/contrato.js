@@ -160,6 +160,8 @@ export const CAMPOS = [
   ['renavam', 'Renavam'], ['ano_modelo', 'Ano do modelo'],
   ['combustivel', 'Combustível'],
   ['valor', 'Valor'], ['valor_extenso', 'Valor por extenso'],
+  ['valor_tabela', 'Valor de tabela'], ['valor_desconto', 'Valor do desconto'],
+  ['hora', 'Hora da assinatura'],
   ['forma_pagamento', 'Forma de pagamento'], ['vendedor', 'Vendedor'], ['data', 'Data da venda'],
   // Veículo recebido em troca. O contrato de loja costuma ter cláusula inteira
   // sobre ele — quem responde por multa até transferir, o que vale se aparecer
@@ -281,6 +283,23 @@ export const dadosDoContrato = ({ loja, carro, venda }) => ({
     ? Number(venda.trade_in_km).toLocaleString('pt-BR') : '',
   troca_valor: venda?.trade_in_value ? dinheiro(venda.trade_in_value) : '',
   troca_valor_extenso: venda?.trade_in_value ? porExtenso(venda.trade_in_value) : '',
+
+  // Preco de tabela e desconto. Contratos mais completos discriminam os tres
+  // valores, e os dois primeiros ja existem: o `price` do carro e o anunciado,
+  // e o desconto e a diferenca ate o que foi efetivamente pago. Desconto
+  // negativo (vendeu acima do anunciado) sai vazio em vez de virar numero com
+  // sinal, que num contrato pareceria erro de digitacao.
+  valor_tabela: carro?.price ? dinheiro(carro.price) : '',
+  valor_desconto: (() => {
+    const tabela = Number(carro?.price ?? 0);
+    const pago   = Number(venda?.salePrice ?? 0);
+    const dif = tabela - pago;
+    return tabela > 0 && dif > 0 ? dinheiro(dif) : '';
+  })(),
+
+  // Hora da assinatura. A clausula de responsabilidade civil costuma marcar
+  // data E hora, porque e a partir dali que multa passa a ser do comprador.
+  hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
 
   valor: dinheiro(venda?.salePrice),
   valor_extenso: porExtenso(venda?.salePrice),

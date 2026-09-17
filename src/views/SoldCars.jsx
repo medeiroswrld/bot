@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Search, TrendingUp, ShoppingCart, X, Package, Camera, FileText, Printer, RefreshCw, Trash2 } from 'lucide-react';
 import { useAppContext, formatDateStr } from '../context/AppContext.jsx';
-import { MODELO_PADRAO, montarContrato, dadosDoContrato, imprimirContrato, formatarCPF } from '../lib/contrato.js';
+import { montarContrato, dadosDoContrato, imprimirContrato, formatarCPF } from '../lib/contrato.js';
+import { useModelosContrato, SeletorModelo } from '../lib/useModelosContrato.jsx';
 import CustosDoVeiculo from './CustosDoVeiculo.jsx';
 
 // Par rotulo/valor. Valor ausente vira travessao em vez de sumir: espaco vazio
@@ -40,15 +41,19 @@ const dinheiro = (v) => (v == null || v === '' ? '' : `R$ ${Number(v).toLocaleSt
 const ContratoDaVenda = ({ car, onClose }) => {
     const { companySettings } = useAppContext();
     const venda = { ...car, salePrice: car.sold_price, saleDate: car.sold_at, sellerName: car.sold_by };
+    const { modelos, escolhido, setEscolhido, htmlDoModelo } = useModelosContrato();
     const html = montarContrato(
-        companySettings?.contract_template || MODELO_PADRAO,
+        htmlDoModelo,
         dadosDoContrato({ loja: companySettings, carro: car, venda }),
     );
 
     return (
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 780 }}>
-                <div className="modal-header"><h2>Contrato de Compra e Venda</h2></div>
+                <div className="modal-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                    <h2>Contrato</h2>
+                    <SeletorModelo modelos={modelos} escolhido={escolhido} onEscolher={setEscolhido} />
+                </div>
                 <div className="modal-body" style={{ maxHeight: '60vh', overflowY: 'auto',
                                                      background: '#fff', color: '#111',
                                                      padding: 22, borderRadius: 8 }}>
