@@ -956,7 +956,7 @@ const SellModal = ({ car, onClose, onConfirm }) => {
 // "imprimo amanha" e nao imprime.
 const ContratoModal = ({ carro, venda, onClose }) => {
     const { companySettings } = useAppContext();
-    const { modelos, escolhido, setEscolhido, htmlDoModelo } = useModelosContrato();
+    const { modelos, escolhido, setEscolhido, htmlDoModelo } = useModelosContrato(companySettings?.contract_template);
     const html = montarContrato(htmlDoModelo, dadosDoContrato({ loja: companySettings, carro, venda }));
 
     return (

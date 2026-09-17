@@ -41,7 +41,7 @@ const dinheiro = (v) => (v == null || v === '' ? '' : `R$ ${Number(v).toLocaleSt
 const ContratoDaVenda = ({ car, onClose }) => {
     const { companySettings } = useAppContext();
     const venda = { ...car, salePrice: car.sold_price, saleDate: car.sold_at, sellerName: car.sold_by };
-    const { modelos, escolhido, setEscolhido, htmlDoModelo } = useModelosContrato();
+    const { modelos, escolhido, setEscolhido, htmlDoModelo } = useModelosContrato(companySettings?.contract_template);
     const html = montarContrato(
         htmlDoModelo,
         dadosDoContrato({ loja: companySettings, carro: car, venda }),

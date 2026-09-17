@@ -10,6 +10,7 @@ import { MODELO_PADRAO, CAMPOS, formatarCNPJ } from '../lib/contrato.js';
 import { prepararImagem, ehHeic } from '../lib/imagem.js';
 import { detectar, aplicar } from '../lib/marcadores.js';
 import DoisFatores from './DoisFatores.jsx';
+import OutrosContratos from './OutrosContratos.jsx';
 import Assinatura from './Assinatura.jsx';
 
 // ─── Assistente de marcadores ────────────────────────────────────────────────
@@ -1643,6 +1644,11 @@ const Settings = () => {
                         </button>
                     </div>
                 </section>
+            </div>
+
+            {/* -- Outros modelos de contrato ----------------------------------- */}
+            <div style={{ marginTop: '2rem' }}>
+                <OutrosContratos />
             </div>
 
             {/* -- Senha -------------------------------------------------------- */}
