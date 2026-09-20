@@ -11,6 +11,7 @@ import { prepararImagem, ehHeic } from '../lib/imagem.js';
 import { detectar, aplicar } from '../lib/marcadores.js';
 import DoisFatores from './DoisFatores.jsx';
 import OutrosContratos from './OutrosContratos.jsx';
+import VitrineWhatsApp from './VitrineWhatsApp.jsx';
 import Assinatura from './Assinatura.jsx';
 
 // ─── Assistente de marcadores ────────────────────────────────────────────────
@@ -1644,6 +1645,11 @@ const Settings = () => {
                         </button>
                     </div>
                 </section>
+            </div>
+
+            {/* -- Vitrine no WhatsApp ------------------------------------------ */}
+            <div style={{ marginTop: '2rem' }}>
+                <VitrineWhatsApp />
             </div>
 
             {/* -- Outros modelos de contrato ----------------------------------- */}

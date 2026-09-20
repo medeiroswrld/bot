@@ -1,6 +1,6 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
-import { sendMessage, sendMessageComId, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
+import { sendMessage, sendMessageComId, sendImage, sendVideo, resolveWhatsAppToken, sendListaInterativa, sendCatalogo } from '../_shared/whatsapp.ts';
 import { enviarSocial, enviarImagemSocial } from '../_shared/social.ts';
 import { maskName } from '../_shared/maskPII.ts';
 import { withRequest, type Logger } from '../_shared/logger.ts';
@@ -853,17 +853,85 @@ async function executeTool(
       }
     }
 
+    // ── A VITRINE ────────────────────────────────────────────────────────────
+    //
+    // Antes daqui o bot escrevia os carros um embaixo do outro. Com quatro ou
+    // cinco vira textao, e foi essa a reclamacao: "esta ficando feio".
+    //
+    // Agora, quando a loja tem a lista ligada, o estoque sai como MENU nativo do
+    // WhatsApp — um botao que abre uma lista rolavel, com titulo e descricao por
+    // carro, onde o cliente TOCA em vez de digitar. A resposta dele chega como
+    // `list_reply`, que o parseInboundMessage ja le como texto.
+    //
+    // Tres condicoes, e cada uma tem motivo:
+    //
+    //   canal whatsapp  — Instagram e Messenger nao tem esse recurso
+    //   2 ou mais       — menu com um item so e pior que uma frase
+    //   ate 10          — limite da Meta; com 11 ela recusa a mensagem INTEIRA
+    //
+    // Se o envio falhar, nada e perdido: a instrucao abaixo volta a mandar o
+    // modelo escrever a lista em texto, como sempre fez.
+    let listaEnviada = false;
+    if (ctxCanal === 'whatsapp' && data.length >= 2) {
+      const { data: vitrine } = await supabase
+        .from('company_settings')
+        .select('lista_interativa, catalogo_habilitado')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (vitrine?.lista_interativa !== false) {
+        const linhas = (data as CarListRow[]).slice(0, 10).map((c) => {
+          const nome = [c.brand, c.model].filter(Boolean).join(' ').trim() || 'Veiculo';
+          const preco = c.price ? `R$ ${Number(c.price).toLocaleString('pt-BR')}` : 'consulte';
+          const km = c.mileage != null ? `${Number(c.mileage).toLocaleString('pt-BR')} km` : '';
+          return {
+            id: String(c.id),
+            titulo: nome,
+            // Ano, km e preco na descricao: e o que decide se a pessoa abre ou
+            // nao. O titulo sozinho ("HONDA CIVIC") nao diferencia dois do
+            // mesmo modelo no patio.
+            descricao: [c.year, km, preco].filter(Boolean).join(' · '),
+          };
+        });
+
+        listaEnviada = await sendListaInterativa(
+          customerPhone,
+          totalReal > linhas.length
+            ? `Separei ${linhas.length} de ${totalReal} opcoes. Toque para ver:`
+            : `Separei ${linhas.length} opcoes pra voce. Toque para ver:`,
+          'Ver veiculos',
+          [{ titulo: 'Disponiveis', linhas }],
+          phoneNumberId,
+          token,
+          log,
+        );
+      }
+
+      // Catalogo: vitrine nativa com foto e preco, so pra quem ligou. Nasce
+      // desligado porque depende de sincronizacao com o Commerce Manager, e
+      // catalogo desatualizado mostra carro ja vendido.
+      if (vitrine?.catalogo_habilitado === true) {
+        await sendCatalogo(customerPhone, 'Veja tambem nosso catalogo completo:', phoneNumberId, token, log);
+      }
+    }
+
     return {
       // total = o que a loja REALMENTE tem nesse filtro; exibindo = o que veio aqui.
       total: totalReal,
       exibindo: data.length,
+      ...(listaEnviada ? { lista_ja_enviada: true } : {}),
       ...(totalReal > data.length
         ? { aviso: `A loja tem ${totalReal} veículos nesse critério; estes são os ${data.length} mais baratos. Ao falar o número, use ${totalReal} — e ofereça filtrar (marca, faixa de preço, ano) pra mostrar os outros.` }
         : {}),
       // O cliente já disse o que queria (faixa, marca, ano): esconder parte da
       // lista faz ele achar que a loja tem menos do que tem. Antes o modelo
       // escolhia "destaques" por conta e mostrava 3 de 7.
-      instrucao: `Liste TODOS os ${data.length} veículos acima, sem escolher destaques e sem omitir nenhum — o cliente pediu esta faixa e tem direito de ver tudo que cabe nela. Uma linha por carro, curta: modelo, ano, preço e 1 ou 2 diferenciais. Só depois pergunte qual chamou a atenção.`,
+      instrucao: listaEnviada
+        // O menu JA foi entregue ao cliente. Repetir os mesmos carros em texto
+        // logo abaixo seria a mesma lista duas vezes na tela — pior do que
+        // antes de existir menu.
+        ? `Os ${data.length} veículos JÁ foram enviados ao cliente como um menu interativo, que ele pode tocar. NÃO repita a lista em texto e NÃO cite os modelos um a um. Escreva só uma frase curta convidando a abrir o menu e dizendo que você ajuda a escolher.`
+        : `Liste TODOS os ${data.length} veículos acima, sem escolher destaques e sem omitir nenhum — o cliente pediu esta faixa e tem direito de ver tudo que cabe nela. Uma linha por carro, curta: modelo, ano, preço e 1 ou 2 diferenciais. Só depois pergunte qual chamou a atenção.`,
       veiculos: (data as CarListRow[]).map((c) => {
         const v = visitasPorCarro.get(String(c.id));
         return {

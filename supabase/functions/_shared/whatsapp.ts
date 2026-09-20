@@ -391,6 +391,142 @@ export async function sendVideo(
   return true;
 }
 
+/**
+ * Corta respeitando o limite da Meta, com reticencias.
+ *
+ * Os limites do menu interativo sao apertados e a API RECUSA a mensagem inteira
+ * quando um campo passa: titulo de linha 24, descricao 72, botao 20, secao 24.
+ * "VOLKSWAGEN T-CROSS COMFORTLINE" tem 30 — ou seja, o nome de um carro comum
+ * derrubaria a lista toda se fosse mandado cru.
+ */
+function corta(texto: string, limite: number): string {
+  const t = String(texto ?? '').trim();
+  return t.length <= limite ? t : `${t.slice(0, limite - 1).trimEnd()}…`;
+}
+
+export interface LinhaDaLista {
+  id: string;
+  titulo: string;
+  descricao?: string;
+}
+
+/**
+ * Menu interativo com ate 10 linhas — a forma bonita de mostrar o estoque.
+ *
+ * Por que isto e melhor que texto: o WhatsApp desenha um botao que abre uma
+ * lista rolavel, com titulo e descricao por item, e o cliente TOCA em vez de
+ * digitar. Some o "textao" de dez carros empilhados, que era a reclamacao.
+ *
+ * E melhor que o catalogo tambem, pelo motivo mais simples: nao depende de
+ * sincronizar nada. Catalogo desatualizado mostra carro vendido; esta lista sai
+ * do banco no instante do envio, entao nunca mente.
+ *
+ * A resposta chega como `list_reply` e o parseInboundMessage ja a le como
+ * texto — o titulo da linha vira a mensagem do cliente.
+ *
+ * Maximo de 10 linhas no total, somando todas as secoes: e limite da Meta, e
+ * mandar 11 faz a API recusar a mensagem inteira.
+ */
+export async function sendListaInterativa(
+  to: string,
+  corpo: string,
+  rotuloBotao: string,
+  secoes: Array<{ titulo?: string; linhas: LinhaDaLista[] }>,
+  phoneNumberId?: string,
+  token?: string,
+  log?: Logger,
+): Promise<boolean> {
+  const l = log ?? logger;
+  const tk = (token ?? Deno.env.get('WHATSAPP_TOKEN') ?? '').trim();
+  const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
+  if (!tk || !pid) { l.error('token ou phone_number_id ausente', { action: 'sendLista' }); return false; }
+
+  // Corta em 10 linhas ANTES de montar: a API recusaria, e uma lista recusada
+  // deixa o cliente sem resposta nenhuma.
+  let restantes = 10;
+  const secoesLimpas = secoes
+    .map((sec) => {
+      const linhas = sec.linhas.slice(0, Math.max(0, restantes)).map((r) => ({
+        id: corta(r.id, 200),
+        title: corta(r.titulo, 24),
+        ...(r.descricao ? { description: corta(r.descricao, 72) } : {}),
+      }));
+      restantes -= linhas.length;
+      return { ...(sec.titulo ? { title: corta(sec.titulo, 24) } : {}), rows: linhas };
+    })
+    .filter((sec) => sec.rows.length);
+
+  if (!secoesLimpas.length) return false;
+
+  const res = await fetch(`https://graph.facebook.com/v20.0/${pid}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'list',
+        body: { text: corta(corpo, 1024) },
+        action: { button: corta(rotuloBotao, 20), sections: secoesLimpas },
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    l.error('falha ao enviar lista', { action: 'sendLista', to, status: res.status, body: await res.text() });
+    return false;
+  }
+  l.info('lista enviada', { action: 'sendLista', to, linhas: 10 - restantes });
+  return true;
+}
+
+/**
+ * Catalogo do WhatsApp — a vitrine nativa, quando a loja tem catalogo ligado.
+ *
+ * Diferente da lista acima, esta depende de um catalogo criado no Commerce
+ * Manager e conectado a WABA, com os produtos sincronizados. Por isso e
+ * OPCIONAL e desligada por padrao: catalogo fora de sincronia mostra carro
+ * vendido, e cliente pedindo veiculo que nao existe mais e pior que nao ter
+ * vitrine nenhuma.
+ */
+export async function sendCatalogo(
+  to: string,
+  corpo: string,
+  phoneNumberId?: string,
+  token?: string,
+  log?: Logger,
+): Promise<boolean> {
+  const l = log ?? logger;
+  const tk = (token ?? Deno.env.get('WHATSAPP_TOKEN') ?? '').trim();
+  const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
+  if (!tk || !pid) { l.error('token ou phone_number_id ausente', { action: 'sendCatalogo' }); return false; }
+
+  const res = await fetch(`https://graph.facebook.com/v20.0/${pid}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tk}` },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'interactive',
+      interactive: {
+        type: 'catalog_message',
+        body: { text: corta(corpo, 1024) },
+        action: { name: 'catalog_message' },
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    l.error('falha ao enviar catalogo', { action: 'sendCatalogo', to, status: res.status, body: await res.text() });
+    return false;
+  }
+  l.info('catalogo enviado', { action: 'sendCatalogo', to });
+  return true;
+}
+
 export async function sendMessage(
   to: string,
   text: string,
