@@ -879,6 +879,29 @@ async function executeTool(
         .eq('user_id', userId)
         .maybeSingle();
 
+      // ── O menu NAO se repete ────────────────────────────────────────────
+      //
+      // Caso real de 21/09: o cliente disse "nao da pra ver todos" e o bot
+      // respondeu, duas vezes, que os carros "estao no menu ali em cima".
+      // Quem le isso entende "vira-se".
+      //
+      // Cliente que pergunta de novo depois de receber um menu esta com
+      // DIFICULDADE — mandar outro menu e insistir no que nao funcionou. A
+      // partir da segunda vez a resposta sai em texto, escrita.
+      //
+      // 15 minutos porque e a duracao tipica de uma conversa de atendimento:
+      // depois disso, um menu novo e util de novo em vez de repetitivo.
+      const { data: conv } = await supabase
+        .from('conversations')
+        .select('menu_enviado_em')
+        .eq('id', conversationId)
+        .maybeSingle();
+
+      const menuRecente = Boolean(
+        conv?.menu_enviado_em &&
+        Date.now() - new Date(conv.menu_enviado_em as string).getTime() < 15 * 60_000,
+      );
+
       // ── UMA vitrine por resposta, nunca as duas ──────────────────────────
       //
       // A primeira versao mandava o menu E o catalogo quando os dois estavam
@@ -896,7 +919,7 @@ async function executeTool(
       // pra quem ja disse o que procura seria jogar 22 carros na cara de quem
       // pediu um. Por isso o menu ganha sempre que houve filtro, mesmo com o
       // catalogo ligado.
-      const usarCatalogo = vitrine?.catalogo_habilitado === true && !temFiltro;
+      const usarCatalogo = vitrine?.catalogo_habilitado === true && !temFiltro && !menuRecente;
 
       if (usarCatalogo) {
         // Vitrine completa, pra pergunta aberta.
@@ -907,7 +930,7 @@ async function executeTool(
         );
       }
 
-      if (!usarCatalogo && vitrine?.lista_interativa !== false) {
+      if (!usarCatalogo && !menuRecente && vitrine?.lista_interativa !== false) {
         const linhas = (data as CarListRow[]).slice(0, 10).map((c) => {
           const nome = [c.brand, c.model].filter(Boolean).join(' ').trim() || 'Veiculo';
           const preco = c.price ? `R$ ${Number(c.price).toLocaleString('pt-BR')}` : 'consulte';
@@ -935,6 +958,14 @@ async function executeTool(
         );
       }
 
+      // Registra o envio DEPOIS de dar certo: menu que falhou nao pode calar o
+      // proximo, senao um erro de rede deixaria a conversa sem vitrine nenhuma.
+      if (listaEnviada) {
+        await supabase.from('conversations')
+          .update({ menu_enviado_em: new Date().toISOString() })
+          .eq('id', conversationId);
+      }
+
     }
 
     return {
@@ -952,7 +983,9 @@ async function executeTool(
         // O menu JA foi entregue ao cliente. Repetir os mesmos carros em texto
         // logo abaixo seria a mesma lista duas vezes na tela — pior do que
         // antes de existir menu.
-        ? `Os ${data.length} veículos JÁ foram enviados ao cliente como um menu interativo, que ele pode tocar. NÃO repita a lista em texto e NÃO cite os modelos um a um. Escreva só uma frase curta convidando a abrir o menu e dizendo que você ajuda a escolher.`
+        ? `Os ${data.length} veículos JÁ foram enviados ao cliente como um menu interativo, que ele pode tocar. Nesta resposta, escreva só uma frase curta convidando a abrir o menu — não repita os modelos um a um.
+
+REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que não consegue abrir, que não apareceu, ou se ele perguntar DE NOVO pelos carros, então ESCREVA A LISTA EM TEXTO na hora, com modelo, ano e preço, e peça desculpa pela dificuldade. NUNCA responda mandando ele "olhar o menu" uma segunda vez — isso soa como "vira-se" e é exatamente o que não pode acontecer.`
         : `Liste TODOS os ${data.length} veículos acima, sem escolher destaques e sem omitir nenhum — o cliente pediu esta faixa e tem direito de ver tudo que cabe nela. Uma linha por carro, curta: modelo, ano, preço e 1 ou 2 diferenciais. Só depois pergunte qual chamou a atenção.`,
       veiculos: (data as CarListRow[]).map((c) => {
         const v = visitasPorCarro.get(String(c.id));
