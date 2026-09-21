@@ -79,14 +79,14 @@ const VitrineWhatsApp = () => {
           ligado={lista}
           onClick={() => gravar({ lista_interativa: !lista })}
           titulo="Lista interativa (recomendado)"
-          texto={'Em vez de escrever os carros um embaixo do outro, o bot manda um botão que abre um menu — o cliente toca no veículo em vez de digitar. Mostra até 10 por mensagem, que é o limite do WhatsApp.'}
+          texto={'Quando o cliente JÁ DISSE o que procura ("um Gol até 40 mil"), o bot manda um botão que abre um menu com exatamente os carros que batem — ele toca em vez de digitar. Até 10 por mensagem, que é o limite do WhatsApp.'}
         />
 
         <Chave
           ligado={catalogo}
           onClick={() => gravar({ catalogo_habilitado: !catalogo })}
           titulo="Catálogo do WhatsApp"
-          texto={'A vitrine nativa, com foto e preço. Exige um catálogo criado no Commerce Manager da Meta e conectado ao seu número.'}
+          texto={'Usado quando o cliente pergunta de forma ABERTA ("o que vocês têm?"). Mostra a vitrine inteira, com foto e preço. Exige um catálogo criado no Commerce Manager da Meta.'}
           aviso={'Enquanto o catálogo não estiver sincronizado com o estoque, ele pode mostrar veículo já vendido — e o cliente pede um carro que não existe mais.'}
         />
 
@@ -107,6 +107,22 @@ const VitrineWhatsApp = () => {
         )}
 
         {erro && <p style={{ fontSize: '0.82rem', color: '#dc2626', marginTop: 8 }}>{erro}</p>}
+
+        {/* Com os dois ligados o cliente NAO recebe duas mensagens. Quem decide
+            qual vai e a pergunta dele, nao a configuracao — e a tela precisa
+            dizer isso, senao o lojista imagina o dobro de mensagem. */}
+        {lista && catalogo && (
+          <p style={{
+            fontSize: '0.8rem', color: '#1d4ed8', background: '#eff6ff',
+            border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 12px',
+            marginTop: 4, lineHeight: 1.5,
+          }}>
+            Com os dois ligados, o cliente <strong>nunca recebe as duas coisas</strong>.
+            Quem decide é a pergunta dele: <strong>“o que vocês têm?”</strong> recebe o
+            catálogo completo; <strong>“quero um Gol até 40 mil”</strong> recebe o menu só
+            com os carros que batem.
+          </p>
+        )}
 
         <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '0.75rem',
                     display: 'flex', gap: 6, alignItems: 'flex-start', lineHeight: 1.5 }}>

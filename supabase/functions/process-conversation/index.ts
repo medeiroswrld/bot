@@ -879,7 +879,35 @@ async function executeTool(
         .eq('user_id', userId)
         .maybeSingle();
 
-      if (vitrine?.lista_interativa !== false) {
+      // ── UMA vitrine por resposta, nunca as duas ──────────────────────────
+      //
+      // A primeira versao mandava o menu E o catalogo quando os dois estavam
+      // ligados: duas mensagens seguidas com a mesma funcao. Alem de feio, e
+      // confuso — o cliente nao sabe em qual tocar.
+      //
+      // Quem decide qual vai nao e uma preferencia, e o que o cliente PERGUNTOU:
+      //
+      //   "me mostra o que voces tem"  (sem filtro) -> CATALOGO, que e vitrine
+      //                                               e mostra tudo
+      //   "quero um Gol ate 40 mil"    (com filtro) -> MENU, com exatamente os
+      //                                               carros que batem
+      //
+      // O catalogo NAO sabe filtrar: ele mostra o catalogo inteiro. Mandar ele
+      // pra quem ja disse o que procura seria jogar 22 carros na cara de quem
+      // pediu um. Por isso o menu ganha sempre que houve filtro, mesmo com o
+      // catalogo ligado.
+      const usarCatalogo = vitrine?.catalogo_habilitado === true && !temFiltro;
+
+      if (usarCatalogo) {
+        // Vitrine completa, pra pergunta aberta.
+        listaEnviada = await sendCatalogo(
+          customerPhone,
+          'Aqui esta nosso estoque completo, com foto e preco:',
+          phoneNumberId, token, log,
+        );
+      }
+
+      if (!usarCatalogo && vitrine?.lista_interativa !== false) {
         const linhas = (data as CarListRow[]).slice(0, 10).map((c) => {
           const nome = [c.brand, c.model].filter(Boolean).join(' ').trim() || 'Veiculo';
           const preco = c.price ? `R$ ${Number(c.price).toLocaleString('pt-BR')}` : 'consulte';
@@ -907,12 +935,6 @@ async function executeTool(
         );
       }
 
-      // Catalogo: vitrine nativa com foto e preco, so pra quem ligou. Nasce
-      // desligado porque depende de sincronizacao com o Commerce Manager, e
-      // catalogo desatualizado mostra carro ja vendido.
-      if (vitrine?.catalogo_habilitado === true) {
-        await sendCatalogo(customerPhone, 'Veja tambem nosso catalogo completo:', phoneNumberId, token, log);
-      }
     }
 
     return {
