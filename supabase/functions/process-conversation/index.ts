@@ -2006,13 +2006,29 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
   const { label: todayLabel } = getBrazilDateInfo();
 
   const nomeCliente = customerName ? customerName.split(' ')[0] : null;
+  // O nome JA e conhecido: proibir perguntar de novo e o ponto principal.
+  //
+  // Caso real de 21/09: o bot escreveu "Luciane, qual e o seu nome pra eu
+  // deixar anotado aqui?" — chamou a cliente pelo nome e pediu o nome na
+  // mesma frase. Saber o nome sem ter regra contra perguntar nao bastava: o
+  // modelo tem instrucao de registrar lead e cumpriu essa, sem notar a
+  // contradicao.
   const nomeInfo = nomeCliente
-    ? `\n- Nome do cliente nesta conversa: ${nomeCliente} (use este nome com parcimônia, não a cada mensagem)`
+    ? `\n- Nome do cliente nesta conversa: ${nomeCliente} (use com parcimônia, não a cada mensagem)`
+      + `\n- VOCÊ JÁ SABE O NOME DELE. NUNCA pergunte "qual é o seu nome" nem peça o nome de novo, em hipótese nenhuma — nem para registrar interesse, nem para anotar, nem para agendar. Use ${nomeCliente} direto.`
     : '';
 
   // Sem esta nota o modelo responde a primeira mensagem sem dizer de onde fala.
   // A boas-vindas enlatada so dispara agora quando a abertura e um "oi" seco;
   // quando o cliente ja abre perguntando, quem cumprimenta é ele.
+  // Toque no menu chega como TEXTO com o nome do carro.
+  //
+  // Caso real de 21/09: a cliente tocou em "HYUNDAI TUCSON GLSB" e o bot
+  // respondeu perguntando o nome dela — ignorou o carro que ela acabara de
+  // escolher. Do lado dela, ela apontou para um veiculo e foi ignorada.
+  const toqueNoMenuInfo =
+    '\n- Se a mensagem do cliente for SÓ o nome de um veículo (ex.: "HYUNDAI TUCSON GLSB"), ele TOCOU nesse carro no menu que você enviou. Trate como interesse declarado naquele veículo: busque no estoque e responda com os detalhes e as fotos dele IMEDIATAMENTE. Não pergunte outra coisa antes, não mude de assunto e não peça dados.';
+
   const primeiroContatoInfo = primeiroContato
     ? '\n- Esta é a PRIMEIRA mensagem desta conversa: cumprimente e diga de qual loja você fala, em uma linha curta, ANTES de responder o que foi perguntado.'
     : '';
@@ -2308,7 +2324,7 @@ e destroem a confiança justamente com quem estava mais perto de comprar.
 - Endereço: ${address}
 - Telefone: ${phone}
 - Horário de funcionamento: ${horarios}
-- Data de hoje (Brasília): ${todayLabel}${nomeInfo}${primeiroContatoInfo}
+- Data de hoje (Brasília): ${todayLabel}${nomeInfo}${toqueNoMenuInfo}${primeiroContatoInfo}
 
 Use a data de hoje como referência sempre que o cliente falar em datas relativas ("hoje", "amanhã", "sexta que vem", "fim de semana"). Nunca ofereça nem confirme horário fora do funcionamento da loja: a agenda real — só com horários válidos e que ainda não passaram hoje — vem sempre do ver_horarios_disponiveis; ofereça apenas os horarios_livres que ela retornar.
 
