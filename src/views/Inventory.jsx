@@ -4,10 +4,11 @@ import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
     X, Gauge, Tag, CheckCircle2, ShoppingCart, Package, Camera,
     Video, Loader2
-, CalendarDays, Printer, ArrowLeftRight, Lock } from 'lucide-react';
+, CalendarDays, Printer, ArrowLeftRight, Lock, Copy } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import { montarContrato, dadosDoContrato, imprimirContrato, formatarCPF, cpfValido } from '../lib/contrato.js';
 import { useModelosContrato, SeletorModelo } from '../lib/useModelosContrato.jsx';
+import { estoqueEmTexto, copiarTexto } from '../lib/estoqueTexto.js';
 import { supabase } from '../lib/supabase.js';
 import { prepararImagem, ehHeic } from '../lib/imagem.js';
 import MatchFoundModal from './MatchFoundModal.jsx';
@@ -1126,7 +1127,7 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
 
 
 const Inventory = () => {
-    const { inventory, addInventoryCar, updateInventoryCar, removeInventoryCar, sellCar, waitingListTemplateReady, notifyWaitingListMatch } = useAppContext();
+    const { inventory, addInventoryCar, updateInventoryCar, removeInventoryCar, sellCar, waitingListTemplateReady, notifyWaitingListMatch, companySettings, addToast } = useAppContext();
     const [search, setSearch] = useState('');
     const [filterStatus, setFilterStatus] = useState('todos');
     const [showAddModal, setShowAddModal] = useState(false);
@@ -1198,6 +1199,25 @@ const Inventory = () => {
                     <p>Gerencie seus veículos. <strong>{filtered.length}</strong> listado{filtered.length !== 1 ? 's' : ''}.</p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+                    {/* Copia o que ESTÁ NA TELA, não o estoque inteiro. Filtrou
+                        por "até 50 mil"? copia aquilo. É o que transforma um
+                        documento que ninguém lê numa mensagem que se responde. */}
+                    <button className="btn-secondary" disabled={!filtered.length}
+                        title={filtered.length
+                            ? `Copia os ${filtered.length} veículos listados, em texto, pra colar no WhatsApp`
+                            : 'Nenhum veículo na lista'}
+                        onClick={async () => {
+                            const texto = estoqueEmTexto(filtered, { nomeDaLoja: companySettings?.company_name });
+                            const ok = await copiarTexto(texto);
+                            addToast(
+                                ok ? `${filtered.length} veículo${filtered.length !== 1 ? 's' : ''} copiado${filtered.length !== 1 ? 's' : ''}. É só colar.`
+                                   : 'Não consegui copiar. Seu navegador bloqueou a área de transferência.',
+                                ok ? 'success' : 'error',
+                            );
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Copy size={17} /> Copiar estoque
+                    </button>
                     <button className="btn-secondary" onClick={() => setShowConsulta(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <Search size={17} /> Consultar placa
                     </button>

@@ -4,6 +4,7 @@ import {
   PhoneCall, Search, Loader2, AlertCircle, Bell, BellOff, Trash2, Mic, ChevronLeft, CarFront,
 } from 'lucide-react';
 import { supabaseTyped } from '../lib/supabase-typed';
+import { estoqueEmTexto } from '../lib/estoqueTexto.js';
 // useAppContext is from a .jsx file — cast to known shape below
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import { useAppContext } from '../context/AppContext.jsx';
@@ -676,6 +677,39 @@ export default function Conversations() {
       });
     return () => { vivo = false; };
   }, [showCarros, carros.length, user?.id]);
+
+  // Manda a lista inteira que está no seletor, em texto, sem foto.
+  //
+  // Para o lojista que atende pelo CRM e NÃO tem bot: em vez de escolher um
+  // carro de cada vez, manda o que tem e deixa o cliente apontar. Usa o mesmo
+  // envio de atendente, então vale a janela de 24h como qualquer texto livre.
+  const enviarListaDeCarros = async () => {
+    if (!selectedId || !session?.access_token) return;
+    const visiveis = carros.filter((c) => {
+      const t = `${c.brand} ${c.model} ${(c as { version?: string }).version ?? ''}`.toLowerCase();
+      return t.includes(buscaCarro.toLowerCase().trim());
+    });
+    if (!visiveis.length) return;
+
+    const texto = estoqueEmTexto(visiveis);
+    if (!texto) return;
+
+    setEnviandoCarro('lista');
+    try {
+      const res = await fetch(`${supabaseUrl}/functions/v1/send-agent-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ conversation_id: selectedId, text: texto }),
+      });
+      if (!res.ok) { console.error('[Conversations] falha ao enviar a lista'); return; }
+      setShowCarros(false); setBuscaCarro('');
+      await fetchMessages(selectedId);
+    } catch (e) {
+      console.error('[Conversations] erro de rede ao enviar a lista:', e);
+    } finally {
+      setEnviandoCarro(null);
+    }
+  };
 
   const enviarCarro = async (carId: string) => {
     if (!selectedId || !session?.access_token) return;
@@ -1601,6 +1635,23 @@ export default function Conversations() {
                       placeholder="Buscar modelo..."
                       style={{ width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-primary)', fontSize: '0.83rem', marginBottom: 6 }}
                     />
+                    {/* Manda TUDO que está filtrado, em texto e sem foto.
+                        Serve pra quem não tem bot: em vez de escolher um carro
+                        de cada vez, manda a lista e deixa o cliente apontar. */}
+                    <button
+                      type="button"
+                      disabled={enviandoCarro !== null}
+                      onClick={enviarListaDeCarros}
+                      style={{
+                        width: '100%', textAlign: 'left', padding: '7px 9px', borderRadius: 7,
+                        border: '1px dashed var(--border)', background: 'transparent',
+                        cursor: enviandoCarro ? 'wait' : 'pointer', color: 'var(--text-secondary)',
+                        fontSize: '0.8rem', marginBottom: 6,
+                      }}
+                    >
+                      {enviandoCarro === 'lista' ? 'Enviando...' : 'Enviar a lista em texto (sem fotos)'}
+                    </button>
+
                     {carros
                       .filter((c) => {
                         const t = `${c.brand} ${c.model} ${c.version ?? ''}`.toLowerCase();
