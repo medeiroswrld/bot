@@ -919,6 +919,9 @@ async function executeTool(
       // pra quem ja disse o que procura seria jogar 22 carros na cara de quem
       // pediu um. Por isso o menu ganha sempre que houve filtro, mesmo com o
       // catalogo ligado.
+      // Fica fora do bloco de envio pra virar mensagem na tela depois.
+      let linhasDoMenu: Array<{ id: string; titulo: string; descricao: string }> = [];
+
       const usarCatalogo = vitrine?.catalogo_habilitado === true && !temFiltro && !menuRecente;
 
       if (usarCatalogo) {
@@ -931,7 +934,7 @@ async function executeTool(
       }
 
       if (!usarCatalogo && !menuRecente && vitrine?.lista_interativa !== false) {
-        const linhas = (data as CarListRow[]).slice(0, 10).map((c) => {
+        linhasDoMenu = (data as CarListRow[]).slice(0, 10).map((c) => {
           const nome = [c.brand, c.model].filter(Boolean).join(' ').trim() || 'Veiculo';
           const preco = c.price ? `R$ ${Number(c.price).toLocaleString('pt-BR')}` : 'consulte';
           const km = c.mileage != null ? `${Number(c.mileage).toLocaleString('pt-BR')} km` : '';
@@ -947,11 +950,11 @@ async function executeTool(
 
         listaEnviada = await sendListaInterativa(
           customerPhone,
-          totalReal > linhas.length
-            ? `Separei ${linhas.length} de ${totalReal} opcoes. Toque para ver:`
-            : `Separei ${linhas.length} opcoes pra voce. Toque para ver:`,
+          totalReal > linhasDoMenu.length
+            ? `Separei ${linhasDoMenu.length} de ${totalReal} opcoes. Toque para ver:`
+            : `Separei ${linhasDoMenu.length} opcoes pra voce. Toque para ver:`,
           'Ver veiculos',
-          [{ titulo: 'Disponiveis', linhas }],
+          [{ titulo: 'Disponiveis', linhas: linhasDoMenu }],
           phoneNumberId,
           token,
           log,
@@ -964,6 +967,31 @@ async function executeTool(
         await supabase.from('conversations')
           .update({ menu_enviado_em: new Date().toISOString() })
           .eq('id', conversationId);
+
+        // ── O menu precisa APARECER na tela de Conversas ──────────────────
+        //
+        // Ele vai direto do servidor pra Meta e nunca passou por `messages`.
+        // Resultado: o atendente lia o bot dizendo "abre o menu ali" e nao via
+        // menu nenhum — parecia que o bot mandou o cliente olhar o nada.
+        //
+        // Pior que feio: quem assume a conversa precisa saber EXATAMENTE o que
+        // o cliente recebeu. Sem isso repete carro que ja foi mostrado, ou
+        // deixa de fora o que nao foi.
+        //
+        // Grava como texto com os mesmos itens. Nao e a mensagem literal que o
+        // cliente ve — e o conteudo dela, que e o que importa pra quem atende.
+        const resumoMenu = linhasDoMenu.length
+          ? 'Menu de veiculos enviado ao cliente:\n' + linhasDoMenu
+              .map((l) => '- ' + l.titulo + (l.descricao ? ' — ' + l.descricao : ''))
+              .join('\n')
+          : 'Menu de veiculos enviado ao cliente.';
+
+        await supabase.from('messages').insert({
+          conversation_id: conversationId,
+          role: 'bot',
+          content: resumoMenu,
+          wa_status: 'sent',
+        });
       }
 
     }
