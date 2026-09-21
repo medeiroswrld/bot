@@ -804,6 +804,19 @@ const Painel = ({ onSair }) => {
                         <div style={{ fontSize: '0.7rem', color: '#6b6b76' }}>
                           desde {dataCurta(l.criado_em)}
                           {!l.whatsapp_ativo && <span style={{ color: '#f59e0b' }}> · sem WhatsApp</span>}
+                          {/* Loja com MAIS DE UM numero. Nao e enfeite: o volume
+                              dela se divide entre eles, e um pode estar com
+                              qualidade ruim enquanto o outro vai bem — sem isso
+                              o suporte olha o numero errado. */}
+                          {Array.isArray(l.numeros_whatsapp) && l.numeros_whatsapp.length > 1 && (
+                            <span
+                              title={l.numeros_whatsapp
+                                .map((n) => `${n.rotulo}${n.numero ? ` (${n.numero})` : ''}${n.ativo ? '' : ' — desativado'}`)
+                                .join('\n')}
+                              style={{ color: '#93c5fd', cursor: 'help' }}>
+                              {' '}· {l.numeros_whatsapp.length} números
+                            </span>
+                          )}
                           {l.instagram_ativo && <span style={{ color: '#8b8b96' }}> · Instagram</span>}
                         </div>
                       </td>

@@ -408,6 +408,31 @@ Deno.serve(async (req) => {
 
   // Consumo do mes de TODAS as lojas numa consulta so, e a tabela de planos
   // para saber o limite de cada faixa.
+  // Numeros de WhatsApp por loja. O painel so sabia dizer "sem WhatsApp" — nao
+  // via que uma loja atende por DOIS numeros, que e informacao de suporte: o
+  // volume dela se divide, e um numero pode estar com qualidade ruim enquanto o
+  // outro vai bem.
+  const numeros = new Map<string, Array<{ rotulo: string; numero: string | null; ativo: boolean }>>();
+  try {
+    const { data: nums } = await admin
+      .from('whatsapp_numbers')
+      .select('user_id, phone_number_id, rotulo, numero, ativo')
+      .order('created_at');
+    for (const n of nums ?? []) {
+      const uid = String(n.user_id);
+      const lista = numeros.get(uid) ?? [];
+      lista.push({
+        // Sem rotulo, mostra o fim do id: feio, mas distingue um do outro.
+        rotulo: String(n.rotulo ?? '').trim() || `…${String(n.phone_number_id ?? '').slice(-4)}`,
+        numero: (n.numero as string | null) ?? null,
+        ativo: n.ativo !== false,
+      });
+      numeros.set(uid, lista);
+    }
+  } catch (e) {
+    console.warn('[admin-metrics] numeros indisponiveis:', (e as Error)?.message);
+  }
+
   const uso = new Map<string, number>();
   const limites = new Map<string, number | null>();
   try {
@@ -452,6 +477,7 @@ Deno.serve(async (req) => {
       assinatura_status: planos.get(uid)?.assinatura ?? 'isento',
       proximo_vencimento: planos.get(uid)?.vencimento ?? null,
       plano: planos.get(uid)?.plano ?? 'personalizado',
+      numeros_whatsapp: numeros.get(uid) ?? [],
       conversas_mes: uso.get(uid) ?? 0,
       // null = sem limite (personalizado). Nao confundir com 0, que e o plano
       // CRM: aquele nao tem bot, este nao tem teto.
