@@ -823,12 +823,35 @@ ${legenda}` : `[imagem] ${url}`;
         // Sem a foto o bot não tem o que ler — avisa em vez de deixar no vácuo.
         await supabase.from('messages')
           .update({ content: '[imagem que não consegui abrir]' }).eq('id', imgMsg.id);
-        const token = await resolveWhatsAppToken(supabase, userId);
-        const aviso = 'Recebi sua foto mas não consegui abrir aqui 😕 pode mandar de novo, ou me descrever o que é?';
-        await sendMessage(from, aviso, phoneNumberId || undefined, token);
-        await supabase.from('messages').insert({ conversation_id: convIdImg, role: 'bot', content: aviso });
+
+        // Mesma trava do fallback de audio, pelo mesmo motivo: loja sem bot
+        // contratado, suspensa ou fora do horario nao pode ter resposta
+        // automatica nenhuma — nem mensagem de erro. Do lado do cliente, "o
+        // sistema falou" e igual seja qual for o texto.
+        //
+        // Este era o SEGUNDO vazamento: consertei o do audio e este ficou, com
+        // o mesmo defeito, ate aparecer no historico da Leandrinho. Quando um
+        // caminho escapa da trava, vale procurar os irmaos dele.
+        const { data: guardasImg } = await supabase
+          .from('company_settings')
+          .select(COLUNAS_GUARDA)
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (!guardasImg || botPodeResponder(guardasImg)) {
+          const token = await resolveWhatsAppToken(supabase, userId);
+          const aviso = 'Recebi sua foto mas não consegui abrir aqui 😕 pode mandar de novo, ou me descrever o que é?';
+          await sendMessage(from, aviso, phoneNumberId || undefined, token);
+          await supabase.from('messages').insert({ conversation_id: convIdImg, role: 'bot', content: aviso });
+        } else {
+          console.log('[WH-img] bot nao pode responder nesta loja: imagem marcada, sem resposta automatica');
+        }
+
+        // A conversa vai pra pendente em qualquer caso: cliente mandou foto que
+        // ninguem conseguiu ver, e alguem precisa olhar. Na loja sem bot, e a
+        // unica coisa que acontece.
         await supabase.from('conversations')
-          .update({ last_message_at: new Date().toISOString() }).eq('id', convIdImg);
+          .update({ last_message_at: new Date().toISOString(), status: 'pending' }).eq('id', convIdImg);
       }
     })());
 
@@ -890,13 +913,45 @@ ${legenda}` : `[imagem] ${url}`;
         };
         const fb = FALLBACKS[code] ?? FALLBACKS.openai_error;
 
-        const token = await resolveWhatsAppToken(supabase, userId);
-        const sent = await sendMessage(from, fb.msg, pid || undefined, token);
-        if (!sent) console.error('[WH-audio] falha ao enviar fallback (salvo no banco mesmo assim)');
-        await supabase.from('messages').insert({ conversation_id: convId, role: 'bot', content: fb.msg });
+        // ── As travas do bot valem AQUI TAMBEM ──────────────────────────────
+        //
+        // Este caminho foi escrito antes do `botGuards` e ficou de fora quando
+        // o modulo virou a fonte unica. Resultado visto em producao: a
+        // Leandrinho Motos, que NAO tem bot contratado, recebeu tres vezes
+        // "Tive um problema tecnico, pode mandar de novo?" — um bot que ela nao
+        // compra falando com o cliente dela.
+        //
+        // Loja sem bot, suspensa, com assinatura vencida, com o bot desligado
+        // ou fora do horario nao pode ter resposta automatica NENHUMA, nem
+        // mensagem de erro. Do lado do cliente, "o sistema falou" e o mesmo
+        // seja qual for o texto.
+        //
+        // O que continua acontecendo em qualquer caso: o audio fica marcado
+        // como falho e a conversa vai pra pendente. Isso e pro ATENDENTE, nao
+        // pro cliente — e justamente o que faz alguem olhar.
+        const { data: guardasAudio } = await supabase
+          .from('company_settings')
+          .select(COLUNAS_GUARDA)
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        const podeResponder = !guardasAudio || botPodeResponder(guardasAudio);
+
+        if (podeResponder) {
+          const token = await resolveWhatsAppToken(supabase, userId);
+          const sent = await sendMessage(from, fb.msg, pid || undefined, token);
+          if (!sent) console.error('[WH-audio] falha ao enviar fallback (salvo no banco mesmo assim)');
+          await supabase.from('messages').insert({ conversation_id: convId, role: 'bot', content: fb.msg });
+        } else {
+          console.log('[WH-audio] bot nao pode responder nesta loja: audio marcado, sem resposta automatica');
+        }
+
+        // Handoff vale SEMPRE que a transcricao falhou, inclusive na loja sem
+        // bot: e um cliente que mandou audio e nao foi entendido: alguem tem
+        // que ver. Na loja sem bot, e a unica coisa que acontece.
         await supabase.from('conversations').update({
           last_message_at: new Date().toISOString(),
-          ...(fb.handoff ? { status: 'pending' } : {}),
+          ...(fb.handoff || !podeResponder ? { status: 'pending' } : {}),
         }).eq('id', convId);
       } catch (e) {
         console.error('[WH-audio] exceção no processamento de áudio:', e);
