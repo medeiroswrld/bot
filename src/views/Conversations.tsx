@@ -495,6 +495,11 @@ export default function Conversations() {
   // precisa de mim?" e "como esta o Instagram?") e juntar num controle so
   // obrigaria a escolher entre elas.
   const [filtroCanal, setFiltroCanal]     = useState<string>('todos');
+  // Filtro por NÚMERO, separado do de canal. A loja com dois números atende
+  // duas frentes diferentes (loja e oficina, matriz e filial, dois vendedores)
+  // e precisa ver uma de cada vez — misturar as duas na mesma lista é o que
+  // torna a caixa confusa quando o segundo número entra.
+  const [filtroNumero, setFiltroNumero]   = useState<string>('todos');
   const [searchRaw, setSearchRaw]         = useState('');
   const [search, setSearch]               = useState('');
   const [alertConvIds, setAlertConvIds]   = useState<Set<string>>(new Set());
@@ -1243,6 +1248,15 @@ export default function Conversations() {
 
   // Quantos canais a loja realmente usa. Mostrar o filtro numa loja que só tem
   // WhatsApp seria oferecer uma escolha que não existe.
+  // Números que REALMENTE aparecem nas conversas, não os cadastrados. Loja que
+  // conectou um segundo número ontem e ainda não recebeu nada por ele não
+  // precisa de filtro — seria um botão que não muda nada.
+  const numerosUsados = [...new Set(
+    conversations
+      .map((c) => String((c as { phone_number_id?: string | null }).phone_number_id ?? ''))
+      .filter(Boolean),
+  )];
+
   const temMaisDeUmCanal = new Set(
     conversations.map((c) => String((c as { channel?: string }).channel ?? 'whatsapp')),
   ).size > 1;
@@ -1254,6 +1268,9 @@ export default function Conversations() {
       // Conversa antiga pode nao ter canal gravado; nesses casos e WhatsApp.
       const canalDaConversa = String((c as { channel?: string }).channel ?? 'whatsapp');
       if (canalDaConversa !== filtroCanal) return false;
+    }
+    if (filtroNumero !== 'todos') {
+      if (String((c as { phone_number_id?: string | null }).phone_number_id ?? '') !== filtroNumero) return false;
     }
     if (filter && c.status !== filter) return false;
     if (search) {
@@ -1370,6 +1387,43 @@ export default function Conversations() {
               </button>
             ))}
           </div>
+
+          {/* Números. Só aparece quando mais de um número REALMENTE recebeu
+              conversa — com um número só, seria um botão que não muda nada.
+              Vem antes do filtro de canal porque, pra quem tem dois números, a
+              primeira pergunta é "qual loja/frente", não "qual aplicativo". */}
+          {numerosUsados.length > 1 && (
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 7 }}>
+              <button type="button" onClick={() => setFiltroNumero('todos')}
+                style={{
+                  padding: '3px 9px', fontSize: '0.68rem', borderRadius: 999,
+                  cursor: 'pointer', fontWeight: filtroNumero === 'todos' ? 700 : 500,
+                  border: `1px solid ${filtroNumero === 'todos' ? 'var(--primary)' : 'var(--border)'}`,
+                  background: filtroNumero === 'todos' ? 'var(--primary)' : 'transparent',
+                  color: filtroNumero === 'todos' ? '#fff' : 'var(--text-secondary)',
+                }}>
+                Todos os números
+              </button>
+              {numerosUsados.map((pid) => {
+                const ativo = filtroNumero === pid;
+                // Sem rótulo cadastrado, mostra o fim do id — feio, mas
+                // distingue. Melhor que dois botões iguais escritos "Número".
+                const nome = rotulosNumero[pid] || `Número …${pid.slice(-4)}`;
+                return (
+                  <button key={pid} type="button" onClick={() => setFiltroNumero(pid)}
+                    style={{
+                      padding: '3px 9px', fontSize: '0.68rem', borderRadius: 999,
+                      cursor: 'pointer', fontWeight: ativo ? 700 : 500,
+                      border: `1px solid ${ativo ? 'var(--primary)' : 'var(--border)'}`,
+                      background: ativo ? 'var(--primary)' : 'transparent',
+                      color: ativo ? '#fff' : 'var(--text-secondary)',
+                    }}>
+                    {nome}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Canais. Só aparece quando a loja tem mais de um — numa loja só de
               WhatsApp, o filtro seria um controle inútil ocupando espaço.
