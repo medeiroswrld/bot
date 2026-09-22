@@ -150,6 +150,7 @@ const AssistenteMarcadores = ({ texto, onAplicar, onFechar }) => {
     );
 };
 import ConectarWhatsApp from './ConectarWhatsApp.jsx';
+import { ConectarInstagram } from './ConectarInstagram.jsx';
 
 const WEEK_DAYS = [
     { key: 'mon', label: 'Segunda-feira' },
@@ -1400,7 +1401,25 @@ const Settings = () => {
                             Os dois são independentes — conecte só o que a loja usa.
                         </p>
 
-                        {[
+                        <ConectarInstagram />
+
+                        {/* Colar ID e token à mão continua funcionando, mas sai da
+                            frente: é o caminho que ninguém fora de nós consegue
+                            percorrer, e o token colado aqui morre em 60 dias sem
+                            avisar. Fica recolhido em vez de apagado porque há loja
+                            em produção conectada assim — apagar agora a derrubaria. */}
+                        <details style={{ marginTop: 4 }}>
+                            <summary style={{ cursor: 'pointer', fontSize: '0.82rem', color: 'var(--color-text-muted)', padding: '6px 0' }}>
+                                Modo avançado — colar ID e token à mão
+                            </summary>
+
+                            <p style={{ fontSize: '0.78rem', color: '#b45309', lineHeight: 1.55, margin: '8px 0 12px' }}>
+                                O Messenger ainda só se conecta por aqui. Para o Instagram, prefira o
+                                botão acima: token colado à mão não se renova e para de responder
+                                sozinho depois de 60 dias.
+                            </p>
+
+                            {[
                             {
                                 canal: 'instagram',
                                 titulo: 'Instagram Direct',
@@ -1479,7 +1498,8 @@ const Settings = () => {
                                     )}
                                 </div>
                             </div>
-                        ))}
+                            ))}
+                        </details>
 
                         <div style={{ padding: '10px 12px', borderRadius: 8,
                                       background: 'var(--input-bg)', border: '1px solid var(--border)' }}>

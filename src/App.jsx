@@ -29,6 +29,11 @@ const Campaigns    = lazy(() => import('./views/Campaigns.jsx'));
 const CampaignDetails = lazy(() => import('./views/CampaignDetails.jsx'));
 const Financeiro   = lazy(() => import('./views/Financeiro.jsx'));
 const Anuncios     = lazy(() => import('./views/Anuncios.jsx'));
+// Rota de RETORNO do Instagram: o navegador sai do CRM, autoriza no
+// instagram.com e volta aqui com o `code`. Precisa ser rota de verdade porque a
+// URI é registrada no painel da Meta e conferida por ela a cada conexão.
+const RetornoInstagram = lazy(() =>
+  import('./views/ConectarInstagram.jsx').then((m) => ({ default: m.RetornoInstagram })));
 
 // ─── Sidebar ─────────────────────────────────────────────────────────────────
 
@@ -338,6 +343,7 @@ const AuthenticatedApp = () => {
               <Route path="/campanhas/:id" element={<CampaignDetails />} />
               <Route path="/assistente"    element={<BotSettings />} />
               <Route path="/configuracoes" element={<SettingsView />} />
+              <Route path="/conectar/instagram" element={<RetornoInstagram />} />
             </Routes>
           </div>
         </Suspense>
