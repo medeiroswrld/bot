@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AtSign, CheckCircle, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
+import { AtSign, CheckCircle, AlertCircle, RefreshCw, Loader2, Unplug } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
 
@@ -52,7 +52,9 @@ const irParaAutorizacao = () => {
 // ─── O cartão, nas Configurações ────────────────────────────────────────────
 
 export const ConectarInstagram = () => {
-  const { companySettings } = useAppContext();
+  const { companySettings, refreshCompanySettings } = useAppContext();
+  const [saindo, setSaindo] = useState(false);
+  const [erroSaida, setErroSaida] = useState('');
 
   const conectado = Boolean(companySettings?.ig_user_id);
   const arroba    = companySettings?.ig_username;
@@ -66,6 +68,44 @@ export const ConectarInstagram = () => {
   const naMao = conectado && !vence;
 
   const faltaConfigurar = !INSTAGRAM_APP_ID;
+
+  const desconectar = async () => {
+    // Confirmação com o @ dentro. "Desconectar?" é fácil de clicar por engano,
+    // e quem faz isso sem querer numa loja em produção derruba o atendimento
+    // do Direct até alguém perceber.
+    const quem = arroba ? `@${arroba}` : 'esta conta';
+    if (!window.confirm(
+      `Desconectar ${quem} do Instagram?\n\n`
+      + 'O bot para de responder no Direct. As conversas que já existem continuam '
+      + 'guardadas, e dá pra reconectar quando quiser.',
+    )) return;
+
+    setErroSaida(''); setSaindo(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/conectar-instagram`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${session?.access_token ?? ''}`,
+          },
+          body: JSON.stringify({ desconectar: true }),
+        },
+      );
+      const j = await res.json();
+      if (!res.ok || !j.success) {
+        setErroSaida(j.error || 'Não consegui desconectar.');
+        return;
+      }
+      await refreshCompanySettings?.();
+    } catch (e) {
+      setErroSaida(e?.message || 'Falha de rede ao desconectar.');
+    } finally {
+      setSaindo(false);
+    }
+  };
 
   return (
     <div style={{
@@ -107,15 +147,38 @@ export const ConectarInstagram = () => {
           Instagram → API setup with Instagram login.
         </p>
       ) : (
-        <button
-          type="button"
-          className={conectado && !naMao ? 'btn-outline' : 'btn-primary'}
-          onClick={irParaAutorizacao}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}
-        >
-          <AtSign size={16} />
-          {conectado ? 'Reconectar Instagram' : 'Conectar Instagram'}
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button
+            type="button"
+            className={conectado && !naMao ? 'btn-outline' : 'btn-primary'}
+            onClick={irParaAutorizacao}
+            disabled={saindo}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}
+          >
+            <AtSign size={16} />
+            {conectado ? 'Reconectar Instagram' : 'Conectar Instagram'}
+          </button>
+
+          {conectado && (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={desconectar}
+              disabled={saindo}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: '#dc2626' }}
+            >
+              {saindo
+                ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Desconectando...</>
+                : <><Unplug size={15} /> Desconectar</>}
+            </button>
+          )}
+        </div>
+      )}
+
+      {erroSaida && (
+        <p style={{ display: 'flex', gap: 6, alignItems: 'flex-start', fontSize: '0.8rem', color: '#dc2626', marginTop: 8, lineHeight: 1.5 }}>
+          <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 2 }} /> {erroSaida}
+        </p>
       )}
 
       {conectado && (

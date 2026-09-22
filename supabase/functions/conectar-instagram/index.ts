@@ -71,8 +71,77 @@ Deno.serve(async (req) => {
       await userClient.auth.getUser(authHeader.replace('Bearer ', ''));
     if (userErr || !user) return json({ error: 'Não autenticado' }, 401);
 
-    let body: { code?: string; redirect_uri?: string };
+    let body: { code?: string; redirect_uri?: string; desconectar?: boolean };
     try { body = await req.json(); } catch { return json({ error: 'JSON inválido' }, 400); }
+
+    // ── Desconectar ──────────────────────────────────────────────────
+    //
+    // Mora aqui, e não em função própria, porque conectar e desconectar são um
+    // par: o que um assina, o outro precisa cancelar. Separados, um ganha um
+    // passo e o outro não — foi assim que o social-webhook nasceu como cópia do
+    // whatsapp-webhook e passou meses sem as travas dele.
+    if (body?.desconectar === true) {
+      const admin = createClient(url, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+
+      const { data: cfg } = await admin
+        .from('company_settings')
+        .select('ig_user_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      // Cancela a assinatura do webhook ANTES de largar o token — depois não
+      // haveria com o que autenticar. Sem este passo a Meta continua mandando
+      // mensagem que ninguém responde, e o log enche de "não cadastrado".
+      //
+      // Falhar aqui NÃO impede a desconexão. Token vencido, ou revogado do lado
+      // do Instagram, devolve erro — e uma loja nessa situação é justamente
+      // quem mais precisa conseguir desconectar. Desconexão que depende da Meta
+      // cooperar é desconexão que trava quando mais importa.
+      if (cfg?.ig_user_id) {
+        try {
+          const { data: tok } = await admin.rpc('get_meta_page_token', {
+            p_user_id: user.id, p_canal: 'instagram',
+          });
+          if (tok) {
+            const r = await fetch(
+              `${GRAPH}/${GRAPH_VER}/${cfg.ig_user_id}/subscribed_apps`,
+              { method: 'DELETE', headers: { Authorization: `Bearer ${tok}` } },
+            );
+            marcar('cancelar a assinatura do webhook', r.ok, r.ok ? undefined : `a Meta respondeu ${r.status}`);
+          } else {
+            marcar('cancelar a assinatura do webhook', false, 'não havia token guardado');
+          }
+        } catch (e) {
+          marcar('cancelar a assinatura do webhook', false, e instanceof Error ? e.message : String(e));
+        }
+      }
+
+      const { error: remErr } = await admin.rpc('set_meta_page_token', {
+        p_user_id: user.id, p_canal: 'instagram', p_token: '',
+      });
+      marcar('apagar o token', !remErr, remErr?.message);
+
+      // O ig_user_id é o que o webhook usa pra achar a loja. Limpar ele é o que
+      // de fato desliga o canal, mesmo que os passos acima tenham falhado.
+      const { error: limpaErr } = await admin
+        .from('company_settings')
+        .update({
+          ig_user_id:         null,
+          ig_username:        null,
+          ig_token_expira_em: null,
+          updated_at:         new Date().toISOString(),
+        })
+        .eq('user_id', user.id);
+      if (limpaErr) {
+        marcar('desligar o canal', false, limpaErr.message);
+        return json({ error: 'Não consegui limpar os dados da conexão.', etapas }, 500);
+      }
+      marcar('desligar o canal', true);
+
+      return json({ success: true, desconectado: true, etapas });
+    }
 
     const code        = String(body?.code ?? '').trim();
     const redirectUri = String(body?.redirect_uri ?? '').trim();
