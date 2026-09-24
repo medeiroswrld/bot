@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { MessageSquare, CheckCircle, RefreshCw, AlertCircle } from 'lucide-react';
+import { MessageSquare, CheckCircle, RefreshCw, AlertCircle, Unplug } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
 
@@ -33,6 +33,7 @@ const ConectarWhatsApp = () => {
     // a lista vira três ids iguais e ninguém se acha.
     const [numeros, setNumeros] = useState([]);
     const [salvandoId, setSalvandoId] = useState(null);
+    const [removendoId, setRemovendoId] = useState(null);
 
     const carregarNumeros = useCallback(async () => {
         const { data, error } = await supabase
@@ -57,6 +58,53 @@ const ConectarWhatsApp = () => {
         // O número principal é espelhado em company_settings por trigger; o
         // resto do app lê de lá.
         if ('principal' in campos) await refreshCompanySettings();
+    };
+
+    // Desconectar um numero.
+    //
+    // Apaga a linha e, quando é o último da WABA, cancela a assinatura do
+    // webhook lá também — senão a Meta continuaria entregando mensagem que
+    // ninguem consome.
+    //
+    // O aviso é explícito porque isto NÃO é o mesmo que desativar: desativar
+    // para de receber e mantém o cadastro; desconectar exige refazer o
+    // Embedded Signup para voltar.
+    const desconectarNumero = async (n) => {
+        const quem = n.numero || `...${String(n.phone_number_id).slice(-6)}`;
+        if (!window.confirm(
+            `Desconectar o número ${quem}?\n\n`
+            + 'A loja para de receber e de enviar por ele, e voltar exige conectar de novo '
+            + 'pelo Facebook. As conversas já existentes continuam guardadas.\n\n'
+            + 'Se você só quer pausar, desmarque "ativo" em vez disto.',
+        )) return;
+
+        setRemovendoId(n.id); setErro('');
+        try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const res = await fetch(
+                `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/conectar-whatsapp`,
+                {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${session?.access_token ?? ''}`,
+                    },
+                    body: JSON.stringify({ desconectar: true, phone_number_id: n.phone_number_id }),
+                },
+            );
+            const j = await res.json();
+            setEtapas(j.etapas ?? []);
+            if (!res.ok || !j.success) {
+                setErro(j.error || 'Não consegui desconectar.');
+                return;
+            }
+            await carregarNumeros();
+            await refreshCompanySettings?.();
+        } catch (e) {
+            setErro(e?.message ?? 'Falha de rede ao desconectar.');
+        } finally {
+            setRemovendoId(null);
+        }
     };
 
     // ── SDK do Facebook, carregado só quando esta tela abre ──────────────────
@@ -234,6 +282,21 @@ const ConectarWhatsApp = () => {
                                         />
                                         ativo
                                     </label>
+
+                                    <button
+                                        type="button"
+                                        className="btn-outline"
+                                        disabled={removendoId === n.id || salvandoId === n.id}
+                                        onClick={() => desconectarNumero(n)}
+                                        title="Remove o número da conta. Voltar exige conectar de novo pelo Facebook."
+                                        style={{
+                                            fontSize: '0.7rem', padding: '2px 8px', color: '#dc2626',
+                                            display: 'flex', alignItems: 'center', gap: 4,
+                                        }}
+                                    >
+                                        <Unplug size={13} />
+                                        {removendoId === n.id ? 'desconectando...' : 'desconectar'}
+                                    </button>
                                 </div>
                             ))}
                         </div>

@@ -47,8 +47,95 @@ serve(async (req) => {
     if (userErr || !user) return json({ error: 'Não autenticado' }, 401);
 
     // 2. Body vindo do Embedded Signup
-    let body: { code?: string; waba_id?: string; phone_number_id?: string; pin?: string };
+    let body: { code?: string; waba_id?: string; phone_number_id?: string; pin?: string; desconectar?: boolean };
     try { body = await req.json(); } catch { return json({ error: 'JSON inválido' }, 400); }
+
+    // ── Desconectar um numero ────────────────────────────────────────
+    //
+    // Mora aqui, como no conectar-instagram, porque conectar e desconectar sao
+    // um par: o que um assina, o outro cancela.
+    //
+    // Tres cuidados que nao sao obvios:
+    //
+    //   1. O numero PRECISA ser desta loja. Sem conferir, qualquer usuario
+    //      logado desconectaria o numero de outra.
+    //   2. A assinatura do webhook vive na WABA, e VARIOS numeros podem dividir
+    //      a mesma. Cancelar a assinatura com outro numero ativo ali derrubaria
+    //      o atendimento dele junto, sem ninguem relacionar as duas coisas.
+    //   3. Falhar na Meta NAO impede a desconexao: token ja sem acesso e
+    //      justamente o caso de quem mais precisa desconectar.
+    if (body?.desconectar === true) {
+      const alvo = String(body?.phone_number_id ?? '').trim();
+      if (!alvo) return json({ error: 'phone_number_id ausente.' }, 400);
+
+      const admin = createClient(supabaseUrl, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+
+      const { data: numero } = await admin
+        .from('whatsapp_numbers')
+        .select('id, waba_id, principal')
+        .eq('phone_number_id', alvo)
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (!numero) return json({ error: 'Numero nao encontrado nesta conta.' }, 404);
+
+      // Sobra alguem nesta WABA depois que este sair?
+      const { count: irmaos } = await admin
+        .from('whatsapp_numbers')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('waba_id', numero.waba_id)
+        .neq('phone_number_id', alvo);
+
+      if (!irmaos && numero.waba_id) {
+        try {
+          const { data: tok } = await admin.rpc('get_whatsapp_token', { p_user_id: user.id });
+          if (tok) {
+            const r = await fetch(`${GRAPH}/${numero.waba_id}/subscribed_apps`, {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${tok}` },
+            });
+            marcar('cancelar a assinatura do webhook', r.ok, r.ok ? undefined : `a Meta respondeu ${r.status}`);
+          } else {
+            marcar('cancelar a assinatura do webhook', false, 'nao havia token guardado');
+          }
+        } catch (e) {
+          marcar('cancelar a assinatura do webhook', false, e instanceof Error ? e.message : String(e));
+        }
+      } else {
+        marcar('cancelar a assinatura do webhook', true, 'pulado — outro numero ainda usa esta WABA');
+      }
+
+      const { error: delErr } = await admin
+        .from('whatsapp_numbers')
+        .delete()
+        .eq('id', numero.id);
+      if (delErr) {
+        marcar('remover o numero', false, delErr.message);
+        return json({ error: 'Nao consegui remover o numero.', etapas }, 500);
+      }
+      marcar('remover o numero', true);
+
+      // Era o ultimo da loja: limpa o que sobrou apontando pro vazio. O
+      // whatsapp_phone_number_id quem zera e o trigger da 083.
+      const { count: restantes } = await admin
+        .from('whatsapp_numbers')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user.id);
+
+      if (!restantes) {
+        await admin.rpc('set_whatsapp_token', { p_user_id: user.id, p_token: '' });
+        await admin
+          .from('company_settings')
+          .update({ whatsapp_business_account_id: null })
+          .eq('user_id', user.id);
+        marcar('era o ultimo numero — token e WABA limpos', true);
+      }
+
+      return json({ success: true, desconectado: true, etapas });
+    }
 
     const code    = String(body?.code ?? '').trim();
     const wabaId  = String(body?.waba_id ?? '').trim();
