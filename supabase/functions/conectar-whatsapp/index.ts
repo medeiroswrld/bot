@@ -152,6 +152,25 @@ serve(async (req) => {
 
     const ehPrimeiro = !jaTem;
 
+    // RECONEXAO do mesmo numero nao pode rebaixa-lo.
+    //
+    // A conta acima responde "ja existe numero ativo, entao este e um
+    // adicional" — verdade quando o numero e novo, mentira quando a loja esta
+    // reconectando o que ja tinha. Como o upsert casa por phone_number_id, um
+    // `principal: false` ali SOBRESCREVE a linha existente; o trigger
+    // `espelha_numero_principal` nao acha mais nenhum principal e zera o
+    // `company_settings.whatsapp_phone_number_id`.
+    //
+    // Resultado: a loja clica para consertar a conexao e perde o numero
+    // inteiro. Queimou em 24/09, com a DSC fora do ar e prestes a clicar.
+    const { data: existente } = await admin
+      .from('whatsapp_numbers')
+      .select('principal')
+      .eq('phone_number_id', phoneId)
+      .maybeSingle();
+
+    const ehPrincipal = existente ? existente.principal === true : ehPrimeiro;
+
     const { error: numErr } = await admin
       .from('whatsapp_numbers')
       .upsert(
@@ -159,7 +178,7 @@ serve(async (req) => {
           user_id: user.id,
           phone_number_id: phoneId,
           waba_id: wabaId,
-          principal: ehPrimeiro,
+          principal: ehPrincipal,
           ativo: true,
         },
         { onConflict: 'phone_number_id' },
@@ -178,7 +197,7 @@ serve(async (req) => {
     const { error: cfgErr } = await admin
       .from('company_settings')
       .update({
-        ...(ehPrimeiro || numErr ? { whatsapp_phone_number_id: phoneId } : {}),
+        ...(ehPrincipal || numErr ? { whatsapp_phone_number_id: phoneId } : {}),
         whatsapp_business_account_id: wabaId,
       })
       .eq('user_id', user.id);
