@@ -2910,8 +2910,9 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     }
   }
 
-  // ── 3.5. Lock atômico: garante que só UMA invocação processa este lote ────
-  //    Resolve a corrida quando o cliente manda várias mensagens quase juntas.
+  // ── 3.5. A chave do lote ──────────────────────────────────────────────
+  //    Identifica este lote pela ultima mensagem do cliente. So e CALCULADA
+  //    aqui; quem marca ela e o passo 3.7, depois da trava.
   const { data: latestCustomerMsg } = await supabase
     .from('messages')
     .select('id')
@@ -2923,22 +2924,23 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
 
   const batchKey = latestCustomerMsg?.id ?? `welcome-${conversationId}`;
 
-  const { data: claimed, error: claimErr } = await supabase
-    .from('conversations')
-    .update({ last_handled_msg_id: batchKey })
-    .eq('id', conversationId)
-    .or(`last_handled_msg_id.is.null,last_handled_msg_id.neq.${batchKey}`)
-    .select('id')
-    .maybeSingle();
-
-  if (claimErr) {
-    // A coluna last_handled_msg_id pode ainda não existir — não bloqueia o bot,
-    // apenas registra. A dedupe passa a valer assim que a coluna for criada.
-    log.warn('claim ignorado (coluna last_handled_msg_id existe?) — dedupe desativada', { action: 'claim', error: claimErr.message });
-  } else if (!claimed) {
-    log.info('lote já assumido por outra invocação — abortando', { action: 'claim', batchKey });
-    return new Response('OK', { status: 200 });
-  }
+  // A ORDEM AQUI IMPORTA, e ja custou pergunta de cliente.
+  //
+  // A trava vem ANTES da marca da chave. Quando era o contrario:
+  //
+  //   1. "Amanha mesmo" chega  -> chamada A assume e comeca a gerar
+  //   2. "financiam?" chega    -> chamada B MARCA a chave
+  //   3. B tenta travar, ve A gerando, marca reprocess_pending e sai
+  //   4. A termina e dispara a rodada C
+  //   5. C calcula a mesma chave... que B ja tinha queimado no passo 2
+  //      -> "lote ja assumido" -> aborta sem responder
+  //
+  // A pergunta do cliente sumia sem erro nenhum. B marcava a chave e nao
+  // processava nada, e a rodada de reprocessamento era recusada pela marca da
+  // propria B. Acontecia sempre que o cliente mandava duas mensagens enquanto
+  // o bot ainda estava escrevendo — que e o normal de quem esta com pressa.
+  //
+  // Com a trava primeiro, quem desiste nao chega a marcar nada.
 
   // ── 3.6. Trava POR CONVERSA ───────────────────────────────────────────────
   //
@@ -2975,6 +2977,33 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
       .update({ reprocess_pending: true })
       .eq('id', conversationId);
     log.info('outra geração em curso — marcado para reprocessar', { action: 'lock' });
+    return new Response('OK', { status: 200 });
+  }
+
+  // ── 3.7. Dedupe por chave, agora com a trava na mao ────────────────────
+  //
+  // Continua valendo contra entrega repetida do mesmo webhook depois que a
+  // trava ja foi solta. A diferenca e que agora so marca quem de fato vai
+  // processar.
+  const { data: claimed, error: claimErr } = await supabase
+    .from('conversations')
+    .update({ last_handled_msg_id: batchKey })
+    .eq('id', conversationId)
+    .or(`last_handled_msg_id.is.null,last_handled_msg_id.neq.${batchKey}`)
+    .select('id')
+    .maybeSingle();
+
+  if (claimErr) {
+    // A coluna last_handled_msg_id pode ainda nao existir — nao bloqueia o bot,
+    // apenas registra. A dedupe passa a valer assim que a coluna for criada.
+    log.warn('claim ignorado (coluna last_handled_msg_id existe?) — dedupe desativada', { action: 'claim', error: claimErr.message });
+  } else if (!claimed) {
+    // Solta a trava antes de sair: sem isto a conversa ficaria presa ate os 3
+    // minutos vencerem, e o bot mudo nesse intervalo.
+    await supabase.from('conversations')
+      .update({ processing_since: null })
+      .eq('id', conversationId);
+    log.info('lote ja assumido por outra invocacao — abortando', { action: 'claim', batchKey });
     return new Response('OK', { status: 200 });
   }
 
