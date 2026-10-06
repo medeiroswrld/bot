@@ -3828,6 +3828,28 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   let sent = false;
   const enviados: Array<{ texto: string; wamid: string | null; ok: boolean }> = [];
 
+  /** Grava um balao assim que ele sai, e corrige a linha se o eco chegou antes.
+   *
+   *  O upsert por wa_message_id e o que cura a corrida: quando o eco venceu, a
+   *  linha ja existe com role 'agent', e aqui ela volta a ser 'bot' em vez de
+   *  estourar o indice unico. Sem id (envio que falhou) nao da para casar nada,
+   *  entao e insert simples. */
+  const gravarBalao = async (e: { texto: string; wamid: string | null; ok: boolean }) => {
+    const linha = {
+      conversation_id: conversationId,
+      role: 'bot',
+      content: e.texto,
+      wa_message_id: e.wamid,
+      wa_status: e.ok ? 'sent' : 'failed',
+    };
+    const { error } = e.wamid
+      ? await supabase.from('messages').upsert(linha, { onConflict: 'wa_message_id' })
+      : await supabase.from('messages').insert(linha);
+    // Conferir o erro e metade do conserto: o insert em lote antigo falhava
+    // calado, e foi isso que escondeu o defeito por semanas.
+    if (error) log.error('falha ao gravar balao do bot', { action: 'send_final', canal, erro: error.message });
+  };
+
   for (let i = 0; i < baloes.length; i++) {
     const parte = baloes[i];
 
@@ -3850,6 +3872,20 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
       enviados.push({ texto: parte, wamid: r.mid ?? null, ok: r.ok });
       if (!r.ok) log.error('falha ao enviar no canal social', { action: 'send_final', canal, erro: r.erro, balao: i });
     }
+
+    // GRAVA AGORA, nao no fim do laco — e aqui que estava o bug.
+    //
+    // O eco do balao 1 volta da Meta enquanto ainda estamos mandando o 2 e o
+    // 3 (sao 900ms de pausa entre cada um). Se a nossa linha ainda nao existe
+    // quando o eco chega, o social-webhook nao reconhece que a mensagem e
+    // nossa, grava como 'agent' e manda a conversa para 'human' — e o bot se
+    // cala no meio do atendimento, sem erro em lugar nenhum.
+    //
+    // Depois disso o insert em lote do fim batia no indice unico de
+    // wa_message_id, falhava inteiro, e ninguem via porque o erro nao era
+    // conferido. Sobrava so a linha do eco, marcada como atendente.
+    const ultimo = enviados[enviados.length - 1];
+    await gravarBalao(ultimo);
   }
 
   sent = enviados.some((e) => e.ok);
@@ -3860,17 +3896,36 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     log.error('falha ao enviar — mensagem salva no banco mesmo assim', { action: 'send_final', canal });
   }
 
-  // ── 9. Salva resposta do bot e atualiza last_message_at ────────────────────
+  // ── 9. Atualiza last_message_at ───────────────────────────────────────────
+  // As mensagens ja foram gravadas uma a uma, dentro do laco. O insert em lote
+  // que existia aqui era o segundo meio do bug: alem de chegar tarde demais
+  // para a trava do eco, ele batia no indice unico de wa_message_id quando o
+  // eco tinha vencido a corrida, falhava INTEIRO e em silencio.
   const now = new Date().toISOString();
-  // Uma linha por balao, com o id de cada um: e assim que o cliente viu, e assim
-  // que o CRM mostra. O wa_message_id liga cada linha aos webhooks de status.
-  await supabase.from('messages').insert(
-    enviados.map((e) => ({
-      conversation_id: conversationId, role: 'bot', content: e.texto,
-      wa_message_id: e.wamid, wa_status: e.ok ? 'sent' : 'failed',
-    })),
-  );
   await supabase.from('conversations').update({ last_message_at: now }).eq('id', conversationId);
+
+  // Desfaz o "humano" que o nosso proprio eco possa ter causado.
+  //
+  // O bot so roda em conversa que NAO estava com humano, entao achar 'human'
+  // agora significa que algo mudou durante o envio. Com `atendente` vazio, nao
+  // foi gente assumindo: foi o eco de um balao nosso chegando antes da linha
+  // existir. Sem esta correcao o bot ficaria mudo nas mensagens seguintes ate
+  // o cron devolver-ao-bot reparar, e o cliente esperaria no vazio.
+  //
+  // So mexe quando atendente e nulo: vendedor que assumiu de verdade tem que
+  // continuar com a conversa.
+  const { data: depois } = await supabase
+    .from('conversations')
+    .select('status, atendente')
+    .eq('id', conversationId)
+    .maybeSingle();
+
+  if (depois?.status === 'human' && !depois?.atendente) {
+    await supabase.from('conversations').update({ status: 'bot' }).eq('id', conversationId);
+    log.info('status devolvido ao bot: o eco do proprio envio tinha marcado como humano', {
+      action: 'send_final', canal,
+    });
+  }
 
   // Libera a conversa DEPOIS de gravar as mensagens: se soltasse antes, a
   // rodada seguinte poderia montar o histórico sem o que acabamos de dizer e
