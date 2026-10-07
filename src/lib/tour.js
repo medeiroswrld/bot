@@ -112,6 +112,91 @@ export const esperar = (sel, limiteMs = 4000) => new Promise((resolve) => {
   tenta();
 });
 
+// ─── O fio ──────────────────────────────────────────────────────────────────
+//
+// Liga a caixa ao elemento que ela explica. Substitui a setinha triangular da
+// biblioteca, que aponta mas não CONDUZ: num tour que atravessa cinco telas, o
+// olho precisa de um caminho para seguir, não de um bico.
+//
+// Desenhado em SVG por cima da página e ABAIXO da caixa (z-index entre o
+// destaque e o tooltip), para o fio se enfiar sob a borda do cartão em vez de
+// encostar nela — é o que faz os dois lerem como peças ligadas.
+
+const ID_FIO = 'amply-tour-fio';
+
+const removerFio = () => document.getElementById(ID_FIO)?.remove();
+
+/** Curva de uma borda à outra, sempre saindo e entrando perpendicular.
+ *  Controles perpendiculares são o que dá o formato de chicote da referência —
+ *  linha reta ligaria os dois pontos sem sugerir direção nenhuma. */
+const caminho = (de, para) => {
+  const folga = Math.min(Math.max(Math.abs(de.x - para.x) * 0.5, 40), 120);
+  const c1 = de.eixo === 'x'   ? [de.x + de.sinal * folga, de.y]   : [de.x, de.y + de.sinal * folga];
+  const c2 = para.eixo === 'x' ? [para.x + para.sinal * folga, para.y] : [para.x, para.y + para.sinal * folga];
+  return `M ${de.x} ${de.y} C ${c1[0]} ${c1[1]}, ${c2[0]} ${c2[1]}, ${para.x} ${para.y}`;
+};
+
+/** De qual borda sair, e para qual entrar. Decide pelo eixo dominante: caixa à
+ *  direita do alvo sai pela esquerda dela e entra pela direita dele. */
+const bordas = (t, a) => {
+  const dx = (a.left + a.width / 2) - (t.left + t.width / 2);
+  const dy = (a.top + a.height / 2) - (t.top + t.height / 2);
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const paraDireita = dx > 0;
+    return [
+      { x: paraDireita ? t.right : t.left, y: t.top + t.height / 2, eixo: 'x', sinal: paraDireita ? 1 : -1 },
+      { x: paraDireita ? a.left : a.right, y: a.top + a.height / 2, eixo: 'x', sinal: paraDireita ? -1 : 1 },
+    ];
+  }
+  const paraBaixo = dy > 0;
+  return [
+    { x: t.left + t.width / 2, y: paraBaixo ? t.bottom : t.top, eixo: 'y', sinal: paraBaixo ? 1 : -1 },
+    { x: a.left + a.width / 2, y: paraBaixo ? a.top : a.bottom, eixo: 'y', sinal: paraBaixo ? -1 : 1 },
+  ];
+};
+
+const desenharFio = (alvo) => {
+  removerFio();
+  const caixa = document.querySelector('.introjs-tooltip');
+  if (!alvo || !caixa) return;
+
+  const t = caixa.getBoundingClientRect();
+  const a = alvo.getBoundingClientRect();
+  if (!t.width || !a.width) return;
+
+  const [de, para] = bordas(t, a);
+  const d = caminho(de, para);
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.id = ID_FIO;
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML =
+    `<path class="amply-fio-halo" d="${d}" />` +
+    `<path class="amply-fio-nucleo" d="${d}" />`;
+  document.body.appendChild(svg);
+
+  // Desenha de uma ponta à outra, no sentido caixa -> elemento: o traço em si
+  // conta para onde olhar.
+  const nucleo = svg.querySelector('.amply-fio-nucleo');
+  const halo   = svg.querySelector('.amply-fio-halo');
+  const comprimento = nucleo.getTotalLength();
+  const suave = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  for (const p of [nucleo, halo]) {
+    p.style.strokeDasharray = comprimento;
+    p.style.strokeDashoffset = suave ? 0 : comprimento;
+  }
+  if (!suave) {
+    requestAnimationFrame(() => {
+      for (const p of [nucleo, halo]) {
+        p.style.transition = 'stroke-dashoffset 460ms cubic-bezier(.22,1,.36,1)';
+        p.style.strokeDashoffset = 0;
+      }
+    });
+  }
+};
+
 const marcarComoVisto = async (userId) => {
   if (!userId) return;
   try {
@@ -194,8 +279,34 @@ export function rodarTour(userId, { navigate, aoFechar } = {}) {
     // O Intro.js dispara `onexit` TAMBÉM ao concluir. Sem esta separação, cada
     // capítulo terminado seria lido como desistência e o tour pararia no
     // primeiro — a bandeira distingue os dois.
-    tour.oncomplete(() => { avancando = true; proximo(); });
+    // O fio precisa das medidas JA posicionadas, e a biblioteca coloca o
+    // tooltip depois de disparar o evento — dai o quadro de espera.
+    let redesenhar = null;
+    tour.onafterchange(function (elemento) {
+      requestAnimationFrame(() => desenharFio(elemento));
+      if (redesenhar) {
+        window.removeEventListener('scroll', redesenhar, true);
+        window.removeEventListener('resize', redesenhar);
+      }
+      // Rolagem e redimensionamento movem as duas pontas. Sem redesenhar, o
+      // fio fica ligando lugares onde nada mais esta.
+      redesenhar = () => requestAnimationFrame(() => desenharFio(elemento));
+      window.addEventListener('scroll', redesenhar, true);
+      window.addEventListener('resize', redesenhar);
+    });
+
+    const limparFio = () => {
+      removerFio();
+      if (redesenhar) {
+        window.removeEventListener('scroll', redesenhar, true);
+        window.removeEventListener('resize', redesenhar);
+        redesenhar = null;
+      }
+    };
+
+    tour.oncomplete(() => { avancando = true; limparFio(); proximo(); });
     tour.onexit(() => {
+      limparFio();
       if (avancando) { avancando = false; return; }
       encerrar();   // pulou de verdade: respeitamos e não insistimos
     });

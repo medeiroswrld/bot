@@ -1247,3 +1247,44 @@
   .introjs-tooltip.amply-tour { animation: none; }
   .introjs-helperLayer.amply-tour-ring { transition: opacity 200ms ease; }
 }
+
+/* ── O fio do tour ───────────────────────────────────────────────────────────
+   Liga a caixa ao elemento que ela explica. Substitui a setinha triangular da
+   biblioteca, que aponta mas não conduz — num tour que atravessa cinco telas,
+   o olho precisa de um caminho para seguir.
+
+   Vive entre o destaque (9999998) e a caixa (100000000), então o traço some
+   por baixo da borda do cartão em vez de encostar nela. É esse detalhe que faz
+   os dois lerem como peças ligadas, e não como um risco ao lado. */
+
+#amply-tour-fio {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 99999999;
+  pointer-events: none;   /* nunca rouba clique de nada */
+  overflow: visible;
+}
+
+#amply-tour-fio path {
+  fill: none;
+  stroke-linecap: round;
+}
+
+/* Núcleo fino e sólido; halo largo e borrado por baixo. Dois traços em vez de
+   um com sombra porque o brilho precisa seguir a curva, e sombra de SVG
+   borraria o traço inteiro de forma uniforme. */
+.amply-fio-nucleo {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.amply-fio-halo {
+  stroke: var(--accent);
+  stroke-width: 7;
+  opacity: .32;
+  filter: blur(5px);
+}
+
+.introjs-arrow { display: none; }   /* o fio faz o trabalho dela */
