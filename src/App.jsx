@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, CarFront, Users, Calendar, Settings,
@@ -126,6 +126,7 @@ const Sidebar = ({ aberta = false, onFechar = () => {} }) => {
                   className={`sidebar-nav-item${isActive(item) ? ' active' : ''}`}
                   onClick={onFechar}
                   data-tooltip={item.name}
+                  data-tour={item.path}
                 >
                   <span className="sidebar-nav-icon" style={{ position: 'relative' }}>
                     {item.icon}
@@ -159,6 +160,7 @@ const Sidebar = ({ aberta = false, onFechar = () => {} }) => {
           rel="noopener noreferrer"
           onClick={onFechar}
           data-tooltip="Suporte no WhatsApp"
+          data-tour="suporte"
         >
           <span className="sidebar-nav-icon"><LifeBuoy size={17} /></span>
           <span className="sidebar-label">Suporte</span>
@@ -311,6 +313,36 @@ const AvisoSuspensao = () => {
 const AuthenticatedApp = () => {
   const location = useLocation();
   const [menuAberto, setMenuAberto] = useState(false);
+  const { user, companySettings, refreshCompanySettings } = useAppContext();
+
+  // Tour de boas-vindas, uma vez por loja.
+  //
+  // Espera meio segundo de proposito: as telas sao lazy e os cartoes do Inicio
+  // montam depois do primeiro quadro. Abrir antes disso faria o tour descartar
+  // justamente os passos que importam, porque os elementos ainda nao existem.
+  //
+  // So na tela de Inicio: comecar o tour por cima da tela de Estoque, porque
+  // foi la que a pessoa caiu, e explicar a casa a partir do quarto dos fundos.
+  const tourPedido = useRef(false);
+  useEffect(() => {
+    if (tourPedido.current) return;
+    if (!companySettings || companySettings.tour_visto_em) return;
+    if (location.pathname !== '/') return;
+
+    tourPedido.current = true;
+    const t = setTimeout(() => {
+      import('./lib/tour.js')
+        .then(({ rodarTour }) => {
+          const abriu = rodarTour(user?.id, { aoFechar: () => refreshCompanySettings?.() });
+          // Nao abriu (tela ainda incompleta): solta a trava para a proxima
+          // visita ao Inicio tentar de novo, em vez de perder o tour para
+          // sempre por causa de um render infeliz.
+          if (!abriu) tourPedido.current = false;
+        })
+        .catch(() => { tourPedido.current = false; });
+    }, 500);
+    return () => clearTimeout(t);
+  }, [companySettings, location.pathname, user?.id, refreshCompanySettings]);
 
   // Fecha ao trocar de rota. Sem isso o drawer fica aberto por cima da tela
   // nova, e no celular ele cobre quase tudo.

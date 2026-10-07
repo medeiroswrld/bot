@@ -1074,3 +1074,95 @@
 .selo-confianca svg { flex-shrink: 0; margin-top: 2px; color: var(--accent); }
 .selo-confianca strong { display: block; font-size: .84rem; margin-bottom: 2px; color: var(--color-text); }
 .selo-confianca span { font-size: .78rem; color: var(--color-text-muted); line-height: 1.45; }
+
+/* ── Tour de boas-vindas (Intro.js) ──────────────────────────────────────────
+   A biblioteca vem com visual claro e fixo. Sem isto, o tour aparece como uma
+   caixa branca por cima do tema escuro — e a primeira impressão do produto
+   vira "parece quebrado". Tudo aqui sai dos mesmos tokens do resto do app,
+   então ele acompanha os dois temas sem código de tema nenhum. */
+
+.introjs-tooltip {
+  background: var(--card-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px -12px rgba(0, 0, 0, .45);
+  max-width: 340px;
+  min-width: 260px;
+}
+
+.introjs-tooltip-title {
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.introjs-tooltiptext {
+  color: var(--color-text-muted);
+  font-size: .87rem;
+  line-height: 1.55;
+}
+
+.introjs-arrow.top        { border-bottom-color: var(--card-bg); }
+.introjs-arrow.bottom     { border-top-color: var(--card-bg); }
+.introjs-arrow.left       { border-right-color: var(--card-bg); }
+.introjs-arrow.right      { border-left-color: var(--card-bg); }
+
+.introjs-button {
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-shadow: none;
+  font-size: .84rem;
+  font-weight: 600;
+  padding: 6px 14px;
+}
+
+.introjs-button:hover,
+.introjs-button:focus {
+  background: var(--border);
+  color: var(--text-primary);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+/* O "Próximo" é o caminho esperado: destaque nele e nada nos outros. */
+.introjs-nextbutton {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.introjs-nextbutton:hover,
+.introjs-nextbutton:focus {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  filter: brightness(1.08);
+}
+
+.introjs-skipbutton {
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  font-weight: 500;
+}
+
+.introjs-disabled,
+.introjs-disabled:hover {
+  background: var(--input-bg);
+  color: var(--color-text-muted);
+  opacity: .5;
+}
+
+.introjs-progress { background: var(--input-bg); }
+.introjs-progressbar { background: var(--accent); }
+
+/* O recorte que destaca o elemento. Borda clara demais marca um retângulo
+   branco no tema escuro — aqui ela só insinua. */
+.introjs-helperLayer {
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px rgba(0, 0, 0, .55);
+  background: transparent;
+}

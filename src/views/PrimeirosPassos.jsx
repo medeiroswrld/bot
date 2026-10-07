@@ -79,7 +79,7 @@ const PrimeirosPassos = () => {
   const pct = Math.round((prontos / passos.length) * 100);
 
   return (
-    <section className="card" style={{ padding: '1.4rem 1.5rem', marginBottom: '1.5rem' }}>
+    <section className="card" data-tour="primeiros-passos" style={{ padding: '1.4rem 1.5rem', marginBottom: '1.5rem' }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
         <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>Primeiros passos</h2>
         <span style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
