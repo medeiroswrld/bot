@@ -5,6 +5,7 @@ import {
     ChevronRight, Bot
 } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
+import PrimeirosPassos from './PrimeirosPassos.jsx';
 import { supabase } from '../lib/supabase.js';
 
 const STATUS_LABELS = {
@@ -336,6 +337,12 @@ const Dashboard = () => {
                 <h1>Início</h1>
                 <p>Resumo operacional da sua concessionária — {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}.</p>
             </header>
+
+            {/* Fica ACIMA das métricas de propósito: numa loja que acabou de
+                entrar, todas elas são zero, e zero no topo da primeira tela diz
+                "aqui não acontece nada". A lista diz o que fazer para que
+                acontecam. Some sozinha quando os quatro passos estiverem feitos. */}
+            <PrimeirosPassos />
 
             {/* ── Métricas principais ──────────────────────────────────────── */}
             <div className="metrics-grid">
