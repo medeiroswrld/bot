@@ -1086,7 +1086,14 @@
    leem todos daqui. E, como apontam para os tokens do app, o tour segue tema
    claro e escuro sem uma linha a mais. */
 
-:root {
+/* A biblioteca carimba `introjs-light` ou `introjs-dark` na raiz dela e, com
+   isso, redefine estes mesmos tokens MAIS PERTO do tooltip que o nosso :root —
+   por isso a caixa saía branca mesmo com o app no escuro. O prefixo `html`
+   sobe a especificidade o suficiente para neutralizar as duas, e aí o tema do
+   app volta a mandar. */
+:root,
+html .introjs-light,
+html .introjs-dark {
   --introjs-bg:          var(--card-bg);
   --introjs-color:       var(--text-primary);
   --introjs-arrow-color: var(--card-bg);
@@ -1108,7 +1115,10 @@
 /* ── A caixa ─────────────────────────────────────────────────────────────── */
 
 .introjs-tooltip.amply-tour {
-  border: 1px solid var(--border);
+  /* Borda puxada para o roxo: amarra o cartão ao fio, ao eyebrow e ao botão,
+     de modo que as quatro peças leiam como uma família e não como elementos
+     soltos que por acaso compartilham a tela. */
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
   border-radius: 14px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, .2), 0 20px 50px -18px rgba(0, 0, 0, .6);
   min-width: 300px;
@@ -1137,7 +1147,10 @@
   padding: 10px 18px 16px;
   font-size: .875rem;
   line-height: 1.6;
-  color: var(--text-secondary);
+  /* Mais forte que o cinza secundário: texto de leitura sobre superfície
+     elevada precisa de contraste, e cinza chapado é o que faz um cartão
+     parecer desbotado. */
+  color: color-mix(in srgb, var(--text-primary) 76%, transparent);
 }
 
 /* Diz em que tela a pessoa está — responde "onde estou?", que é a pergunta de
