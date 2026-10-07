@@ -141,43 +141,54 @@ const caminho = (de, para, vao) => {
 
 const entre = (v, min, max) => Math.max(min, Math.min(max, v));
 
-/** Onde cada ponta encosta. Liga as bordas que se ENFRENTAM, no ponto mais
- *  próximo uma da outra — não os centros.
+/** Onde cada ponta encosta.
  *
- *  Ligar centros parece natural e não é: a barra lateral tem 500px de altura, e
- *  o centro dela fica muito abaixo da caixa, fazendo o fio atravessar meia tela
- *  para chegar a um ponto que não interessa a ninguém.
+ *  Liga as bordas que se ENFRENTAM, no ponto mais próximo uma da outra — nunca
+ *  os centros. Ligar centros parece natural e não é: a barra lateral tem 500px
+ *  de altura, e o centro dela fica muito abaixo da caixa, fazendo o fio
+ *  atravessar meia tela para chegar a um ponto que não interessa a ninguém.
  *
- *  Devolve null quando as duas quase se tocam: fio de 10px não liga nada, só
- *  suja. Nesses casos o anel já diz o que precisa ser dito. */
+ *  SEMPRE devolve um caminho. A versão anterior desistia quando as duas peças
+ *  estavam quase encostadas, e isso apagava o fio justamente nos passos da
+ *  barra lateral, que são a maioria. Quando não há vão para o lado, a saída é
+ *  pela borda de baixo da caixa, contornando — fio curto é melhor que nenhum,
+ *  porque é ele que liga a explicação ao que ela explica. */
 const bordas = (t, a) => {
   const vaoX = Math.max(a.left - t.right, t.left - a.right);
   const vaoY = Math.max(a.top - t.bottom, t.top - a.bottom);
-  const MINIMO = 24;
+  const FOLGA_MIN = 34;
 
-  if (vaoX >= vaoY && vaoX > MINIMO) {
+  // Há espaço lateral: o caminho mais curto e mais legível.
+  if (vaoX >= vaoY && vaoX > 12) {
     const paraDireita = a.left >= t.right;
-    // A altura de encontro: o centro da caixa, preso à faixa vertical do alvo.
-    // Assim o fio sai reto e chega reto, sem subir ou descer à toa.
     const y = entre(t.top + t.height / 2, a.top + 10, a.bottom - 10);
     return [
       { x: paraDireita ? t.right : t.left, y: entre(y, t.top + 10, t.bottom - 10), eixo: 'x', sinal: paraDireita ? 1 : -1 },
       { x: paraDireita ? a.left : a.right, y, eixo: 'x', sinal: paraDireita ? -1 : 1 },
-      vaoX,
+      Math.max(vaoX, FOLGA_MIN),
     ];
   }
 
-  if (vaoY > MINIMO) {
+  // Há espaço acima ou abaixo.
+  if (vaoY > 12) {
     const paraBaixo = a.top >= t.bottom;
     const x = entre(t.left + t.width / 2, a.left + 10, a.right - 10);
     return [
       { x: entre(x, t.left + 10, t.right - 10), y: paraBaixo ? t.bottom : t.top, eixo: 'y', sinal: paraBaixo ? 1 : -1 },
       { x, y: paraBaixo ? a.top : a.bottom, eixo: 'y', sinal: paraBaixo ? -1 : 1 },
-      vaoY,
+      Math.max(vaoY, FOLGA_MIN),
     ];
   }
 
-  return null;
+  // Encostadas ou sobrepostas: sai por baixo da caixa e sobe por fora até a
+  // borda do alvo mais próxima na horizontal. Dá um laço curto, visível, sem
+  // cruzar o conteúdo.
+  const alvoAEsquerda = (a.left + a.width / 2) < (t.left + t.width / 2);
+  return [
+    { x: entre(t.left + t.width / 2, t.left + 20, t.right - 20), y: t.bottom, eixo: 'y', sinal: 1 },
+    { x: alvoAEsquerda ? a.right : a.left, y: entre(t.bottom + 28, a.top + 10, a.bottom - 10), eixo: 'x', sinal: alvoAEsquerda ? 1 : -1 },
+    FOLGA_MIN,
+  ];
 };
 
 const desenharFio = (alvo) => {
@@ -189,9 +200,7 @@ const desenharFio = (alvo) => {
   const a = alvo.getBoundingClientRect();
   if (!t.width || !a.width) return;
 
-  const pontas = bordas(t, a);
-  if (!pontas) return;        // encostadas: o anel basta, fio curto so suja
-  const [de, para, vao] = pontas;
+  const [de, para, vao] = bordas(t, a);
   const d = caminho(de, para, vao);
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
