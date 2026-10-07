@@ -328,25 +328,38 @@ const AuthenticatedApp = () => {
   useEffect(() => {
     if (tourPedido.current) return;
     if (!companySettings || companySettings.tour_visto_em) return;
-    if (location.pathname !== '/') return;
 
     tourPedido.current = true;
-    const t = setTimeout(() => {
-      import('./lib/tour.js')
-        .then(({ rodarTour }) => {
-          const abriu = rodarTour(user?.id, {
-            navigate,
-            aoFechar: () => refreshCompanySettings?.(),
-          });
-          // Nao abriu (tela ainda incompleta): solta a trava para a proxima
-          // visita ao Inicio tentar de novo, em vez de perder o tour para
-          // sempre por causa de um render infeliz.
-          if (!abriu) tourPedido.current = false;
-        })
-        .catch(() => { tourPedido.current = false; });
-    }, 500);
-    return () => clearTimeout(t);
-  }, [companySettings, location.pathname, user?.id, refreshCompanySettings, navigate]);
+    let vivo = true;
+
+    (async () => {
+      // LEVA pro Início em vez de desistir.
+      //
+      // A versão anterior só disparava quando a rota já era '/', e quem
+      // recarregou a página estando em Configurações nunca via o tour — que é
+      // exatamente quem mais precisa dele.
+      if (window.location.pathname !== '/') navigate('/');
+
+      const { rodarTour, esperar } = await import('./lib/tour.js');
+
+      // Espera o ALVO existir, em vez de apostar num tempo fixo. As telas são
+      // lazy: 500ms acertava às vezes, e quando errava o tour se perdia para
+      // sempre, porque nada fazia o efeito rodar de novo.
+      const pronto = await esperar('[data-tour="/conversas"]', 8000);
+      if (!vivo) return;
+      if (!pronto) { tourPedido.current = false; return; }
+
+      const abriu = rodarTour(user?.id, {
+        navigate,
+        aoFechar: () => refreshCompanySettings?.(),
+      });
+      if (!abriu) tourPedido.current = false;
+    })().catch(() => { tourPedido.current = false; });
+
+    return () => { vivo = false; };
+    // `location.pathname` fica FORA das dependências de propósito: o próprio
+    // tour navega entre telas, e reagir a isso reiniciaria o efeito no meio.
+  }, [companySettings, user?.id, refreshCompanySettings, navigate]);
 
   // Fecha ao trocar de rota. Sem isso o drawer fica aberto por cima da tela
   // nova, e no celular ele cobre quase tudo.

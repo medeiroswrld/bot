@@ -97,7 +97,7 @@ const visivel = (sel) => {
 
 /** Espera um elemento aparecer depois da navegação. As telas são lazy: a rota
  *  troca na hora, o conteúdo chega alguns quadros depois. */
-const esperar = (sel, limiteMs = 4000) => new Promise((resolve) => {
+export const esperar = (sel, limiteMs = 4000) => new Promise((resolve) => {
   const inicio = Date.now();
   const tenta = () => {
     if (visivel(sel)) return resolve(true);
