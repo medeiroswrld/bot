@@ -193,12 +193,32 @@ const bordas = (t, a) => {
 
 const desenharFio = (alvo) => {
   removerFio();
-  const caixa = document.querySelector('.introjs-tooltip');
-  if (!alvo || !caixa) return;
+  if (!alvo) return;
+  const a0 = alvo.getBoundingClientRect();
+  if (!a0.width) return;
+
+  // A caixa MAIS PROXIMA do alvo, nao a primeira do documento.
+  //
+  // Na troca de capitulo duas existem por um instante, e `querySelector`
+  // devolvia a que estava saindo: o fio nascia da caixa velha, parada em outro
+  // canto, e varria a tela inteira para chegar ao alvo certo. Ordem no DOM nao
+  // e criterio confiavel aqui; proximidade e, porque a biblioteca sempre
+  // posiciona a caixa do passo colada no elemento dele.
+  const perto = (r) => Math.hypot(
+    (r.left + r.width / 2) - (a0.left + a0.width / 2),
+    (r.top + r.height / 2) - (a0.top + a0.height / 2),
+  );
+
+  const caixa = [...document.querySelectorAll('.introjs-tooltip')]
+    .map((c) => ({ el: c, r: c.getBoundingClientRect() }))
+    .filter((c) => c.r.width > 0)
+    .sort((x, y) => perto(x.r) - perto(y.r))[0]?.el;
+
+  if (!caixa) return;
 
   const t = caixa.getBoundingClientRect();
-  const a = alvo.getBoundingClientRect();
-  if (!t.width || !a.width) return;
+  const a = a0;
+  if (!t.width) return;
 
   const [de, para, vao] = bordas(t, a);
   const d = caminho(de, para, vao);
