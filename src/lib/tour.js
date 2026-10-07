@@ -37,7 +37,7 @@ const ROTEIRO = [
       { alvo: '[data-tour="primeiros-passos"]', posicao: 'bottom',
         titulo: 'Comece por aqui',
         texto: 'Esta lista mostra o que falta para o assistente atender o seu primeiro cliente. Ela some sozinha quando você terminar.' },
-      { alvo: '[data-tour="/conversas"]', posicao: 'right',
+      { alvo: '[data-tour="menu"]', posicao: 'right',
         titulo: 'O menu da esquerda',
         texto: 'Tudo fica aqui. Vou te levar pelas telas que você mais usa no começo.' },
     ],
@@ -185,6 +185,9 @@ export function rodarTour(userId, { navigate, aoFechar } = {}) {
       highlightClass: 'amply-tour-ring',
       exitOnOverlayClick: false,   // clique fora não deve encerrar sem querer
       disableInteraction: true,
+      // Escurecido forte: o alvo às vezes é um ícone de 18px numa barra já
+      // escura, e com pouco contraste o destaque simplesmente não se lê.
+      overlayOpacity: 0.72,
       scrollToElement: true,
     });
 

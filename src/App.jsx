@@ -114,7 +114,7 @@ const Sidebar = ({ aberta = false, onFechar = () => {} }) => {
       </Link>
 
       {/* Navigation */}
-      <nav className="sidebar-nav">
+      <nav className="sidebar-nav" data-tour="menu">
         <ul>
           {NAV_ITEMS.map((item) => {
             // O aviso da lista de espera agora vive no grupo que a contém.
