@@ -126,34 +126,58 @@ const ID_FIO = 'amply-tour-fio';
 
 const removerFio = () => document.getElementById(ID_FIO)?.remove();
 
-/** Curva de uma borda à outra, sempre saindo e entrando perpendicular.
- *  Controles perpendiculares são o que dá o formato de chicote da referência —
- *  linha reta ligaria os dois pontos sem sugerir direção nenhuma. */
-const caminho = (de, para) => {
-  const folga = Math.min(Math.max(Math.abs(de.x - para.x) * 0.5, 40), 120);
-  const c1 = de.eixo === 'x'   ? [de.x + de.sinal * folga, de.y]   : [de.x, de.y + de.sinal * folga];
+/** Curva curta entre as bordas que se enfrentam.
+ *
+ *  A folga dos controles sai do VÃO REAL entre as duas peças, não de uma
+ *  constante: com folga fixa, duas peças quase encostadas geravam um traço que
+ *  disparava para fora da tela antes de voltar — foi o que cruzou o conteúdo
+ *  todo na primeira versão. */
+const caminho = (de, para, vao) => {
+  const folga = Math.min(Math.max(vao * 0.55, 14), 70);
+  const c1 = de.eixo === 'x'   ? [de.x + de.sinal * folga, de.y]     : [de.x, de.y + de.sinal * folga];
   const c2 = para.eixo === 'x' ? [para.x + para.sinal * folga, para.y] : [para.x, para.y + para.sinal * folga];
   return `M ${de.x} ${de.y} C ${c1[0]} ${c1[1]}, ${c2[0]} ${c2[1]}, ${para.x} ${para.y}`;
 };
 
-/** De qual borda sair, e para qual entrar. Decide pelo eixo dominante: caixa à
- *  direita do alvo sai pela esquerda dela e entra pela direita dele. */
-const bordas = (t, a) => {
-  const dx = (a.left + a.width / 2) - (t.left + t.width / 2);
-  const dy = (a.top + a.height / 2) - (t.top + t.height / 2);
+const entre = (v, min, max) => Math.max(min, Math.min(max, v));
 
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    const paraDireita = dx > 0;
+/** Onde cada ponta encosta. Liga as bordas que se ENFRENTAM, no ponto mais
+ *  próximo uma da outra — não os centros.
+ *
+ *  Ligar centros parece natural e não é: a barra lateral tem 500px de altura, e
+ *  o centro dela fica muito abaixo da caixa, fazendo o fio atravessar meia tela
+ *  para chegar a um ponto que não interessa a ninguém.
+ *
+ *  Devolve null quando as duas quase se tocam: fio de 10px não liga nada, só
+ *  suja. Nesses casos o anel já diz o que precisa ser dito. */
+const bordas = (t, a) => {
+  const vaoX = Math.max(a.left - t.right, t.left - a.right);
+  const vaoY = Math.max(a.top - t.bottom, t.top - a.bottom);
+  const MINIMO = 24;
+
+  if (vaoX >= vaoY && vaoX > MINIMO) {
+    const paraDireita = a.left >= t.right;
+    // A altura de encontro: o centro da caixa, preso à faixa vertical do alvo.
+    // Assim o fio sai reto e chega reto, sem subir ou descer à toa.
+    const y = entre(t.top + t.height / 2, a.top + 10, a.bottom - 10);
     return [
-      { x: paraDireita ? t.right : t.left, y: t.top + t.height / 2, eixo: 'x', sinal: paraDireita ? 1 : -1 },
-      { x: paraDireita ? a.left : a.right, y: a.top + a.height / 2, eixo: 'x', sinal: paraDireita ? -1 : 1 },
+      { x: paraDireita ? t.right : t.left, y: entre(y, t.top + 10, t.bottom - 10), eixo: 'x', sinal: paraDireita ? 1 : -1 },
+      { x: paraDireita ? a.left : a.right, y, eixo: 'x', sinal: paraDireita ? -1 : 1 },
+      vaoX,
     ];
   }
-  const paraBaixo = dy > 0;
-  return [
-    { x: t.left + t.width / 2, y: paraBaixo ? t.bottom : t.top, eixo: 'y', sinal: paraBaixo ? 1 : -1 },
-    { x: a.left + a.width / 2, y: paraBaixo ? a.top : a.bottom, eixo: 'y', sinal: paraBaixo ? -1 : 1 },
-  ];
+
+  if (vaoY > MINIMO) {
+    const paraBaixo = a.top >= t.bottom;
+    const x = entre(t.left + t.width / 2, a.left + 10, a.right - 10);
+    return [
+      { x: entre(x, t.left + 10, t.right - 10), y: paraBaixo ? t.bottom : t.top, eixo: 'y', sinal: paraBaixo ? 1 : -1 },
+      { x, y: paraBaixo ? a.top : a.bottom, eixo: 'y', sinal: paraBaixo ? -1 : 1 },
+      vaoY,
+    ];
+  }
+
+  return null;
 };
 
 const desenharFio = (alvo) => {
@@ -165,8 +189,10 @@ const desenharFio = (alvo) => {
   const a = alvo.getBoundingClientRect();
   if (!t.width || !a.width) return;
 
-  const [de, para] = bordas(t, a);
-  const d = caminho(de, para);
+  const pontas = bordas(t, a);
+  if (!pontas) return;        // encostadas: o anel basta, fio curto so suja
+  const [de, para, vao] = pontas;
+  const d = caminho(de, para, vao);
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.id = ID_FIO;
