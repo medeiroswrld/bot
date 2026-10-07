@@ -41,3 +41,6 @@ deno.lock
 *~
 .tmp
 .temp
+
+.vercel
+.env*

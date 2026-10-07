@@ -1076,93 +1076,170 @@
 .selo-confianca span { font-size: .78rem; color: var(--color-text-muted); line-height: 1.45; }
 
 /* ── Tour de boas-vindas (Intro.js) ──────────────────────────────────────────
-   A biblioteca vem com visual claro e fixo. Sem isto, o tour aparece como uma
-   caixa branca por cima do tema escuro — e a primeira impressão do produto
-   vira "parece quebrado". Tudo aqui sai dos mesmos tokens do resto do app,
-   então ele acompanha os dois temas sem código de tema nenhum. */
+   O CSS da biblioteca entra pelo chunk lazy, DEPOIS deste arquivo, e por isso
+   vence a cascata com especificidade igual. Daí o `.amply-tour` em tudo: é a
+   classe que passamos em `tooltipClass`, e ela desempata sem precisar de
+   `!important` espalhado.
 
-.introjs-tooltip {
+   A ideia do visual: o tour tem dois pontos de contato — o ANEL em volta do
+   elemento e a SETA da caixa. Os dois usam o mesmo roxo do app, então o olho
+   liga "esta caixa fala daquilo" sem precisar de instrução. Todo o resto é
+   quieto e sai dos tokens que o CRM já usa, para o tour parecer parte do
+   produto e não uma biblioteca colada por cima. */
+
+.introjs-tooltip.amply-tour {
   background: var(--card-bg);
   color: var(--text-primary);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 12px 40px -12px rgba(0, 0, 0, .45);
+  border-radius: 14px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .18), 0 18px 48px -18px rgba(0, 0, 0, .55);
+  min-width: 290px;
   max-width: 340px;
-  min-width: 260px;
+  padding: 2px;
 }
 
-.introjs-tooltip-title {
+/* Chega como material, não como opacidade: escala e opacidade juntas, curva
+   sem overshoot — o passo não foi arremessado por ninguém, então não deve
+   quicar. */
+.introjs-tooltip.amply-tour {
+  animation: amply-tour-entrada 240ms cubic-bezier(.22, 1, .36, 1);
+}
+
+@keyframes amply-tour-entrada {
+  from { opacity: 0; transform: scale(.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.amply-tour .introjs-tooltip-header {
+  padding: 16px 18px 0;
+}
+
+.amply-tour .introjs-tooltip-title {
+  font-size: 1.0625rem;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -.015em;   /* aperta conforme cresce, como todo texto grande */
   color: var(--text-primary);
-  font-size: 1rem;
+}
+
+.amply-tour .introjs-tooltiptext {
+  padding: 8px 18px 16px;
+  font-size: .875rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+/* Diz em que tela a pessoa está. Vale mais que barra de progresso: o tour
+   atravessa cinco telas, e progresso que reinicia a cada uma engana. */
+.amply-tour-eyebrow {
+  display: block;
+  margin-bottom: 10px;
+  font-size: .68rem;
   font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--accent);
 }
 
-.introjs-tooltiptext {
-  color: var(--color-text-muted);
-  font-size: .87rem;
-  line-height: 1.55;
+/* ── A seta ────────────────────────────────────────────────────────────────
+   Na cor da própria caixa, não do destaque: assim a caixa lê como um objeto
+   só, com um bico apontando — e não como um triângulo solto ao lado dela.
+   Maior que o padrão (8px → 11px) porque no tema escuro a seta original
+   sumia contra o fundo. */
+.amply-tour .introjs-arrow         { border-width: 11px; }
+.amply-tour .introjs-arrow.top,
+.amply-tour .introjs-arrow.top-right,
+.amply-tour .introjs-arrow.top-middle    { border-bottom-color: var(--card-bg); top: -22px; }
+.amply-tour .introjs-arrow.bottom,
+.amply-tour .introjs-arrow.bottom-right,
+.amply-tour .introjs-arrow.bottom-middle { border-top-color: var(--card-bg); bottom: -22px; }
+.amply-tour .introjs-arrow.left,
+.amply-tour .introjs-arrow.left-bottom   { border-right-color: var(--card-bg); left: -22px; }
+.amply-tour .introjs-arrow.right,
+.amply-tour .introjs-arrow.right-bottom  { border-left-color: var(--card-bg); right: -22px; }
+
+/* ── Rodapé ────────────────────────────────────────────────────────────────
+   O "Pular" vinha posicionado por cima do título — era o defeito mais visível.
+   Aqui ele desce para o rodapé, à esquerda, como saída discreta: continua
+   disponível (agência), sem competir com o caminho principal. */
+.amply-tour .introjs-tooltipbuttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 18px 16px;
+  border-top: none;
+  text-align: left;
 }
 
-.introjs-arrow.top        { border-bottom-color: var(--card-bg); }
-.introjs-arrow.bottom     { border-top-color: var(--card-bg); }
-.introjs-arrow.left       { border-right-color: var(--card-bg); }
-.introjs-arrow.right      { border-left-color: var(--card-bg); }
-
-.introjs-button {
-  background: var(--input-bg);
-  color: var(--text-primary);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  text-shadow: none;
+.amply-tour .introjs-button {
   font-size: .84rem;
   font-weight: 600;
-  padding: 6px 14px;
+  padding: 7px 15px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  text-shadow: none;
+  transition: transform 90ms ease-out, filter 120ms ease-out;
 }
 
-.introjs-button:hover,
-.introjs-button:focus {
-  background: var(--border);
-  color: var(--text-primary);
-  border-color: var(--border);
+/* Resposta no apertar, não no soltar. */
+.amply-tour .introjs-button:active { transform: scale(.97); }
+
+.amply-tour .introjs-nextbutton,
+.amply-tour .introjs-donebutton {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  margin-left: auto;          /* caminho principal fica na direita */
+}
+
+.amply-tour .introjs-nextbutton:hover,
+.amply-tour .introjs-donebutton:hover { filter: brightness(1.1); }
+
+.amply-tour .introjs-skipbutton {
+  position: static;            /* desfaz o absoluto que o jogava no cabeçalho */
+  order: -1;
+  padding: 7px 4px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  width: auto;
+  height: auto;
+  line-height: normal;
+}
+
+.amply-tour .introjs-skipbutton:hover { color: var(--text-primary); }
+
+.amply-tour .introjs-prevbutton.introjs-disabled,
+.amply-tour .introjs-disabled {
+  opacity: .4;
+  background: var(--input-bg);
+  color: var(--text-secondary);
+}
+
+.amply-tour .introjs-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
   box-shadow: none;
 }
 
-/* O "Próximo" é o caminho esperado: destaque nele e nada nos outros. */
-.introjs-nextbutton {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.introjs-nextbutton:hover,
-.introjs-nextbutton:focus {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  filter: brightness(1.08);
-}
-
-.introjs-skipbutton {
-  color: var(--color-text-muted);
-  background: none;
-  border: none;
-  font-weight: 500;
-}
-
-.introjs-disabled,
-.introjs-disabled:hover {
-  background: var(--input-bg);
-  color: var(--color-text-muted);
-  opacity: .5;
-}
-
-.introjs-progress { background: var(--input-bg); }
-.introjs-progressbar { background: var(--accent); }
-
-/* O recorte que destaca o elemento. Borda clara demais marca um retângulo
-   branco no tema escuro — aqui ela só insinua. */
-.introjs-helperLayer {
-  border-radius: 10px;
-  box-shadow: 0 0 0 2px var(--accent), 0 0 0 9999px rgba(0, 0, 0, .55);
+/* ── O anel no elemento ────────────────────────────────────────────────────
+   O outro ponto de contato. Mesmo roxo da seta, com um halo curto para
+   separar do fundo escuro sem pintar um retângulo branco em volta. */
+.introjs-helperLayer.amply-tour-ring {
+  border-radius: 12px;
   background: transparent;
+  box-shadow: 0 0 0 2px var(--accent),
+              0 0 0 7px color-mix(in srgb, var(--accent) 22%, transparent),
+              0 0 0 9999px rgba(8, 8, 12, .62);
+  transition: all 420ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.introjs-overlay { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  .introjs-tooltip.amply-tour { animation: none; }
+  .introjs-helperLayer.amply-tour-ring { transition: opacity 200ms ease; }
 }

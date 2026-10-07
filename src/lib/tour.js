@@ -30,6 +30,7 @@ import { supabase } from './supabase.js';
 const ROTEIRO = [
   {
     rota: '/',
+    tela: 'Início',
     passos: [
       { titulo: 'Bem-vindo à Amply',
         texto: 'Em um minuto eu te mostro onde fica cada coisa. Pode pular quando quiser.' },
@@ -43,6 +44,7 @@ const ROTEIRO = [
   },
   {
     rota: '/estoque',
+    tela: 'Veículos',
     passos: [
       { alvo: '[data-tour="estoque-adicionar"]', posicao: 'bottom',
         titulo: 'Seus veículos',
@@ -51,6 +53,7 @@ const ROTEIRO = [
   },
   {
     rota: '/conversas',
+    tela: 'Conversas',
     passos: [
       { alvo: '[data-tour="conversas-lista"]', posicao: 'right',
         titulo: 'As conversas',
@@ -59,6 +62,7 @@ const ROTEIRO = [
   },
   {
     rota: '/assistente',
+    tela: 'Assistente',
     passos: [
       { alvo: '[data-tour="assistente-instrucoes"]', posicao: 'bottom',
         titulo: 'Como ele fala',
@@ -67,6 +71,7 @@ const ROTEIRO = [
   },
   {
     rota: '/configuracoes',
+    tela: 'Configurações',
     passos: [
       { alvo: '[data-tour="cfg-empresa"]', posicao: 'bottom',
         titulo: 'Os dados da loja',
@@ -120,12 +125,15 @@ const marcarComoVisto = async (userId) => {
   }
 };
 
+// O corpo leva um "eyebrow" com o nome da tela. Ele responde "onde eu estou?",
+// que e a pergunta que um tour de cinco telas precisa responder o tempo todo —
+// e vale mais que barra de progresso, que reiniciaria a cada tela e enganaria.
 const montarEtapas = (cap) => cap.passos
   .filter((p) => !p.alvo || visivel(p.alvo))
   .map((p) => ({
     ...(p.alvo ? { element: document.querySelector(p.alvo) } : {}),
     title: p.titulo,
-    intro: p.texto,
+    intro: `<span class="amply-tour-eyebrow">${cap.tela}</span>${p.texto}`,
     ...(p.posicao ? { position: p.posicao } : {}),
   }));
 
@@ -170,7 +178,11 @@ export function rodarTour(userId, { navigate, aoFechar } = {}) {
       doneLabel: capitulo === ROTEIRO.length - 1 ? 'Entendi' : 'Continuar',
       skipLabel: 'Pular',
       showBullets: false,
-      showProgress: true,
+      // Sem barra: ela e por capitulo, entao reiniciaria em cada tela e diria
+      // "quase la" cinco vezes. O nome da tela no topo informa melhor.
+      showProgress: false,
+      tooltipClass: 'amply-tour',
+      highlightClass: 'amply-tour-ring',
       exitOnOverlayClick: false,   // clique fora não deve encerrar sem querer
       disableInteraction: true,
       scrollToElement: true,
