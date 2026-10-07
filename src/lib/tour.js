@@ -2,63 +2,110 @@ import introJs from 'intro.js';
 import 'intro.js/introjs.css';
 import { supabase } from './supabase.js';
 
-// Tour de boas-vindas — mostra ONDE ficam as coisas.
+// Tour de boas-vindas — atravessa as telas, não só a primeira.
 //
 // Divide tarefa com a lista de Primeiros Passos, e os dois precisam existir:
 //
 //   tour   → "onde fica cada coisa", uma vez só, no primeiro login
 //   lista  → "o que ainda falta", toda vez, até terminar
 //
-// Um tour que também cobrasse tarefa viraria lembrete repetido; uma lista que
-// também ensinasse a navegar viraria manual. Separados, cada um faz uma coisa.
+// ── Por que capítulos, e não uma lista de passos ───────────────────────────
 //
-// ── A fragilidade de todo tour, e como esta versão não cai nela ────────────
+// O Intro.js destaca elementos da tela ATUAL. Um tour de verdade precisa levar
+// o lojista até Configurações, porque é lá que está o botão sem o qual nada
+// funciona. Então o roteiro é dividido por rota: termina o capítulo, navega,
+// espera a tela montar e continua de onde parou.
 //
-// Tour quebra quando o seletor some: alguém renomeia uma classe, o elemento
-// muda de lugar, e o passo aponta para o nada. Com a biblioteca travada num
-// elemento inexistente, o lojista fica com a tela escurecida e sem saída —
-// pior que não ter tour nenhum.
+// Termina em Configurações de propósito. A última coisa que a pessoa vê é
+// "conecte o seu WhatsApp" — que é exatamente o que ela precisa fazer a seguir.
 //
-// Por isso cada passo é CONFERIDO antes de entrar: elemento ausente ou
-// invisível é descartado em silêncio. No celular, onde a barra lateral vive
-// fechada, isso corta os passos dela sozinho — sem precisar de código de
-// celular em lugar nenhum.
+// ── A fragilidade de todo tour ─────────────────────────────────────────────
+//
+// Tour quebra quando o seletor some: alguém renomeia algo e o passo aponta
+// para o nada, deixando a tela escurecida sem saída — pior que não ter tour.
+// Aqui cada passo é conferido antes de entrar, e capítulo que ficou vazio é
+// pulado inteiro. No celular, com a barra lateral fechada, isso descarta os
+// passos dela sozinho, sem uma linha de código de celular.
 
-const passo = (seletor, titulo, texto, posicao) => ({ seletor, titulo, texto, posicao });
-
-const PASSOS = [
-  passo(null, 'Bem-vindo à Amply',
-    'Em um minuto eu te mostro onde fica cada coisa. Depois é só usar.'),
-
-  passo('[data-tour="primeiros-passos"]', 'Comece por aqui',
-    'Esta lista mostra o que falta para o assistente atender o seu primeiro cliente. Ela some sozinha quando você terminar.', 'bottom'),
-
-  passo('[data-tour="/estoque"]', 'Seus veículos',
-    'É daqui que o assistente tira o que oferecer ao cliente. Carro cadastrado aqui aparece na conversa, no site e no contrato de venda.', 'right'),
-
-  passo('[data-tour="/conversas"]', 'As conversas',
-    'Tudo que chega pelo WhatsApp e pelo Instagram cai aqui. Quando quiser falar você mesmo, é só assumir a conversa — o assistente sai de cena na hora.', 'right'),
-
-  passo('[data-tour="/agenda"]', 'As visitas',
-    'O assistente agenda sozinho, respeitando o seu horário de funcionamento. As visitas marcadas aparecem aqui.', 'right'),
-
-  passo('[data-tour="/assistente"]', 'O assistente',
-    'Aqui você conta como a sua loja trabalha: financiamento, troca, formas de pagamento e horário. É o que faz ele responder como alguém da sua equipe.', 'right'),
-
-  passo('[data-tour="/configuracoes"]', 'Configurações',
-    'Os dados da loja, o contrato de venda e — o mais importante — o botão que conecta o seu WhatsApp.', 'right'),
-
-  passo('[data-tour="suporte"]', 'Travou em algo?',
-    'Este botão abre o WhatsApp da gente. Pode chamar.', 'right'),
+const ROTEIRO = [
+  {
+    rota: '/',
+    passos: [
+      { titulo: 'Bem-vindo à Amply',
+        texto: 'Em um minuto eu te mostro onde fica cada coisa. Pode pular quando quiser.' },
+      { alvo: '[data-tour="primeiros-passos"]', posicao: 'bottom',
+        titulo: 'Comece por aqui',
+        texto: 'Esta lista mostra o que falta para o assistente atender o seu primeiro cliente. Ela some sozinha quando você terminar.' },
+      { alvo: '[data-tour="/conversas"]', posicao: 'right',
+        titulo: 'O menu da esquerda',
+        texto: 'Tudo fica aqui. Vou te levar pelas telas que você mais usa no começo.' },
+    ],
+  },
+  {
+    rota: '/estoque',
+    passos: [
+      { alvo: '[data-tour="estoque-adicionar"]', posicao: 'bottom',
+        titulo: 'Seus veículos',
+        texto: 'Cadastre por aqui. Dá para puxar os dados pela placa, e o carro cadastrado já aparece na conversa com o cliente, no seu site e no contrato de venda.' },
+    ],
+  },
+  {
+    rota: '/conversas',
+    passos: [
+      { alvo: '[data-tour="conversas-lista"]', posicao: 'right',
+        titulo: 'As conversas',
+        texto: 'Tudo que chega pelo WhatsApp e pelo Instagram cai aqui. Quando quiser falar você mesmo, é só assumir a conversa — o assistente sai de cena na hora e volta quando você mandar.' },
+    ],
+  },
+  {
+    rota: '/assistente',
+    passos: [
+      { alvo: '[data-tour="assistente-instrucoes"]', posicao: 'bottom',
+        titulo: 'Como ele fala',
+        texto: 'Conte o que a sua loja tem de diferente: desconto à vista, se pega carro na troca, o que não pode ser prometido. Dois parágrafos já mudam muito.' },
+    ],
+  },
+  {
+    rota: '/configuracoes',
+    passos: [
+      { alvo: '[data-tour="cfg-empresa"]', posicao: 'bottom',
+        titulo: 'Os dados da loja',
+        texto: 'Nome, endereço e telefone. O assistente usa pra se apresentar, e o contrato de venda sai com eles.' },
+      { alvo: '[data-tour="cfg-whatsapp"]', posicao: 'bottom',
+        titulo: 'O passo que liga tudo',
+        texto: 'Aqui você conecta o WhatsApp da loja. Entra com a conta do Facebook do negócio, autoriza, e pronto — a partir daí o cliente conversa com o assistente.' },
+      { alvo: '[data-tour="cfg-social"]', posicao: 'bottom',
+        titulo: 'Instagram também',
+        texto: 'O mesmo assistente atende no Direct. Dá pra conectar agora ou deixar pra depois.' },
+      { alvo: '[data-tour="cfg-contrato"]', posicao: 'bottom',
+        titulo: 'O contrato de venda',
+        texto: 'Ao registrar uma venda, o contrato sai pronto com os dados do comprador e do veículo. Você pode usar o modelo da Amply ou colar o da sua loja.' },
+      { titulo: 'É isso',
+        texto: 'Se travar em algo, o botão de Suporte no fim do menu abre o nosso WhatsApp. Bom trabalho!' },
+    ],
+  },
 ];
 
-/** Elemento existe E está visível? Barra lateral fechada no celular tem
- *  largura zero, e destacar o invisível deixa o tour apontando para o vazio. */
-const visivel = (el) => {
+/** Existe E ocupa espaço? Barra lateral fechada no celular tem largura zero, e
+ *  destacar o invisível deixa o tour apontando para o vazio. */
+const visivel = (sel) => {
+  const el = document.querySelector(sel);
   if (!el) return false;
   const r = el.getBoundingClientRect();
   return r.width > 0 && r.height > 0;
 };
+
+/** Espera um elemento aparecer depois da navegação. As telas são lazy: a rota
+ *  troca na hora, o conteúdo chega alguns quadros depois. */
+const esperar = (sel, limiteMs = 4000) => new Promise((resolve) => {
+  const inicio = Date.now();
+  const tenta = () => {
+    if (visivel(sel)) return resolve(true);
+    if (Date.now() - inicio > limiteMs) return resolve(false);
+    setTimeout(tenta, 120);
+  };
+  tenta();
+});
 
 const marcarComoVisto = async (userId) => {
   if (!userId) return;
@@ -68,45 +115,82 @@ const marcarComoVisto = async (userId) => {
       .update({ tour_visto_em: new Date().toISOString() })
       .eq('user_id', userId);
   } catch {
-    // Falhar aqui só faz o tour aparecer de novo no próximo login. Chato,
-    // não quebrado — e não vale travar a entrada do lojista por causa disso.
+    // Falhar aqui só faz o tour reaparecer no próximo login. Chato, não
+    // quebrado — e não vale travar a entrada do lojista por isso.
   }
 };
 
-/** Roda o tour. Devolve true se chegou a abrir. */
-export function rodarTour(userId, { aoFechar } = {}) {
-  const etapas = PASSOS
-    .filter((p) => !p.seletor || visivel(document.querySelector(p.seletor)))
-    .map((p) => ({
-      ...(p.seletor ? { element: document.querySelector(p.seletor) } : {}),
-      title: p.titulo,
-      intro: p.texto,
-      ...(p.posicao ? { position: p.posicao } : {}),
-    }));
+const montarEtapas = (cap) => cap.passos
+  .filter((p) => !p.alvo || visivel(p.alvo))
+  .map((p) => ({
+    ...(p.alvo ? { element: document.querySelector(p.alvo) } : {}),
+    title: p.titulo,
+    intro: p.texto,
+    ...(p.posicao ? { position: p.posicao } : {}),
+  }));
 
-  // Sobrou só a boas-vindas: a tela ainda não montou, ou é um layout que não
-  // conhecemos. Melhor não abrir do que abrir um tour de um slide só.
-  if (etapas.length < 2) return false;
+/**
+ * Roda o tour inteiro, atravessando as telas.
+ *
+ * `navigate` vem do react-router: sem ele o tour fica preso na tela de Início,
+ * que é justamente o que não queremos.
+ */
+export function rodarTour(userId, { navigate, aoFechar } = {}) {
+  let capitulo = 0;
+  let avancando = false;   // separa "terminou o capítulo" de "o lojista saiu"
 
-  const tour = introJs();
-  tour.setOptions({
-    steps: etapas,
-    nextLabel: 'Próximo',
-    prevLabel: 'Voltar',
-    doneLabel: 'Entendi',
-    skipLabel: 'Pular',
-    showBullets: false,
-    showProgress: true,
-    exitOnOverlayClick: false,  // clique fora não deve encerrar sem querer
-    disableInteraction: true,
-    scrollToElement: true,
-  });
-
-  // Marca como visto tanto no fim quanto na saída: quem pulou decidiu que não
-  // quer, e insistir seria transformar ajuda em incômodo.
   const encerrar = () => { marcarComoVisto(userId); aoFechar?.(); };
-  tour.oncomplete(encerrar);
-  tour.onexit(encerrar);
-  tour.start();
+
+  const proximo = async () => {
+    capitulo += 1;
+    if (capitulo >= ROTEIRO.length) return encerrar();
+
+    const cap = ROTEIRO[capitulo];
+    navigate?.(cap.rota);
+
+    // Espera o primeiro alvo do capítulo. Se não vier, pula o capítulo
+    // inteiro em vez de abrir um tour apontando para o nada.
+    const primeiro = cap.passos.find((p) => p.alvo);
+    if (primeiro) {
+      const veio = await esperar(primeiro.alvo);
+      if (!veio) return proximo();
+    }
+    rodarCapitulo();
+  };
+
+  const rodarCapitulo = () => {
+    const etapas = montarEtapas(ROTEIRO[capitulo]);
+    if (!etapas.length) return proximo();
+
+    const tour = introJs();
+    tour.setOptions({
+      steps: etapas,
+      nextLabel: 'Próximo',
+      prevLabel: 'Voltar',
+      doneLabel: capitulo === ROTEIRO.length - 1 ? 'Entendi' : 'Continuar',
+      skipLabel: 'Pular',
+      showBullets: false,
+      showProgress: true,
+      exitOnOverlayClick: false,   // clique fora não deve encerrar sem querer
+      disableInteraction: true,
+      scrollToElement: true,
+    });
+
+    // O Intro.js dispara `onexit` TAMBÉM ao concluir. Sem esta separação, cada
+    // capítulo terminado seria lido como desistência e o tour pararia no
+    // primeiro — a bandeira distingue os dois.
+    tour.oncomplete(() => { avancando = true; proximo(); });
+    tour.onexit(() => {
+      if (avancando) { avancando = false; return; }
+      encerrar();   // pulou de verdade: respeitamos e não insistimos
+    });
+
+    tour.start();
+  };
+
+  // Não abre com um slide só: ou a tela ainda não montou, ou é um layout que
+  // não conhecemos.
+  if (montarEtapas(ROTEIRO[0]).length < 2) return false;
+  rodarCapitulo();
   return true;
 }

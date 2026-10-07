@@ -314,6 +314,7 @@ const AuthenticatedApp = () => {
   const location = useLocation();
   const [menuAberto, setMenuAberto] = useState(false);
   const { user, companySettings, refreshCompanySettings } = useAppContext();
+  const navigate = useNavigate();
 
   // Tour de boas-vindas, uma vez por loja.
   //
@@ -333,7 +334,10 @@ const AuthenticatedApp = () => {
     const t = setTimeout(() => {
       import('./lib/tour.js')
         .then(({ rodarTour }) => {
-          const abriu = rodarTour(user?.id, { aoFechar: () => refreshCompanySettings?.() });
+          const abriu = rodarTour(user?.id, {
+            navigate,
+            aoFechar: () => refreshCompanySettings?.(),
+          });
           // Nao abriu (tela ainda incompleta): solta a trava para a proxima
           // visita ao Inicio tentar de novo, em vez de perder o tour para
           // sempre por causa de um render infeliz.
@@ -342,7 +346,7 @@ const AuthenticatedApp = () => {
         .catch(() => { tourPedido.current = false; });
     }, 500);
     return () => clearTimeout(t);
-  }, [companySettings, location.pathname, user?.id, refreshCompanySettings]);
+  }, [companySettings, location.pathname, user?.id, refreshCompanySettings, navigate]);
 
   // Fecha ao trocar de rota. Sem isso o drawer fica aberto por cima da tela
   // nova, e no celular ele cobre quase tudo.

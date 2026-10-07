@@ -952,7 +952,7 @@ const Settings = () => {
 
             <div className="settings-grid">
                 {/* ── Perfil da Empresa ───────────────────────────────────── */}
-                <section className="settings-section card">
+                <section className="settings-section card" data-tour="cfg-empresa">
                     <div className="section-title">
                         <Building2 size={20} />
                         <h2>Perfil da Empresa</h2>
@@ -1247,7 +1247,7 @@ const Settings = () => {
             <div style={{ marginTop: '2rem' }}>
                 {/* Embedded Signup: caminho recomendado. Os campos manuais
                     abaixo ficam como alternativa pra quem ja configurou na mao. */}
-                <ConectarWhatsApp />
+                <div data-tour="cfg-whatsapp"><ConectarWhatsApp /></div>
 
                 <section className="settings-section card">
                     <div className="section-title">
@@ -1393,7 +1393,7 @@ const Settings = () => {
                 <section className="settings-section card">
                     <div className="section-title">
                         <MessageSquare size={20} />
-                        <h2>Instagram e Messenger</h2>
+                        <h2 data-tour="cfg-social">Instagram e Messenger</h2>
                     </div>
                     <div className="settings-form">
                         <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1.25rem', lineHeight: 1.5 }}>
@@ -1528,7 +1528,7 @@ const Settings = () => {
                 <section className="settings-section card">
                     <div className="section-title">
                         <Save size={20} />
-                        <h2>Contrato de Venda</h2>
+                        <h2 data-tour="cfg-contrato">Contrato de Venda</h2>
                     </div>
                     <div className="settings-form">
                         <p style={{ fontSize: '0.85rem', color: 'var(--color-text-muted)', marginBottom: '1rem', lineHeight: 1.5 }}>

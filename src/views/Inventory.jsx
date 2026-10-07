@@ -1221,7 +1221,7 @@ const Inventory = () => {
                     <button className="btn-secondary" onClick={() => setShowConsulta(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <Search size={17} /> Consultar placa
                     </button>
-                    <button className="btn-primary" onClick={() => setShowAddModal(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <button className="btn-primary" data-tour="estoque-adicionar" onClick={() => setShowAddModal(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Plus size={20} /> Novo Veículo
                     </button>
                 </div>

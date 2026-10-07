@@ -131,7 +131,7 @@ const BotSettings = () => {
                 <section className="settings-section card">
                     <div className="section-title">
                         <Bot size={20} />
-                        <h2>Instruções Personalizadas</h2>
+                        <h2 data-tour="assistente-instrucoes">Instruções Personalizadas</h2>
                     </div>
                     <div className="settings-form">
                         <div className="form-group">

@@ -1345,7 +1345,7 @@ export default function Conversations() {
               precisa registrar, vermelho bloqueado. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <MessageCircle size={19} style={{ color: 'var(--primary)', flexShrink: 0 }} />
-            <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>Conversas</h2>
+            <h2 data-tour="conversas-lista" style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>Conversas</h2>
             {filtered.length > 0 && (
               <span style={{
                 fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)',
