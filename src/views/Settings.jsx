@@ -9,10 +9,6 @@ import { supabase } from '../lib/supabase.js';
 import { MODELO_PADRAO, CAMPOS, formatarCNPJ } from '../lib/contrato.js';
 import { prepararImagem, ehHeic } from '../lib/imagem.js';
 import { detectar, aplicar } from '../lib/marcadores.js';
-import DoisFatores from './DoisFatores.jsx';
-import OutrosContratos from './OutrosContratos.jsx';
-import NotaFiscal from './NotaFiscal.jsx';
-import VitrineWhatsApp from './VitrineWhatsApp.jsx';
 
 // ─── Assistente de marcadores ────────────────────────────────────────────────
 // A loja cola o contrato de uma venda real; aqui ela confirma o que virou campo.
@@ -183,8 +179,27 @@ const PAYMENT_OPTIONS = [
     'Boleto',
 ];
 
-const Settings = () => {
-    const { company, updateCompany, profile, user, companySettings, messageTemplates, updateNotificationSettings, refreshCompanySettings } = useAppContext();
+// Configurações — e, por tabela, as seções do assistente que moram neste
+// arquivo.
+//
+// ── Por que um componente com `grupos` em vez de arquivos separados ────────
+//
+// A tela nasceu como uma rolagem única de 16 seções, e metade era do
+// assistente de IA, que tem tela própria. O lojista procurava "como o bot
+// responde" em Configurações e achava junto com CNPJ, contrato e senha.
+//
+// Partir o arquivo seria o óbvio e seria errado aqui: quase toda seção lê e
+// grava no MESMO `settings`, pelo mesmo `handleChange` e pelo mesmo `save`.
+// Separar em arquivos significaria passar esse estado inteiro como prop para
+// cada pedaço — mais código, mais lugares para um campo deixar de salvar em
+// silêncio, que é o defeito mais caro que esta tela pode ter.
+//
+// Então o componente é um só e recebe a LISTA de grupos que deve renderizar.
+// Quem monta a navegação decide o que aparece em qual aba; aqui dentro nada
+// sabe que abas existem. `grupos` nulo renderiza tudo, que é o que mantém a
+// tela inteira funcionando se alguém abrir a rota direto.
+const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
+    const { company, updateCompany, profile, user, companySettings, messageTemplates, updateNotificationSettings, refreshCompanySettings, addToast } = useAppContext();
 
     // ── Notificações automáticas (aniversário / lista de espera) ──────────────
     const approvedTemplates = (messageTemplates || []).filter(t => t.status === 'approved');
@@ -943,13 +958,18 @@ const Settings = () => {
     };
 
     // ── Render ────────────────────────────────────────────────────────────────
+    const ver = (g) => !grupos || grupos.includes(g);
+
     return (
         <div className="view-content">
-            <header className="view-header">
-                <h1>Configurações</h1>
-                <p>Personalize o perfil da concessionária e defina as regras de atendimento.</p>
-            </header>
+            {cabecalho === undefined ? (
+                <header className="view-header">
+                    <h1>Configurações</h1>
+                    <p>Dados da loja, documentos e acesso à conta.</p>
+                </header>
+            ) : cabecalho}
 
+            {ver('empresa') && (
             <div className="settings-grid">
                 {/* ── Perfil da Empresa ───────────────────────────────────── */}
                 <section className="settings-section card" data-tour="cfg-empresa">
@@ -1154,8 +1174,10 @@ const Settings = () => {
                     </div>
                 </section>
             </div>
+            )}
 
             {/* ── Perfil do WhatsApp ─────────────────────────────────────────── */}
+            {ver('canal-wa') && (
             <div style={{ marginTop: '2rem' }}>
                 <section className="settings-section card">
                     <div className="section-title">
@@ -1242,8 +1264,10 @@ const Settings = () => {
                     </div>
                 </section>
             </div>
+            )}
 
             {/* ── Integração WhatsApp (API) ──────────────────────────────────── */}
+            {ver('canal-wa') && (
             <div style={{ marginTop: '2rem' }}>
                 {/* Embedded Signup: caminho recomendado. Os campos manuais
                     abaixo ficam como alternativa pra quem ja configurou na mao. */}
@@ -1319,8 +1343,10 @@ const Settings = () => {
                     </div>
                 </section>
             </div>
+            )}
 
             {/* ── Formas de Pagamento ────────────────────────────────────────── */}
+            {ver('pagamento') && (
             <div style={{ marginTop: '2rem' }}>
                 <section className="settings-section card">
                     <div className="section-title">
@@ -1387,8 +1413,10 @@ const Settings = () => {
                     </div>
                 </section>
             </div>
+            )}
 
             {/* -- Instagram e Messenger ---------------------------------------- */}
+            {ver('canal-social') && (
             <div style={{ marginTop: '2rem' }}>
                 <section className="settings-section card">
                     <div className="section-title">
@@ -1522,8 +1550,10 @@ const Settings = () => {
                     </div>
                 </section>
             </div>
+            )}
 
             {/* -- Contrato de Venda -------------------------------------------- */}
+            {ver('contrato') && (
             <div style={{ marginTop: '2rem' }}>
                 <section className="settings-section card">
                     <div className="section-title">
@@ -1666,23 +1696,13 @@ const Settings = () => {
                     </div>
                 </section>
             </div>
+            )}
 
-            {/* -- Vitrine no WhatsApp ------------------------------------------ */}
-            <div style={{ marginTop: '2rem' }}>
-                <VitrineWhatsApp />
-            </div>
 
-            {/* -- Outros modelos de contrato ----------------------------------- */}
-            <div style={{ marginTop: '2rem' }}>
-                <OutrosContratos />
-            </div>
 
-            {/* -- Nota Fiscal -------------------------------------------------- */}
-            <div style={{ marginTop: '2rem' }}>
-                <NotaFiscal />
-            </div>
 
             {/* -- Senha -------------------------------------------------------- */}
+            {ver('conta') && (
             <div style={{ marginTop: '2rem' }}>
                 <section className="settings-section card">
                     <div className="section-title">
@@ -1718,6 +1738,7 @@ const Settings = () => {
                     </div>
                 </section>
             </div>
+            )}
 
             {/* A assinatura saiu daqui e virou a tela Plano.
                 Enterrada no fim desta rolagem, ela so era achada por quem ja
@@ -1726,12 +1747,9 @@ const Settings = () => {
                 A tela nova obriga a escolha e mostra o consumo do mes ao lado
                 do preco, que e a informacao que falta para decidir. */}
 
-            {/* -- Verificacao em duas etapas ----------------------------------- */}
-            <div style={{ marginTop: '2rem' }}>
-                <DoisFatores />
-            </div>
 
             {/* ── Funcionamento do Bot ───────────────────────────────────────── */}
+            {ver('bot-funcionamento') && (
             <div style={{ marginTop: '2rem' }}>
                 <section className="settings-section card">
                     <div className="section-title">
@@ -1904,8 +1922,10 @@ const Settings = () => {
                     </div>
                 </section>
             </div>
+            )}
 
             {/* -- Equipe e Outros Setores --------------------------------- */}
+            {ver('bot-equipe') && (
             <div style={{ marginTop: '2rem' }}>
                 <section className="settings-section card">
                     <div className="section-title">
@@ -2011,8 +2031,10 @@ const Settings = () => {
                     </div>
                 </section>
             </div>
+            )}
 
             {/* ── Comportamento do Bot ────────────────────────────────────────── */}
+            {ver('bot-comportamento') && (
             <div style={{ marginTop: '2rem' }}>
                 <section className="settings-section card">
                     <div className="section-title">
@@ -2228,8 +2250,10 @@ const Settings = () => {
                     </div>
                 </section>
             </div>
+            )}
 
             {/* ── Financiamento ────────────────────────────────────────────── */}
+            {ver('financiamento') && (
             <div style={{ marginTop: '2rem' }}>
                 <section className="settings-section card">
                     <div className="section-title"><Landmark size={20} /><h2>Financiamento</h2></div>
@@ -2278,8 +2302,10 @@ const Settings = () => {
                     </div>
                 </section>
             </div>
+            )}
 
             {/* ── Exceções e Feriados (largura total) ───────────────────────── */}
+            {ver('horario') && (
             <div style={{ marginTop: '2rem' }}>
                 <section className="settings-section card">
                     <div className="section-title" style={{ justifyContent: 'space-between' }}>
@@ -2420,8 +2446,12 @@ const Settings = () => {
                         </div>
                     )}
                 </section>
+            </div>
+            )}
 
-                {/* ── Notificações Automáticas ────────────────────────────── */}
+            {/* ── Notificações Automáticas ────────────────────────────── */}
+            {ver('notificacoes') && (
+            <div style={{ marginTop: '2rem' }}>
                 <section className="settings-section card">
                     <div className="section-title">
                         <Bell size={20} />
@@ -2476,6 +2506,9 @@ const Settings = () => {
                     </button>
                 </section>
             </div>
+            )}
+
+            {extras && <div style={{ marginTop: '2rem' }}>{extras}</div>}
         </div>
     );
 };

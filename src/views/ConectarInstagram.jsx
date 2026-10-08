@@ -261,7 +261,7 @@ export const RetornoInstagram = () => {
         }
         await refreshCompanySettings?.();
         setEstado('ok');
-        setTimeout(() => navigate('/configuracoes'), 2500);
+        setTimeout(() => navigate('/assistente/canais'), 2500);
       } catch (e) {
         setErro(e?.message || 'Falha de rede ao concluir a conexão.');
         setEstado('erro');
@@ -300,7 +300,7 @@ export const RetornoInstagram = () => {
                 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
                 <RefreshCw size={16} /> Tentar de novo
               </button>
-              <button type="button" className="btn-outline" onClick={() => navigate('/configuracoes')}
+              <button type="button" className="btn-outline" onClick={() => navigate('/assistente/canais')}
                 style={{ fontSize: '0.85rem' }}>
                 Voltar às configurações
               </button>

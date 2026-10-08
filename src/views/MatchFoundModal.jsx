@@ -81,7 +81,7 @@ const MatchFoundModal = ({ data, onClose }) => {
                 ) : (
                     <div style={{ marginTop: 12, fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
                         <Settings size={14} />
-                        <button className="btn-text" style={{ padding: 0 }} onClick={() => { onClose(); navigate('/configuracoes'); }}>
+                        <button className="btn-text" style={{ padding: 0 }} onClick={() => { onClose(); navigate('/assistente/canais'); }}>
                             Configurar avisos automáticos →
                         </button>
                     </div>

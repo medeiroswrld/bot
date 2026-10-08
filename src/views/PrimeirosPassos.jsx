@@ -57,7 +57,7 @@ const PrimeirosPassos = () => {
       icone: <MessageSquare size={17} />,
       titulo: 'Conecte o WhatsApp',
       porque: 'É por onde o cliente chega. Você entra com a conta do Facebook do negócio e autoriza.',
-      para: '/configuracoes',
+      para: '/assistente/canais',
       acao: 'Conectar',
     },
     {
@@ -65,7 +65,7 @@ const PrimeirosPassos = () => {
       icone: <Bot size={17} />,
       titulo: 'Ajuste o jeito do assistente',
       porque: 'Conte como a sua loja fala, o que não pode ser dito e o que destacar. Dois parágrafos já mudam muito.',
-      para: '/assistente',
+      para: '/assistente/conhecimento',
       acao: 'Ajustar',
     },
   ];
@@ -162,7 +162,7 @@ const PrimeirosPassos = () => {
           <AtSign size={15} style={{ flexShrink: 0, marginTop: 2 }} />
           <span>
             O mesmo assistente também atende no Direct do Instagram.{' '}
-            <Link to="/configuracoes" style={{ color: 'var(--accent)' }}>Conectar depois</Link>.
+            <Link to="/assistente/canais" style={{ color: 'var(--accent)' }}>Conectar depois</Link>.
           </span>
         </p>
       )}

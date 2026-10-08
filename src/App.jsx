@@ -31,6 +31,14 @@ const CampaignDetails = lazy(() => import('./views/CampaignDetails.jsx'));
 const Financeiro   = lazy(() => import('./views/Financeiro.jsx'));
 const Anuncios     = lazy(() => import('./views/Anuncios.jsx'));
 const Plano        = lazy(() => import('./views/Plano.jsx'));
+// Componentes inteiros que viviam dentro da rolagem de Configuracoes e agora
+// sao montados na aba a que pertencem.
+const VitrineWhatsApp = lazy(() => import('./views/VitrineWhatsApp.jsx'));
+const OutrosContratos = lazy(() => import('./views/OutrosContratos.jsx'));
+const NotaFiscal      = lazy(() => import('./views/NotaFiscal.jsx'));
+const DoisFatores     = lazy(() => import('./views/DoisFatores.jsx'));
+const ResultadosAssistente = lazy(() => import('./views/ResultadosAssistente.jsx'));
+const VendasDoAssistente   = lazy(() => import('./views/VendasDoAssistente.jsx'));
 // Rota de RETORNO do Instagram: o navegador sai do CRM, autoriza no
 // instagram.com e volta aqui com o `code`. Precisa ser rota de verdade porque a
 // URI é registrada no painel da Meta e conferida por ela a cada conexão.
@@ -69,12 +77,34 @@ const NAV_ITEMS = [
       { name: 'Anúncios',  path: '/anuncios' },
     ],
   },
-  { name: 'Assistente',    icon: <Bot size={18} />,        path: '/assistente' },
+  // Tudo do assistente num lugar só.
+  //
+  // Antes isto estava partido entre três telas sem relação aparente: as
+  // instruções e o FAQ aqui; como o bot responde, a equipe e os canais
+  // enterrados na rolagem de Configurações; e os resultados pendurados no
+  // Início, entre os números de venda. O lojista que queria mexer no bot
+  // tinha de saber de cor em qual das três olhar.
+  {
+    name: 'Assistente',  icon: <Bot size={18} />,        path: '/assistente',
+    tabs: [
+      { name: 'Comportamento', path: '/assistente' },
+      { name: 'Conhecimento',  path: '/assistente/conhecimento' },
+      { name: 'Canais',        path: '/assistente/canais' },
+      { name: 'Resultados',    path: '/assistente/resultados' },
+    ],
+  },
   // Plano fica FORA de Configurações de propósito. Enterrado no fim de uma
   // rolagem de 16 seções, o estado da assinatura era a última coisa que o
   // lojista achava — e é a primeira que ele procura quando o bot para.
   { name: 'Plano',         icon: <CreditCard size={18} />, path: '/plano' },
-  { name: 'Configurações', icon: <Settings size={18} />,   path: '/configuracoes' },
+  {
+    name: 'Configurações', icon: <Settings size={18} />,   path: '/configuracoes',
+    tabs: [
+      { name: 'Loja',       path: '/configuracoes' },
+      { name: 'Documentos', path: '/configuracoes/documentos' },
+      { name: 'Conta',      path: '/configuracoes/conta' },
+    ],
+  },
 ];
 
 // Todos os caminhos que um item cobre (o próprio + os das abas).
@@ -240,21 +270,105 @@ const PageLoader = () => (
   </div>
 );
 
+// Cabeçalho de uma aba. Cada uma diz o que é, porque a barra lateral só
+// mostra o nome do grupo — "Assistente" não explica se você está vendo o
+// comportamento dele ou os canais onde ele atende.
+const Cabecalho = ({ titulo, texto }) => (
+  <header className="view-header">
+    <h1>{titulo}</h1>
+    <p>{texto}</p>
+  </header>
+);
+
+const AbaComportamento = () => (
+  <SettingsView
+    grupos={['bot-funcionamento', 'bot-comportamento', 'bot-equipe']}
+    cabecalho={<Cabecalho titulo="Comportamento do assistente"
+      texto="Quando ele responde, o que ele faz na conversa e quando passa para a equipe." />}
+  />
+);
+
+const AbaConhecimento = () => (
+  <>
+    {/* As instruções e o FAQ vêm primeiro: é o que o lojista mexe toda semana.
+        A vitrine é configuração de uma vez. */}
+    <BotSettings />
+    <div className="view-content" style={{ paddingTop: 0 }}>
+      <VitrineWhatsApp />
+    </div>
+  </>
+);
+
+const AbaCanais = () => (
+  <SettingsView
+    grupos={['canal-wa', 'canal-social', 'notificacoes']}
+    cabecalho={<Cabecalho titulo="Canais do assistente"
+      texto="Onde ele atende: WhatsApp, Instagram e Messenger — e os avisos automáticos." />}
+  />
+);
+
+const AbaResultados = () => (
+  <div className="view-content">
+    <Cabecalho titulo="Resultados do assistente"
+      texto="O que o atendimento automático produziu: conversas, visitas e vendas atribuídas." />
+    <ResultadosAssistente />
+    <VendasDoAssistente />
+  </div>
+);
+
+const AbaLoja = () => (
+  <SettingsView grupos={['empresa', 'horario', 'pagamento']} />
+);
+
+const AbaDocumentos = () => (
+  <SettingsView
+    grupos={['contrato', 'financiamento']}
+    cabecalho={<Cabecalho titulo="Documentos"
+      texto="Contrato de venda, outros modelos, nota fiscal e financiamento." />}
+    extras={<><OutrosContratos /><NotaFiscal /></>}
+  />
+);
+
+const AbaConta = () => (
+  <SettingsView
+    grupos={['conta']}
+    cabecalho={<Cabecalho titulo="Sua conta"
+      texto="Senha e verificação em duas etapas." />}
+    extras={<DoisFatores />}
+  />
+);
+
 // Abas do grupo atual. Fica fora do <Routes> de propósito: assim as telas
 // agrupadas não precisam saber que viraram abas — nenhuma view foi alterada.
+// Casa um caminho com uma aba. Exato, ou prefixo seguido de barra.
+//
+// `startsWith` cru deixou de servir quando as abas passaram a ser ANINHADAS:
+// com `/assistente` e `/assistente/canais` na mesma barra, estar em canais
+// acendia as duas. Prefixo com barra separa as duas coisas, e `/campanhas`
+// continua aceso em `/campanhas/123`, que e o motivo de nao ser so igualdade.
+const casaAba = (pathname, base) =>
+  pathname === base || pathname.startsWith(base + '/');
+
 const PageTabs = () => {
   const location = useLocation();
   const grupo = NAV_ITEMS.find(
-    (i) => i.tabs && i.tabs.some((t) => location.pathname.startsWith(t.path)),
+    (i) => i.tabs && i.tabs.some((t) => casaAba(location.pathname, t.path)),
   );
   if (!grupo) return null;
+
+  // A mais longa entre as que casam. `/assistente` casa com tudo que comeca
+  // por ele; a aba certa e sempre a mais especifica.
+  const ativa = grupo.tabs
+    .filter((t) => casaAba(location.pathname, t.path))
+    .sort((a, b) => b.path.length - a.path.length)[0]?.path;
+
   return (
     <div className="page-tabs">
       {grupo.tabs.map((t) => (
         <Link
           key={t.path}
           to={t.path}
-          className={`page-tab${location.pathname.startsWith(t.path) ? ' active' : ''}`}
+          className={`page-tab${t.path === ativa ? ' active' : ''}`}
         >
           {t.name}
         </Link>
@@ -437,9 +551,14 @@ const AuthenticatedApp = () => {
               <Route path="/templates"     element={<Templates />} />
               <Route path="/campanhas"     element={<Campaigns />} />
               <Route path="/campanhas/:id" element={<CampaignDetails />} />
-              <Route path="/assistente"    element={<BotSettings />} />
+              <Route path="/assistente"               element={<AbaComportamento />} />
+              <Route path="/assistente/conhecimento"  element={<AbaConhecimento />} />
+              <Route path="/assistente/canais"        element={<AbaCanais />} />
+              <Route path="/assistente/resultados"    element={<AbaResultados />} />
               <Route path="/plano"         element={<Plano />} />
-              <Route path="/configuracoes" element={<SettingsView />} />
+              <Route path="/configuracoes"            element={<AbaLoja />} />
+              <Route path="/configuracoes/documentos" element={<AbaDocumentos />} />
+              <Route path="/configuracoes/conta"      element={<AbaConta />} />
               <Route path="/conectar/instagram" element={<RetornoInstagram />} />
             </Routes>
           </div>

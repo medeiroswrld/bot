@@ -122,8 +122,8 @@ const BotSettings = () => {
     return (
         <div className="view-content">
             <header className="view-header">
-                <h1>Assistente</h1>
-                <p>Configure o comportamento do bot de atendimento automático pelo WhatsApp.</p>
+                <h1>O que o assistente sabe</h1>
+                <p>As regras da sua loja, as respostas prontas e o que ele mostra do estoque.</p>
             </header>
 
             <div className="settings-grid">

@@ -6,8 +6,6 @@ import {
 } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import PrimeirosPassos from './PrimeirosPassos.jsx';
-import ResultadosAssistente from './ResultadosAssistente.jsx';
-import VendasDoAssistente from './VendasDoAssistente.jsx';
 import { supabase } from '../lib/supabase.js';
 
 const STATUS_LABELS = {
@@ -346,12 +344,13 @@ const Dashboard = () => {
                 acontecam. Some sozinha quando os quatro passos estiverem feitos. */}
             <PrimeirosPassos />
 
-            {/* Logo abaixo da lista de tarefas e ACIMA das metricas de operacao:
-                a lista diz o que falta fazer, este painel diz o que ja foi
-                feito por conta propria. Some sozinho para quem nao tem
-                assistente contratado. */}
-            <ResultadosAssistente />
-            <VendasDoAssistente />
+            {/* Os paineis do assistente sairam daqui e viraram a aba
+                Resultados, dentro de Assistente.
+                Aqui eles disputavam espaco com as metricas de operacao da loja
+                — conversas, leads, estoque — e o lojista lia os dois conjuntos
+                como se medissem a mesma coisa. Junto do resto do assistente,
+                "407 pessoas atendidas" responde a pergunta que ele foi fazer:
+                esse negocio esta funcionando? */}
 
             {/* ── Métricas principais ──────────────────────────────────────── */}
             <div className="metrics-grid">

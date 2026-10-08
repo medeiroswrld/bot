@@ -60,9 +60,26 @@ const ROTEIRO = [
         texto: 'Tudo que chega pelo WhatsApp e pelo Instagram cai aqui. Quando quiser falar você mesmo, é só assumir a conversa — o assistente sai de cena na hora e volta quando você mandar.' },
     ],
   },
+  // Os capítulos seguem a reorganização das telas: conectar o canal vem ANTES
+  // de ensinar o assistente a falar, porque sem canal conectado não existe
+  // conversa para ele atender — e era nessa ordem invertida que o tour
+  // deixava o lojista configurando o tom de voz de um bot que não recebia
+  // mensagem nenhuma.
   {
-    rota: '/assistente',
-    tela: 'Assistente',
+    rota: '/assistente/canais',
+    tela: 'Assistente · Canais',
+    passos: [
+      { alvo: '[data-tour="cfg-whatsapp"]', posicao: 'bottom',
+        titulo: 'O passo que liga tudo',
+        texto: 'Aqui você conecta o WhatsApp da loja. Entra com a conta do Facebook do negócio, autoriza, e pronto — a partir daí o cliente conversa com o assistente.' },
+      { alvo: '[data-tour="cfg-social"]', posicao: 'bottom',
+        titulo: 'Instagram também',
+        texto: 'O mesmo assistente atende no Direct. Dá pra conectar agora ou deixar pra depois.' },
+    ],
+  },
+  {
+    rota: '/assistente/conhecimento',
+    tela: 'Assistente · Conhecimento',
     passos: [
       { alvo: '[data-tour="assistente-instrucoes"]', posicao: 'bottom',
         titulo: 'Como ele fala',
@@ -76,12 +93,12 @@ const ROTEIRO = [
       { alvo: '[data-tour="cfg-empresa"]', posicao: 'bottom',
         titulo: 'Os dados da loja',
         texto: 'Nome, endereço e telefone. O assistente usa pra se apresentar, e o contrato de venda sai com eles.' },
-      { alvo: '[data-tour="cfg-whatsapp"]', posicao: 'bottom',
-        titulo: 'O passo que liga tudo',
-        texto: 'Aqui você conecta o WhatsApp da loja. Entra com a conta do Facebook do negócio, autoriza, e pronto — a partir daí o cliente conversa com o assistente.' },
-      { alvo: '[data-tour="cfg-social"]', posicao: 'bottom',
-        titulo: 'Instagram também',
-        texto: 'O mesmo assistente atende no Direct. Dá pra conectar agora ou deixar pra depois.' },
+    ],
+  },
+  {
+    rota: '/configuracoes/documentos',
+    tela: 'Configurações · Documentos',
+    passos: [
       { alvo: '[data-tour="cfg-contrato"]', posicao: 'bottom',
         titulo: 'O contrato de venda',
         texto: 'Ao registrar uma venda, o contrato sai pronto com os dados do comprador e do veículo. Você pode usar o modelo da Amply ou colar o da sua loja.' },
