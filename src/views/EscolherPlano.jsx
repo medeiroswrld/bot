@@ -28,7 +28,9 @@ const BENEFICIOS = {
     'Consulta de veículo pela placa',
   ],
   essencial: [
-    'Tudo do CRM',
+    // "Tudo do CRM" nao diz nada para quem nunca viu o CRM — e agora que o
+    // plano CRM saiu da vitrine, ninguem viu. Lista o que ele leva.
+    'Estoque, leads, agenda e contrato de venda',
     'Atendimento automático no WhatsApp e Instagram',
     'Agendamento de visita pelo bot',
     'Disparos em massa e mensagens de aniversário',
@@ -59,7 +61,8 @@ const EscolherPlano = () => {
     (async () => {
       const { data, error } = await supabase
         .from('planos')
-        .select('slug, nome, limite_conversas, preco, inclui_bot, ordem')
+        .select('slug, nome, limite_conversas, preco, inclui_bot, ordem, visivel')
+        .eq('visivel', true)
         .order('ordem');
       if (!vivo) return;
       if (error) setErro('Não consegui carregar os planos. Atualize a página.');
@@ -132,13 +135,15 @@ const EscolherPlano = () => {
 
       <div className="planos-grade">
         {pagos.map((p) => {
-          // O destaque é o Crescimento por medida, não por gosto: é onde cai
-          // uma revenda que anuncia — a DSC, com 218 conversas/mês, está nele.
-          const destaque = p.slug === 'crescimento';
+          // Sem selo de "mais escolhido" e sem card destacado.
+          //
+          // Com duas lojas na base, "mais escolhido" era invencao — e lojista
+          // reconhece selo inventado, perdendo a confianca no resto da pagina
+          // junto. Destacar um card sem motivo real e a mesma coisa, mais
+          // discreta. Quando houver numero que sustente, ele volta.
           const itens = BENEFICIOS[p.slug] ?? [];
           return (
-            <div key={p.slug} className={`plano-card${destaque ? ' destaque' : ''}`}>
-              {destaque && <span className="plano-selo">MAIS ESCOLHIDO</span>}
+            <div key={p.slug} className="plano-card">
 
               <p className="plano-nome">{p.nome}</p>
               <div className="plano-preco">
@@ -146,8 +151,11 @@ const EscolherPlano = () => {
                 <span>/mês</span>
               </div>
               <p className="plano-limite">
+                {/* "Clientes atendidos", nao "conversas". O lojista divide o
+                    preco pelo numero e sente que paga por um "oi"; dividindo
+                    por cliente, a conta e a mesma e a frase e outra. */}
                 {p.inclui_bot
-                  ? <>Até <strong>{p.limite_conversas}</strong> conversas atendidas por mês</>
+                  ? <>Até <strong>{p.limite_conversas}</strong> clientes atendidos por mês</>
                   : <>Sem atendimento automático</>}
               </p>
 
@@ -158,7 +166,7 @@ const EscolherPlano = () => {
               </ul>
 
               <button
-                className={destaque ? 'btn-primary plano-botao' : 'btn-secondary plano-botao'}
+                className="btn-primary plano-botao"
                 onClick={() => assinar(p.slug)}
                 disabled={!!pagando}
                 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
