@@ -20,14 +20,20 @@ const brlDireto = (v) => `R$ ${num(v).toFixed(2)}`;
 const milhares = (v) => num(v).toLocaleString('pt-BR');
 const dataCurta = (d) => (d ? new Date(d).toLocaleDateString('pt-BR') : '—');
 
-// Espelho da tabela `planos` do banco, so pro rotulo e pra confirmacao. A
-// verdade continua sendo o banco: a edge function le o preco de la, nunca daqui
-// — senao um esquecimento nesta lista viraria cobranca errada.
-const PLANOS = [
-  { slug: 'crm',           nome: 'CRM',           limite: 0,    preco: 800 },
-  { slug: 'essencial',     nome: 'Essencial',     limite: 100,  preco: 1497 },
-  { slug: 'crescimento',   nome: 'Crescimento',   limite: 250,  preco: 1997 },
-  { slug: 'performance',   nome: 'Performance',   limite: 500,  preco: 2497 },
+// Os planos vem do BANCO, nao de uma lista aqui.
+//
+// Antes esta lista era escrita a mao, "so pro rotulo". A tabela de precos foi
+// refeita e a lista nao: ficou dizendo Crescimento 250 conversas / R$1.997
+// quando o banco ja dizia 350 / R$1.497. Nao era um numero decorativo — e ele
+// que aparece no `confirm()` de trocar o plano de uma loja. Um administrador
+// leria em voz alta, pro cliente, um valor que o sistema nao cobra mais.
+//
+// A cobranca sempre leu da tabela, entao nada foi cobrado errado. O que
+// quebrou foi a conversa, que e pior de desfazer que um registro.
+const PLANOS_FALLBACK = [
+  { slug: 'essencial',     nome: 'Essencial',     limite: 150,  preco: 897 },
+  { slug: 'crescimento',   nome: 'Crescimento',   limite: 350,  preco: 1497 },
+  { slug: 'performance',   nome: 'Performance',   limite: 700,  preco: 2197 },
   { slug: 'personalizado', nome: 'Personalizado', limite: null, preco: null },
 ];
 const brl0 = (v) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 });
@@ -496,6 +502,27 @@ const Painel = ({ onSair }) => {
   }, []);
   const [salvandoId, setSalvandoId] = useState(null);
   const [lojaAberta, setLojaAberta] = useState(null);
+
+  // A escada de planos, lida da tabela. Com fallback: se a leitura falhar, o
+  // seletor continua funcionando em vez de aparecer vazio — e um seletor vazio
+  // num painel de administracao e pior que um rotulo desatualizado.
+  const [PLANOS, setPlanos] = useState(PLANOS_FALLBACK);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const { data } = await supabaseAdmin
+        .from('planos')
+        .select('slug, nome, limite_conversas, preco')
+        .order('ordem');
+      if (!vivo || !data?.length) return;
+      setPlanos(data.map((p) => ({
+        slug: p.slug, nome: p.nome,
+        limite: p.limite_conversas,
+        preco: p.preco == null ? null : Number(p.preco),
+      })));
+    })();
+    return () => { vivo = false; };
+  }, []);
 
   const chamar = useCallback(async (body) => {
     const { data, error } = await supabaseAdmin.functions.invoke('admin-metrics', { body });

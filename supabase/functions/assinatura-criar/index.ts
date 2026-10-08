@@ -117,13 +117,15 @@ Deno.serve(async (req) => {
       return json({ error: 'Esta conta é cobrada por fora e não precisa de assinatura no cartão.' }, 409);
     }
 
-    // O valor NUNCA é inventado aqui.
+    // O valor NUNCA é inventado aqui. Ele vem de um destes, nesta ordem:
     //
-    // O preço do Amply é NEGOCIADO loja a loja — não existe tabela. Quem manda
-    // é o `billing_amount`, que o administrador define no painel ao fechar a
-    // venda. O secret ASSINATURA_VALOR_PADRAO é só uma rede de segurança, para
-    // o dia em que existir um plano de entrada com preço fixo; enquanto não
-    // existir, ele fica vazio e nunca é usado.
+    //   1. o preço do plano que o lojista acabou de escolher, lido de `planos`
+    //   2. `billing_amount`, o preço negociado que o administrador gravou no
+    //      painel — é o caso de quem fechou por telefone com desconto
+    //   3. ASSINATURA_VALOR_PADRAO, rede de segurança que hoje fica vazia
+    //
+    // A ordem importa: o plano escolhido agora vence o valor antigo do
+    // registro, senão quem sobe de plano continuaria pagando o preço do anterior.
     //
     // Sem preço definido a função NÃO cobra um número chutado. E a mensagem é
     // escrita para o LOJISTA, não para o desenvolvedor: quem vai ler isso é o
@@ -146,8 +148,29 @@ Deno.serve(async (req) => {
       }
 
       valorDoPlano = Number(p.preco);
+
+      // ── Escolha NAO e contrato ─────────────────────────────────────────────
+      //
+      // Aqui gravava `plano` e `billing_amount` direto. O efeito aparecia em
+      // quem clicava num cartao e desistia do checkout: a loja ficava marcada
+      // como daquele plano, e a tela de assinatura passava a oferecer AQUELE
+      // valor como se fosse combinado — plano de R$1.497 numa conta que nunca
+      // pagou nada e talvez nem queira esse tamanho.
+      //
+      // Pior: `billing_amount` e o preco NEGOCIADO, escrito pelo administrador
+      // ao fechar a venda. Sobrescrever no clique apagava o desconto que
+      // alguem combinou por telefone.
+      //
+      // Agora a escolha mora em `plano_pretendido`, e quem promove a `plano` e
+      // o webhook do Asaas quando o pagamento confirma. `plano` passa a
+      // significar uma coisa so: plano que a loja TEM.
+      //
+      // O preco do checkout nao depende disso — vem de `planos`, lido no
+      // servidor duas linhas acima. A trava do banco cobre `plano_pretendido`
+      // justamente para o lojista nao abrir o checkout do barato e trocar a
+      // intencao pelo caro antes do pagamento cair.
       await admin.from('company_settings')
-        .update({ plano: p.slug, billing_amount: valorDoPlano })
+        .update({ plano_pretendido: p.slug })
         .eq('user_id', user.id);
       console.log('[assinatura] plano escolhido pelo lojista', { user: user.id, plano: p.slug });
     }

@@ -3,7 +3,7 @@ import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, CarFront, Users, Calendar, Settings,
   Bell, LogOut, Loader2, MessageCircle, Bot,
-  Sun, Moon, Megaphone, Menu, LifeBuoy, Wallet,
+  Sun, Moon, Megaphone, Menu, LifeBuoy, Wallet, CreditCard,
 } from 'lucide-react';
 import './App.css';
 
@@ -30,6 +30,7 @@ const Campaigns    = lazy(() => import('./views/Campaigns.jsx'));
 const CampaignDetails = lazy(() => import('./views/CampaignDetails.jsx'));
 const Financeiro   = lazy(() => import('./views/Financeiro.jsx'));
 const Anuncios     = lazy(() => import('./views/Anuncios.jsx'));
+const Plano        = lazy(() => import('./views/Plano.jsx'));
 // Rota de RETORNO do Instagram: o navegador sai do CRM, autoriza no
 // instagram.com e volta aqui com o `code`. Precisa ser rota de verdade porque a
 // URI é registrada no painel da Meta e conferida por ela a cada conexão.
@@ -68,8 +69,12 @@ const NAV_ITEMS = [
       { name: 'Anúncios',  path: '/anuncios' },
     ],
   },
-  { name: 'Assistente',    icon: <Bot size={18} />,      path: '/assistente' },
-  { name: 'Configurações', icon: <Settings size={18} />, path: '/configuracoes' },
+  { name: 'Assistente',    icon: <Bot size={18} />,        path: '/assistente' },
+  // Plano fica FORA de Configurações de propósito. Enterrado no fim de uma
+  // rolagem de 16 seções, o estado da assinatura era a última coisa que o
+  // lojista achava — e é a primeira que ele procura quando o bot para.
+  { name: 'Plano',         icon: <CreditCard size={18} />, path: '/plano' },
+  { name: 'Configurações', icon: <Settings size={18} />,   path: '/configuracoes' },
 ];
 
 // Todos os caminhos que um item cobre (o próprio + os das abas).
@@ -293,7 +298,7 @@ const AvisoTeste = () => {
       </span>
       <button type="button" className="btn-primary"
         style={{ fontSize: '0.8rem', padding: '4px 12px', marginLeft: 'auto' }}
-        onClick={() => navigate('/configuracoes')}>
+        onClick={() => navigate('/plano')}>
         Escolher plano
       </button>
     </div>
@@ -338,7 +343,7 @@ const AvisoSuspensao = () => {
       )}
       {podeResolverSozinho && (
         <button
-          onClick={() => navigate('/configuracoes')}
+          onClick={() => navigate('/plano')}
           style={{
             marginLeft: 8, background: 'none', border: 'none', padding: 0,
             color: '#b91c1c', fontWeight: 700, textDecoration: 'underline',
@@ -433,6 +438,7 @@ const AuthenticatedApp = () => {
               <Route path="/campanhas"     element={<Campaigns />} />
               <Route path="/campanhas/:id" element={<CampaignDetails />} />
               <Route path="/assistente"    element={<BotSettings />} />
+              <Route path="/plano"         element={<Plano />} />
               <Route path="/configuracoes" element={<SettingsView />} />
               <Route path="/conectar/instagram" element={<RetornoInstagram />} />
             </Routes>

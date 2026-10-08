@@ -13,7 +13,6 @@ import DoisFatores from './DoisFatores.jsx';
 import OutrosContratos from './OutrosContratos.jsx';
 import NotaFiscal from './NotaFiscal.jsx';
 import VitrineWhatsApp from './VitrineWhatsApp.jsx';
-import Assinatura from './Assinatura.jsx';
 
 // ─── Assistente de marcadores ────────────────────────────────────────────────
 // A loja cola o contrato de uma venda real; aqui ela confirma o que virou campo.
@@ -1720,10 +1719,12 @@ const Settings = () => {
                 </section>
             </div>
 
-            {/* -- Assinatura ---------------------------------------------------- */}
-            <div style={{ marginTop: '2rem' }}>
-                <Assinatura />
-            </div>
+            {/* A assinatura saiu daqui e virou a tela Plano.
+                Enterrada no fim desta rolagem, ela so era achada por quem ja
+                sabia onde estava — e o botao que existia aqui abria o checkout
+                SEM plano escolhido, caindo no ultimo valor gravado no registro.
+                A tela nova obriga a escolha e mostra o consumo do mes ao lado
+                do preco, que e a informacao que falta para decidir. */}
 
             {/* -- Verificacao em duas etapas ----------------------------------- */}
             <div style={{ marginTop: '2rem' }}>

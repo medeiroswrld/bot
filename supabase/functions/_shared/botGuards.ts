@@ -16,6 +16,7 @@ export interface GuardasDoBot {
   suspenso?: boolean | null;
   bot_contratado?: boolean | null;
   assinatura_status?: string | null;
+  trial_termina_em?: string | null;
 }
 
 /**
@@ -35,20 +36,40 @@ export interface GuardasDoBot {
  * duas vezes por ordem de migration — a falha aqui tem que ser para o lado de
  * ATENDER o cliente, nunca para o lado de calar o bot de todo mundo.
  */
-export function assinaturaEmDia(status?: string | null): boolean {
+export function assinaturaEmDia(
+  status?: string | null,
+  trialFim?: string | null,
+): boolean {
   if (status === null || status === undefined || status === '') return true;
-  // 'trial' entra aqui: teste em que o bot nao responde nao e teste, e a loja
-  // sai dele achando que o produto nao funciona. A expiracao e quem devolve
-  // para 'sem_assinatura' — nao esta trava.
-  return status === 'ativa' || status === 'isento' || status === 'trial';
+  if (status === 'ativa' || status === 'isento') return true;
+
+  // 'trial' passa, mas SO ate a data. Teste em que o bot nao responde nao e
+  // teste — a loja sai dele achando que o produto nao funciona.
+  //
+  // A data e conferida AQUI, e nao deixada so para o cron de expiracao, porque
+  // o cron roda uma vez por dia as 6h: quem comeca o teste as 13h de quarta
+  // ganharia 17 horas de brinde. Com a comparacao na trava, o corte e no
+  // minuto. O cron continua existindo para virar o `assinatura_status` — e ele
+  // que faz o CRM pedir o plano e a tela mostrar o motivo.
+  if (status === 'trial') {
+    // Sem a data, passa. Mesmo motivo de a coluna ausente passar: se esta
+    // funcao rodar antes da migration chegar, a falha tem que ser para o lado
+    // de ATENDER o cliente, nunca para o lado de calar o bot de todo mundo.
+    if (!trialFim) return true;
+    const fim = new Date(trialFim).getTime();
+    if (!Number.isFinite(fim)) return true;
+    return fim > Date.now();
+  }
+
+  return false;
 }
 
 /** Colunas que qualquer webhook precisa ler para decidir. */
 export const COLUNAS_GUARDA =
-  'bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso, bot_contratado, bot_blocked_numbers, assinatura_status';
+  'bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso, bot_contratado, bot_blocked_numbers, assinatura_status, trial_termina_em';
 
 /** Colunas necessárias para checar disparo em massa. */
-export const COLUNAS_DISPARO = 'suspenso, disparos_contratado, assinatura_status';
+export const COLUNAS_DISPARO = 'suspenso, disparos_contratado, assinatura_status, trial_termina_em';
 
 /**
  * A loja pode ENVIAR em massa (campanha, aniversário, template)?
@@ -61,10 +82,15 @@ export const COLUNAS_DISPARO = 'suspenso, disparos_contratado, assinatura_status
  * Suspensão continua cortando tudo — inadimplente não dispara.
  */
 export function podeDisparar(
-  s: { suspenso?: boolean | null; disparos_contratado?: boolean | null; assinatura_status?: string | null } | null | undefined,
+  s: {
+    suspenso?: boolean | null;
+    disparos_contratado?: boolean | null;
+    assinatura_status?: string | null;
+    trial_termina_em?: string | null;
+  } | null | undefined,
 ): boolean {
   if (s?.suspenso === true) return false;
-  if (!assinaturaEmDia(s?.assinatura_status)) return false;
+  if (!assinaturaEmDia(s?.assinatura_status, s?.trial_termina_em)) return false;
   return s?.disparos_contratado !== false;
 }
 
@@ -89,7 +115,7 @@ export function botPodeResponder(s: GuardasDoBot | null | undefined): boolean {
   // Assinatura vencida cala o bot, pelo mesmo motivo da suspensão: é decisão do
   // dono do sistema, não do lojista. A diferença é que aqui quem decide não é
   // uma pessoa clicando um botão, e sim o pagamento entrar ou não.
-  if (!assinaturaEmDia(s?.assinatura_status)) return false;
+  if (!assinaturaEmDia(s?.assinatura_status, s?.trial_termina_em)) return false;
 
   if (s?.bot_enabled === false) return false;
   if (s?.bot_schedule_enabled !== true) return true;

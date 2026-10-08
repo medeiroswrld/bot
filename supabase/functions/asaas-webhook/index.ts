@@ -191,6 +191,48 @@ Deno.serve(async (req) => {
     if (novoEstado === 'ativa')  atualizacao.ultimo_pagamento_em   = agora;
     if (pagamento?.dueDate)      atualizacao.proximo_vencimento    = pagamento.dueDate;
 
+    // ── A escolha do plano vira plano aqui, e so aqui ────────────────────────
+    //
+    // `assinatura-criar` grava a escolha em `plano_pretendido` e nao toca em
+    // `plano`. Quem promove e o pagamento confirmado — este evento.
+    //
+    // E dividido assim porque antes a escolha era gravada no clique: quem
+    // abria o checkout e desistia ficava marcado com um plano que nunca
+    // comprou, e a tela passava a cobrar aquele valor. Com a promocao aqui,
+    // `plano` significa uma coisa so: o que a loja esta pagando.
+    //
+    // `billing_amount` vem da tabela `planos`, nao do evento do Asaas. O valor
+    // do Asaas e o que foi cobrado AGORA, que pode ser proporcional ou de uma
+    // promocao; o que a tela mostra como mensalidade tem que ser o preco do
+    // plano. Se o pretendido nao existir mais na tabela, nada e promovido e o
+    // `billing_amount` negociado pelo administrador fica de pe.
+    if (novoEstado === 'ativa') {
+      const { data: pendente } = await admin
+        .from('company_settings')
+        .select('plano_pretendido')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (pendente?.plano_pretendido) {
+        const { data: plano } = await admin
+          .from('planos')
+          .select('slug, preco')
+          .eq('slug', pendente.plano_pretendido)
+          .maybeSingle();
+
+        if (plano?.preco != null) {
+          atualizacao.plano            = plano.slug;
+          atualizacao.billing_amount   = Number(plano.preco);
+          atualizacao.plano_pretendido = null;
+          console.log('[asaas] plano promovido pelo pagamento', { userId, plano: plano.slug });
+        } else {
+          console.error('[asaas] plano pretendido nao existe mais na tabela', {
+            userId, pretendido: pendente.plano_pretendido,
+          });
+        }
+      }
+    }
+
     const { error: erroUpdate } = await admin
       .from('company_settings').update(atualizacao).eq('user_id', userId);
     if (erroUpdate) {
