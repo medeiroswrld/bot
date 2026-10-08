@@ -17,6 +17,8 @@ export interface GuardasDoBot {
   bot_contratado?: boolean | null;
   assinatura_status?: string | null;
   trial_termina_em?: string | null;
+  ultimo_pagamento_em?: string | null;
+  assinatura_motivo?: string | null;
 }
 
 /**
@@ -39,9 +41,30 @@ export interface GuardasDoBot {
 export function assinaturaEmDia(
   status?: string | null,
   trialFim?: string | null,
+  ultimoPagamento?: string | null,
+  motivo?: string | null,
 ): boolean {
   if (status === null || status === undefined || status === '') return true;
   if (status === 'ativa' || status === 'isento') return true;
+
+  // Quem CANCELOU fica ate o fim do mes que ja pagou.
+  //
+  // Cortar no instante do clique seria cobrar por um mes e entregar os dias
+  // ate o arrependimento. Volta como reclamacao ou chargeback, que custa mais
+  // que o mes — e e o tipo de coisa que o lojista conta para os outros.
+  //
+  // O motivo importa porque `cancelada` nao quer dizer uma coisa so: o webhook
+  // chega nesse estado por cinco caminhos, e so UM e o cliente saindo pela
+  // porta. Estorno e chargeback sao o dinheiro voltando — dar um mes de bot de
+  // graca a quem acabou de pedir reembolso seria pagar para ser estornado.
+  if (status === 'cancelada') {
+    if (motivo !== 'cancelamento') return false;
+    if (!ultimoPagamento) return false;
+    const fim = new Date(ultimoPagamento);
+    if (!Number.isFinite(fim.getTime())) return false;
+    fim.setMonth(fim.getMonth() + 1);
+    return fim.getTime() > Date.now();
+  }
 
   // 'trial' passa, mas SO ate a data. Teste em que o bot nao responde nao e
   // teste — a loja sai dele achando que o produto nao funciona.
@@ -66,10 +89,10 @@ export function assinaturaEmDia(
 
 /** Colunas que qualquer webhook precisa ler para decidir. */
 export const COLUNAS_GUARDA =
-  'bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso, bot_contratado, bot_blocked_numbers, assinatura_status, trial_termina_em';
+  'bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso, bot_contratado, bot_blocked_numbers, assinatura_status, trial_termina_em, ultimo_pagamento_em, assinatura_motivo';
 
 /** Colunas necessárias para checar disparo em massa. */
-export const COLUNAS_DISPARO = 'suspenso, disparos_contratado, assinatura_status, trial_termina_em';
+export const COLUNAS_DISPARO = 'suspenso, disparos_contratado, assinatura_status, trial_termina_em, ultimo_pagamento_em, assinatura_motivo';
 
 /**
  * A loja pode ENVIAR em massa (campanha, aniversário, template)?
@@ -87,10 +110,12 @@ export function podeDisparar(
     disparos_contratado?: boolean | null;
     assinatura_status?: string | null;
     trial_termina_em?: string | null;
+    ultimo_pagamento_em?: string | null;
+    assinatura_motivo?: string | null;
   } | null | undefined,
 ): boolean {
   if (s?.suspenso === true) return false;
-  if (!assinaturaEmDia(s?.assinatura_status, s?.trial_termina_em)) return false;
+  if (!assinaturaEmDia(s?.assinatura_status, s?.trial_termina_em, s?.ultimo_pagamento_em, s?.assinatura_motivo)) return false;
   return s?.disparos_contratado !== false;
 }
 
@@ -115,7 +140,7 @@ export function botPodeResponder(s: GuardasDoBot | null | undefined): boolean {
   // Assinatura vencida cala o bot, pelo mesmo motivo da suspensão: é decisão do
   // dono do sistema, não do lojista. A diferença é que aqui quem decide não é
   // uma pessoa clicando um botão, e sim o pagamento entrar ou não.
-  if (!assinaturaEmDia(s?.assinatura_status, s?.trial_termina_em)) return false;
+  if (!assinaturaEmDia(s?.assinatura_status, s?.trial_termina_em, s?.ultimo_pagamento_em, s?.assinatura_motivo)) return false;
 
   if (s?.bot_enabled === false) return false;
   if (s?.bot_schedule_enabled !== true) return true;

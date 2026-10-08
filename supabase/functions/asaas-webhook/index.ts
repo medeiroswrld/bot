@@ -65,6 +65,30 @@ function estadoDoEvento(evento: string): string | null {
   return null;
 }
 
+/**
+ * POR QUE a assinatura chegou ao estado — e nao so QUAL estado.
+ *
+ * `cancelada` e um estado unico para cinco caminhos muito diferentes, e a
+ * diferenca vale um mes de servico: quem CANCELOU fica ate o fim do que pagou,
+ * quem foi ESTORNADO para na hora. Sem guardar o motivo, dar a cortesia a
+ * `cancelada` entregaria um mes de bot de graca a quem acabou de pedir o
+ * dinheiro de volta.
+ *
+ * Ver `assinaturaEmDia` em _shared/botGuards.ts, que e quem le isto.
+ */
+function motivoDoEvento(evento: string): string | null {
+  if (evento === 'SUBSCRIPTION_DELETED')             return 'cancelamento';
+  if (evento === 'SUBSCRIPTION_INACTIVATED')         return 'inativada';
+  if (evento === 'PAYMENT_REFUNDED')                 return 'estorno';
+  if (evento === 'PAYMENT_CHARGEBACK_REQUESTED')     return 'chargeback';
+  if (evento === 'PAYMENT_DELETED')                  return 'cobranca_removida';
+  if (evento === 'PAYMENT_OVERDUE')                  return 'vencida';
+  if (evento === 'PAYMENT_CREDIT_CARD_CAPTURE_REFUSED') return 'cartao_recusado';
+  if (evento === 'PAYMENT_REPROVED_BY_RISK_ANALYSIS')   return 'reprovada_risco';
+  if (evento === 'PAYMENT_CONFIRMED' || evento === 'PAYMENT_RECEIVED') return 'pagamento';
+  return null;
+}
+
 Deno.serve(async (req) => {
   // Validação de quem chamou. O Asaas manda o token no header `asaas-access-token`.
   //
@@ -183,6 +207,7 @@ Deno.serve(async (req) => {
     const agora = new Date().toISOString();
     const atualizacao: Record<string, unknown> = {
       assinatura_status: novoEstado,
+      assinatura_motivo: motivoDoEvento(evento),
       assinatura_atualizada_em: agora,
     };
     const idAssinatura = pagamento?.subscription ?? assinatura?.id;

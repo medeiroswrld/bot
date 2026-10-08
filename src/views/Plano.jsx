@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Check, Loader2, AlertCircle, MessageCircle, ExternalLink, RefreshCw,
-  CheckCircle2, AlertTriangle, Clock, CreditCard,
+  CheckCircle2, AlertTriangle, Clock, CreditCard, XCircle,
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
@@ -96,10 +96,25 @@ const Plano = () => {
 
   // Dias de teste restantes. Arredonda para cima: no último dia o lojista lê
   // "1 dia", não "0" — zero soa como já acabou, e ele ainda pode usar hoje.
+  // Ate quando vale o que ja foi pago. Mesma conta que a trava do servidor
+  // faz em `assinaturaEmDia`: um mes a partir do ultimo pagamento.
+  const fimDoPeriodoPago = (() => {
+    if (!companySettings?.ultimo_pagamento_em) return null;
+    const d = new Date(companySettings.ultimo_pagamento_em);
+    if (!Number.isFinite(d.getTime())) return null;
+    d.setMonth(d.getMonth() + 1);
+    return d;
+  })();
+
   const fimTeste = companySettings?.trial_termina_em
     ? new Date(companySettings.trial_termina_em) : null;
   const diasTeste = fimTeste
     ? Math.max(0, Math.ceil((fimTeste - Date.now()) / 864e5)) : null;
+  // Mesma distincao da faixa do topo: entre o teste vencer e o cron das 6h
+  // virar o status existe uma janela de ate 16h em que o bot JA esta mudo.
+  // Dizer "depois disso o assistente para" ali e prometer, no futuro, algo que
+  // ja aconteceu — e bot calado sem explicacao e o defeito mais caro daqui.
+  const testeVenceu = !!fimTeste && fimTeste.getTime() <= Date.now();
 
   useEffect(() => {
     let vivo = true;
@@ -139,6 +154,52 @@ const Plano = () => {
     window.history.replaceState({}, '', window.location.pathname);
   }, [refreshCompanySettings]);
 
+  // Cancelar.
+  //
+  // Confirmacao com o que REALMENTE acontece, nao um "tem certeza?". O lojista
+  // precisa saber duas coisas antes de clicar: que nao perde o mes que ja
+  // pagou, e que os dados ficam. Sem isso, metade desiste com medo e a outra
+  // metade cancela achando que perdeu tudo.
+  const [cancelando, setCancelando] = useState(false);
+
+  const cancelar = async () => {
+    const ate = fimDoPeriodoPago
+      ? ` Você continua com tudo funcionando até ${dataCurta(fimDoPeriodoPago.toISOString())}, que é o fim do mês que você já pagou.`
+      : '';
+    const ok = window.confirm(
+      ['Encerrar sua assinatura?',
+       `O cartão não será cobrado de novo.${ate}`,
+       'Seu estoque, seus leads e suas conversas continuam aqui — nada é apagado.',
+      ].join('\n\n'),
+    );
+    if (!ok) return;
+
+    setErro(''); setAviso(''); setCancelando(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('assinatura-cancelar', { body: {} });
+      if (error) {
+        let msg = 'Não consegui cancelar agora. Tente de novo em instantes.';
+        try {
+          const corpo = await error.context?.json?.();
+          if (corpo?.error) msg = corpo.error;
+        } catch { /* fica a generica */ }
+        setErro(msg);
+        return;
+      }
+      if (data?.error) { setErro(data.error); return; }
+
+      setAviso('Assinatura encerrada. O cartão não será cobrado de novo.');
+      // O estado vem do webhook, em segundos — nao daqui. Duas releituras
+      // cobrem a demora sem prender a tela esperando.
+      refreshCompanySettings?.();
+      setTimeout(() => refreshCompanySettings?.(), 5000);
+    } catch (e) {
+      setErro(e?.message || 'Falha inesperada ao cancelar.');
+    } finally {
+      setCancelando(false);
+    }
+  };
+
   const assinar = async (slug) => {
     setErro(''); setAviso(''); setPagando(slug);
     try {
@@ -177,6 +238,13 @@ const Plano = () => {
   const atual = companySettings?.plano;
   const pretendido = companySettings?.plano_pretendido;
 
+  // So aparece para quem TEM assinatura no cartao correndo. `isento` paga por
+  // fora e `trial` nao tem o que cancelar — mostrar o botao nesses casos faria
+  // o lojista clicar e receber um erro explicando que nao havia nada ali.
+  const podeCancelar = !!companySettings?.asaas_subscription_id
+    && (status === 'ativa' || status === 'atrasada');
+  const aindaNoPeriodoPago = !!fimDoPeriodoPago && fimDoPeriodoPago.getTime() > Date.now();
+
   if (carregando) {
     return (
       <div className="view-content" style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
@@ -213,13 +281,18 @@ const Plano = () => {
                   {/* O número de dias vem antes de qualquer explicação: é a
                       única informação aqui que muda a decisão de hoje. */}
                   <div>
-                    {diasTeste === 0
-                      ? <><strong>Hoje é o último dia.</strong> Depois disso o assistente para de responder.</>
-                      : <><strong>{diasTeste} {diasTeste === 1 ? 'dia' : 'dias'}</strong> de teste {diasTeste === 1 ? 'restante' : 'restantes'}.</>}
+                    {testeVenceu
+                      ? <><strong>Seu teste terminou.</strong> O assistente parou de responder.</>
+                      : diasTeste === 0
+                        ? <><strong>Hoje é o último dia.</strong> Depois disso o assistente para de responder.</>
+                        : <><strong>{diasTeste} {diasTeste === 1 ? 'dia' : 'dias'}</strong> de teste {diasTeste === 1 ? 'restante' : 'restantes'}.</>}
                   </div>
                   <div style={{ marginTop: 4 }}>
-                    Escolha um plano abaixo quando quiser — assinando antes do fim, nada é
-                    interrompido. Seus dados e conversas ficam aqui de qualquer forma.
+                    {testeVenceu
+                      ? <>Escolha um plano abaixo para religar — as mensagens dos seus clientes
+                         continuam chegando e ficam em Conversas, nada se perde.</>
+                      : <>Escolha um plano abaixo quando quiser — assinando antes do fim, nada é
+                         interrompido. Seus dados e conversas ficam aqui de qualquer forma.</>}
                   </div>
                 </>
               )}
@@ -243,8 +316,13 @@ const Plano = () => {
               )}
               {status === 'cancelada' && (
                 <div>
-                  A assinatura foi encerrada e o atendimento automático está pausado.
-                  Escolha um plano abaixo para voltar.
+                  {aindaNoPeriodoPago
+                    ? <>A assinatura foi encerrada e o cartão não será cobrado de novo.{' '}
+                       <strong>Tudo continua funcionando até {dataCurta(fimDoPeriodoPago.toISOString())}</strong>,
+                       que é o fim do mês que você já pagou. Depois disso o atendimento automático pausa —
+                       e seus dados continuam aqui.</>
+                    : <>A assinatura foi encerrada e o atendimento automático está pausado.
+                       Escolha um plano abaixo para voltar.</>}
                 </div>
               )}
               {status === 'sem_assinatura' && (
@@ -409,6 +487,24 @@ const Plano = () => {
           style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <RefreshCw size={16} /> Atualizar
         </button>
+
+        {/* Cancelar fica aqui, visível, e não escondido num submenu.
+            Cobrança recorrente no cartão em que encerrar é mais difícil que
+            assinar não se sustenta — e esconder o botão não segura ninguém,
+            só transforma a saída numa reclamação. */}
+        {podeCancelar && (
+          <button onClick={cancelar} disabled={cancelando}
+            style={{
+              marginLeft: 'auto', background: 'none', border: 'none', padding: 0,
+              cursor: cancelando ? 'default' : 'pointer', fontSize: '0.84rem',
+              color: 'var(--color-text-muted)', textDecoration: 'underline',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+            {cancelando
+              ? <><Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> Encerrando...</>
+              : <><XCircle size={15} /> Encerrar assinatura</>}
+          </button>
+        )}
       </div>
 
       <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: 16, lineHeight: 1.6 }}>
