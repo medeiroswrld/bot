@@ -37,7 +37,10 @@ export interface GuardasDoBot {
  */
 export function assinaturaEmDia(status?: string | null): boolean {
   if (status === null || status === undefined || status === '') return true;
-  return status === 'ativa' || status === 'isento';
+  // 'trial' entra aqui: teste em que o bot nao responde nao e teste, e a loja
+  // sai dele achando que o produto nao funciona. A expiracao e quem devolve
+  // para 'sem_assinatura' — nao esta trava.
+  return status === 'ativa' || status === 'isento' || status === 'trial';
 }
 
 /** Colunas que qualquer webhook precisa ler para decidir. */

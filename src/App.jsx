@@ -260,6 +260,46 @@ const PageTabs = () => {
 
 // Aviso de conta suspensa. Sem isso o lojista veria o bot mudo sem explicacao e
 // abriria chamado achando que quebrou.
+// Quantos dias faltam do teste.
+//
+// Teste que acaba em silencio e teste perdido: a loja descobre no dia em que o
+// bot para, e a ultima impressao do produto vira uma porta fechada. O aviso
+// aparece todo dia, e aperta no fim — nos ultimos dois dias ele muda de cor,
+// porque e quando a decisao realmente acontece.
+const AvisoTeste = () => {
+  const { companySettings } = useAppContext();
+  const navigate = useNavigate();
+
+  if (companySettings?.assinatura_status !== 'trial') return null;
+  const fim = companySettings?.trial_termina_em ? new Date(companySettings.trial_termina_em) : null;
+  if (!fim) return null;
+
+  const dias = Math.max(0, Math.ceil((fim - Date.now()) / 864e5));
+  const apertando = dias <= 2;
+
+  return (
+    <div style={{
+      margin: '10px 20px 0', padding: '10px 14px', borderRadius: 10,
+      display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+      fontSize: '0.85rem', lineHeight: 1.5,
+      background: apertando ? '#fffbeb' : 'color-mix(in srgb, var(--accent) 8%, transparent)',
+      border: `1px solid ${apertando ? '#fde68a' : 'color-mix(in srgb, var(--accent) 26%, transparent)'}`,
+      color: apertando ? '#92400e' : 'var(--text-primary)',
+    }}>
+      <span>
+        {dias === 0
+          ? <><strong>Hoje é o último dia do teste.</strong> Depois disso o assistente para de responder.</>
+          : <><strong>{dias} {dias === 1 ? 'dia' : 'dias'}</strong> de teste {dias === 1 ? 'restante' : 'restantes'}.</>}
+      </span>
+      <button type="button" className="btn-primary"
+        style={{ fontSize: '0.8rem', padding: '4px 12px', marginLeft: 'auto' }}
+        onClick={() => navigate('/configuracoes')}>
+        Escolher plano
+      </button>
+    </div>
+  );
+};
+
 const AvisoSuspensao = () => {
   const { companySettings } = useAppContext();
   const navigate = useNavigate();
@@ -374,6 +414,7 @@ const AuthenticatedApp = () => {
       )}
       <main className="main-content">
         <Header onAbrirMenu={() => setMenuAberto(true)} />
+        <AvisoTeste />
         <AvisoSuspensao />
         <PageTabs />
         <Suspense fallback={<PageLoader />}>

@@ -50,7 +50,7 @@ const BENEFICIOS = {
 };
 
 const EscolherPlano = () => {
-  const { logout, refreshCompanySettings } = useAppContext();
+  const { user, logout, companySettings, refreshCompanySettings } = useAppContext();
   const [planos, setPlanos] = useState([]);
   const [carregando, setCarregando] = useState(true);
   const [pagando, setPagando] = useState('');
@@ -71,6 +71,20 @@ const EscolherPlano = () => {
     })();
     return () => { vivo = false; };
   }, []);
+
+  // Comecar o teste.
+  //
+  // Vai por funcao do banco e nao por UPDATE: `assinatura_status` esta
+  // protegido por trigger (e decisao do dono do sistema, nao da loja), e a
+  // funcao tambem barra quem ja testou — sem isso o teste viraria renovavel.
+  const [testando, setTestando] = useState(false);
+  const comecarTeste = async () => {
+    setErro(''); setTestando(true);
+    const { error } = await supabase.rpc('comecar_teste', { p_user_id: user?.id });
+    setTestando(false);
+    if (error) { setErro('Nao consegui liberar o teste. Tente de novo.'); return; }
+    await refreshCompanySettings?.();
+  };
 
   const assinar = async (slug) => {
     setErro(''); setPagando(slug);
@@ -123,6 +137,32 @@ const EscolherPlano = () => {
           dá para trocar depois, a qualquer momento.
         </p>
       </div>
+
+      {/* O teste vem ANTES dos preços, e só para quem nunca testou.
+          A oferta aponta o Instagram de propósito: conectar o Direct leva menos
+          de um minuto desde a aprovação da Meta, enquanto o WhatsApp depende de
+          WABA e verificação e pode consumir os 7 dias inteiros na fila. Teste
+          que expira antes do produto rodar uma vez é pior que teste nenhum. */}
+      {!companySettings?.trial_termina_em && (
+        <div style={{
+          maxWidth: 620, margin: '0 auto 28px', padding: '18px 20px', borderRadius: 14,
+          background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--accent) 28%, transparent)',
+        }}>
+          <strong style={{ fontSize: '1rem', display: 'block', marginBottom: 6 }}>
+            Experimente 7 dias, sem cartão
+          </strong>
+          <p style={{ margin: '0 0 14px', fontSize: '.88rem', lineHeight: 1.55, color: 'var(--text-secondary)' }}>
+            Conecte o Instagram da loja — leva menos de um minuto — e veja o assistente
+            atendendo de verdade. Uma semana cobre um fim de semana inteiro, que é quando
+            mais chega mensagem com a loja fechada.
+          </p>
+          <button className="btn-primary" onClick={comecarTeste} disabled={testando}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '.9rem' }}>
+            {testando ? 'Liberando...' : 'Começar os 7 dias'}
+          </button>
+        </div>
+      )}
 
       {erro && (
         <p style={{
