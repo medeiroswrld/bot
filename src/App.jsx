@@ -12,6 +12,7 @@ import { precisaDesafio } from './lib/doisFatores.js';
 
 const Dashboard    = lazy(() => import('./views/Dashboard.jsx'));
 const AdminPanel   = lazy(() => import('./views/AdminPanel.jsx'));
+const PlanosPublico = lazy(() => import('./views/PlanosPublico.jsx'));
 const Inventory    = lazy(() => import('./views/Inventory.jsx'));
 const Leads        = lazy(() => import('./views/Leads.jsx'));
 const Agenda       = lazy(() => import('./views/Agenda.jsx'));
@@ -494,6 +495,22 @@ function App() {
   // supabaseAdmin.js). Assim da pra estar logado como lojista no CRM e como
   // administrador no /admin ao mesmo tempo, no mesmo navegador — antes um
   // derrubava o outro, e o painel abria logado com a conta errada.
+  // Precos ANTES do login, e fora do AppProvider.
+  //
+  // Quem esta comparando fornecedor nao cria conta para descobrir quanto custa
+  // — ele fecha a aba. Ate agora o preco so aparecia depois do cadastro, e e
+  // justamente de quem compara que vem a recusa por preco.
+  //
+  // Fora do provider porque nao precisa de sessao nenhuma: a pagina le a mesma
+  // tabela `planos` que o sistema cobra, com politica de leitura anonima.
+  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/planos')) {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <PlanosPublico />
+      </Suspense>
+    );
+  }
+
   if (typeof window !== 'undefined' && window.location.pathname.startsWith('/admin')) {
     return (
       <Suspense fallback={<LoadingScreen />}>
