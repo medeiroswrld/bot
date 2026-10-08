@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conselho: a ideia é boa?</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#1c1f24; --muted:#5d6570; --line:#e4e7eb; --soft:#f6f7f9;
+    --accent:#2f5bd3; --no:#b42318; --no-bg:#fdecea; --yes:#127a46; --yes-bg:#e6f4ec;
+    --mid:#9a6400; --mid-bg:#fff4dc;
+    --c1:#b42318; --c2:#5b3cc4; --c3:#127a46; --c4:#7a7f87; --c5:#c25e00;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 60px}
+  .eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+  h1{font-size:28px;line-height:1.25;margin:0 0 10px}
+  .q{color:var(--muted);margin:0 0 28px;font-style:italic}
+  .verdict{border:1px solid var(--line);border-left:5px solid var(--yes);border-radius:10px;
+    padding:22px 24px;background:var(--soft);margin-bottom:28px}
+  .verdict .big{font-size:22px;font-weight:700;margin:0 0 8px}
+  .verdict p{margin:0 0 10px}
+  .first{border:1px solid #cbd7f7;background:#eef3ff;border-radius:10px;padding:18px 22px;margin:0 0 32px}
+  .first h3{margin:0 0 6px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+  .first p{margin:0}
+  h2{font-size:19px;margin:36px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  ul,ol{padding-left:22px;margin:8px 0} li{margin:5px 0}
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:12px 0}
+  .card{border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .card h4{margin:0 0 4px;font-size:14px}
+  .card .when{font-size:12px;color:var(--muted);margin:0 0 8px;text-transform:uppercase;letter-spacing:.05em}
+  .card.p1{border-top:4px solid var(--no)} .card.p2{border-top:4px solid var(--yes)} .card.p3{border-top:4px solid var(--c4)}
+  .card ul{padding-left:18px;font-size:14px}
+  .gates{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin:12px 0}
+  .gate{border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:14px}
+  .gate b{display:block;font-size:20px;color:var(--accent);line-height:1.15;margin-bottom:4px}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin:10px 0}
+  table{border-collapse:collapse;width:100%;min-width:640px;font-size:14px}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--soft);font-weight:600;font-size:13px}
+  tr:last-child td{border-bottom:0}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .no{background:var(--no-bg);color:var(--no)} .yes{background:var(--yes-bg);color:var(--yes)}
+  .mid{background:var(--mid-bg);color:var(--mid)}
+  .warn{border:1px solid #f1d39a;background:var(--mid-bg);border-radius:10px;padding:12px 16px;margin:12px 0;font-size:14px}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:1px}
+  details{border:1px solid var(--line);border-radius:10px;margin:10px 0;background:#fff}
+  summary{cursor:pointer;padding:13px 16px;font-weight:600;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";float:right;color:var(--muted);font-weight:400}
+  details[open] summary::after{content:"–"}
+  details .body{padding:0 18px 16px;border-top:1px solid var(--line)}
+  details .body p{margin:12px 0}
+  .tag{font-weight:400;color:var(--muted);font-size:13px;margin-left:6px}
+  .note{font-size:13px;color:var(--muted)}
+  code{font-size:13px;background:var(--soft);padding:1px 5px;border-radius:4px}
+  footer{margin-top:44px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="eyebrow">Conselho · 07/10/2026</p>
+<h1>A ideia é boa? O que falta para ser o melhor?</h1>
+<p class="q">“o que vcs acham sobre esse crm, ideia é boa? o que falta para ser o melhor?”</p>
+
+<div class="verdict">
+  <p class="big">Sim, a ideia é boa, mas não como “CRM de revenda”.</p>
+  <p>Como CRM, você perde para sistemas de gestão de R$300 que têm portal e nota fiscal. O que só a Amply tem é <b>a agência que compra o lead e o sistema que transforma esse lead em carro vendido</b>. É uma máquina de <b>custo por carro vendido</b>: anúncio → conversa → visita → venda.</p>
+  <p>O que pode matar o produto hoje não é a falta de recurso. É a <b>falha silenciosa</b>. Um bot que para de responder sem avisar é pior do que não ter bot, porque a loja para de vigiar o WhatsApp confiando nele.</p>
+</div>
+
+<div class="first">
+  <h3>A primeira coisa a fazer, hoje e antes de qualquer código</h3>
+  <p>Ligue para o <b>Leandrinho</b> e pergunte por que ele nunca ligou o bot e o que faria ele ligar. Depois ligue para a <b>DSC</b> e pergunte o que ela abre de manhã e o que faria ela cancelar. Essas respostas decidem o que o card de resultados mostra e o que entra na semana 1.</p>
+</div>
+
+<h2>Plano de 30 dias</h2>
+<div class="cols">
+  <div class="card p1"><h4>Consertar</h4><p class="when">Semana 1</p><ul>
+    <li>Terminar o card <b>“o que o robô fez”</b>, que já está pela metade (veja abaixo). Aplicar a migration 100 e conferir a coluna no banco <i>antes</i> do deploy</li>
+    <li>Script que <b>trava o deploy</b> quando uma coluna usada pelo código não existe no banco</li>
+    <li><b>Teste sintético a cada 15 min</b>: um número de teste pergunta “tem Onix?” e confere a resposta. O alarme vai também para a loja</li>
+  </ul></div>
+  <div class="card p2"><h4>Construir</h4><p class="when">Semanas 2 a 4</p><ul>
+    <li><b>Resumo de manhã</b> para a loja: “ontem o robô atendeu 14 pessoas e marcou 3 visitas; estas 2 pessoas esperam você”</li>
+    <li><b>Auditoria semanal</b> de 20 conversas reais: preço inventado, passagem para o vendedor, tom</li>
+    <li><b>Venda registrada sem esforço</b>: o contrato ou o lançamento no financeiro marca o lead como vendido. Isso prepara o envio de vendas para a Meta no mês 2</li>
+    <li><b>Guardar vídeo e documento</b> em vez de descartar, com consentimento e prazo de descarte (LGPD)</li>
+  </ul></div>
+  <div class="card p3"><h4>Parar</h4><p class="when">Até ter 10 clientes</p><ul>
+    <li>Tour e polimento de UI</li>
+    <li>Nota fiscal, financiamento, portais (inclusive o Mercado Livre), moto 0km e estoque com quantidade</li>
+    <li>Medir a semana por commits. A métrica passa a ser <b>conversas com lojistas</b></li>
+  </ul></div>
+</div>
+
+<div class="warn"><b>Conferido no seu repositório:</b> <code>src/views/ResultadosAssistente.jsx</code> e <code>supabase/migrations/100_resultados_do_assistente.sql</code> existem e não estão no git, e <code>process-conversation/index.ts</code> tem alterações sem commit. É o card de prova, já começado. Aplique a migration e confira a coluna antes do deploy, porque esse tipo de descompasso já derrubou a produção uma vez.</div>
+
+<h2>Como saber que virou o melhor do Brasil</h2>
+<div class="gates">
+  <div class="gate"><b>0</b>silêncios do bot acima de 15 min sem alerta para a loja</div>
+  <div class="gate"><b>&lt; 2%</b>das conversas auditadas com preço ou carro inventado</div>
+  <div class="gate"><b>&gt; 15%</b>de conversas que viram visita, medido</div>
+  <div class="gate"><b>R$ por carro</b>vendido, informado a cada loja todo mês</div>
+  <div class="gate"><b>1 loja</b>conectada sem você tocar no processo</div>
+  <div class="gate"><b>10 lojas</b>pagando o preço público com fidelidade e nenhum cancelamento por “não funciona”</div>
+</div>
+
+<h2>Onde cada conselheiro ficou</h2>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Conselheiro</th><th>Ideia boa?</th><th>Primeira prioridade</th><th>Parar</th></tr></thead>
+  <tbody>
+    <tr><td><span class="dot" style="background:var(--c1)"></span>Contrarian</td><td><span class="pill yes">Sim</span></td><td>Acabar com a falha silenciosa: testes, monitor e checagem do banco</td><td>Nota, portais, financiamento, moto 0km</td></tr>
+    <tr><td><span class="dot" style="background:var(--c2)"></span>Primeiros Princípios</td><td><span class="pill mid">Sim, se for vendida como custo por carro</span></td><td>Fechar o ciclo anúncio → venda com envio para a Meta</td><td>Correr atrás do que os sistemas de gestão já têm</td></tr>
+    <tr><td><span class="dot" style="background:var(--c3)"></span>Expansionista</td><td><span class="pill yes">Maior do que parece</span></td><td>Envio de vendas para a Meta e dados de várias lojas</td><td>Nota e portais</td></tr>
+    <tr><td><span class="dot" style="background:var(--c4)"></span>Outsider</td><td><span class="pill yes">Sim</span></td><td>Resumo de manhã e alerta para a loja</td><td>Módulos novos antes de o bot ser à prova de silêncio</td></tr>
+    <tr><td><span class="dot" style="background:var(--c5)"></span>Executor</td><td><span class="pill yes">Sim</span></td><td>Teste sintético e trava no deploy (1 a 2 dias)</td><td>Nota, financiamento, moto 0km, tour</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="note">Revisão às cegas, unânime nos dois sentidos: o <b>Executor</b> teve a resposta mais forte (5 de 5) por trazer ordem, prazo e régua. O <b>Expansionista</b> teve o maior ponto cego (5 de 5): falou em dados de várias lojas tendo só 2, ignorou a confiabilidade e não considerou a LGPD.</p>
+
+<h2>Pontos cegos que só a revisão pegou</h2>
+<ul>
+  <li><b>Ninguém mediu se o bot vende bem.</b> O teste sintético só mostra que ele respondeu, não que respondeu certo.</li>
+  <li><b>Ninguém perguntou aos clientes.</b> Saber por que o Leandrinho não usa o bot é o dado mais valioso que você tem hoje.</li>
+  <li><b>Enviar vendas para a Meta não é só técnico.</b> Depende de o vendedor registrar a venda. Na primeira venda, quem comprou foi outra pessoa da casa, e levou outro carro. Mande também “visita agendada”, porque poucas vendas por mês não ensinam o algoritmo.</li>
+  <li><b>Correções ao plano do Executor:</b> o Mercado Livre sai do mês 1 e o card de prova vem antes do envio de vendas para a Meta. Integrar com o sistema de gestão da loja, como sugeriu o Pensador de Primeiros Princípios, não se sustenta: esses sistemas não têm API aberta, e é o seu estoque próprio que alimenta o bot.</li>
+  <li><b>O tour é um sintoma:</b> 5 commits de polimento com 2 clientes.</li>
+</ul>
+
+<h2>Respostas completas</h2>
+
+<details><summary><span class="dot" style="background:var(--c1)"></span>O Contrarian <span class="tag">“o que mata é a falha silenciosa”</span></summary><div class="body">
+<p>A ideia é boa, mas o valor inteiro é confiança, e em poucos meses o bot ficou mudo sem erro, o banco travou e 3 features morreram sem ninguém perceber. O lojista não sabe o que aconteceu. Acha que “não funciona” e cancela.</p>
+<p>Hoje é um serviço de agência com software. Quando a Meta ligar a IA nativa dela, um bot que só conversa vira commodity. O fosso é o ciclo anúncio → conversa → visita → venda → envio para a Meta.</p>
+<p><b>Consertar:</b> testes no caminho crítico, monitor sintético e checagem do banco no deploy. <b>Construir:</b> fechar a atribuição e guardar documento e vídeo. <b>Parar:</b> nota, portais, financiamento e moto 0km.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c2)"></span>O Pensador de Primeiros Princípios <span class="tag">“loja não compra CRM”</span></summary><div class="body">
+<p>Loja compra carro vendido e lead que não morre sem resposta. Como “CRM de revenda”, você perde por falta de itens na lista. O ativo único é ser a agência e o sistema ao mesmo tempo. O melhor do Brasil é uma máquina de custo por carro vendido.</p>
+<p>Ordem: fechar o ciclo do anúncio com envio para a Meta; confiabilidade antes de recurso novo; parar de correr atrás do que os outros têm; tirar você do onboarding. Vendido como “CRM com bot”, a Meta te engole em 18 meses.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c3)"></span>O Expansionista <span class="tag">maior ponto cego, segundo a revisão</span></summary><div class="body">
+<p>Mandar a venda com valor de volta para a Meta faz o algoritmo buscar comprador, e o custo por carro cai. Dados de várias lojas viram sugestão de preço, alerta de carro parado e o que comprar no leilão. A lista de espera somada vira um mapa de demanda. IA lendo o vídeo do carro de troca faz uma pré-avaliação. E um plano com a mídia incluída, cobrado por venda.</p>
+<p class="note">A revisão respondeu: com 2 lojas não há dado para somar, e o produto ainda falha calado.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c4)"></span>O Outsider <span class="tag">“quem precisa do alarme é a loja”</span></summary><div class="body">
+<p>Você descreve o que o produto <i>é</i>. O lojista compra o que ele <i>ganha</i>. Palavras como coexistência e WABA não dizem nada para ele.</p>
+<p>O alarme de bot mudo avisa você, mas quem precisa saber é a loja: “seu robô parou às 14h e 3 clientes estão sem resposta”. O cliente final sabe que está falando com um robô? Quando a conversa passa para o vendedor, ele responde em 5 minutos ou em 5 horas? E quem manda um vídeo e recebe silêncio sente que a loja o ignorou.</p>
+<p>O melhor seria uma tela de manhã com quem está esperando, nenhuma mídia perdida e uma instalação que funcione sem você.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c5)"></span>O Executor <span class="tag">eleito o mais forte (5 de 5)</span></summary><div class="body">
+<ul>
+<li><b>1 a 2 dias:</b> teste sintético a cada 15 min e um script que trava o deploy quando falta coluna no banco.</li>
+<li><b>Semanas 1 e 2:</b> fechar a atribuição (tela e envio para a Meta) e guardar vídeo e documento.</li>
+<li><b>Semanas 3 e 4:</b> só o Mercado Livre e um checklist de onboarding com verificação automática. <span class="note">(A revisão cortou o Mercado Livre e pôs o card de prova antes do envio para a Meta.)</span></li>
+<li><b>Parar:</b> nota, financiamento, moto 0km e o tour (“nenhum cliente comprou por causa de um fio luminoso”).</li>
+</ul>
+<p><b>Régua:</b> só construir o que vira prova de venda ou o que impede o bot de calar.</p>
+</div></details>
+
+<details><summary>Revisão cruzada (5 revisores, às cegas)</summary><div class="body">
+<p><b>Mais forte:</b> Executor, 5 de 5. <b>Maior ponto cego:</b> Expansionista, 5 de 5.</p>
+<p><b>Ângulos que cada revisor trouxe:</b> perguntar aos clientes e o card já começado no repositório; o vendedor como quem registra a venda, sem o qual não há atribuição; a qualidade das respostas do bot e a LGPD; a ordem realista para 30 dias (prova antes do envio para a Meta, sem Mercado Livre); o caso Leandrinho e o polimento como fuga da venda.</p>
+</div></details>
+
+<footer>Conselho rodado em 07/10/2026. Tema: avaliação do produto e o que falta para ser o melhor. Cinco conselheiros independentes, cinco revisões anônimas e uma síntese. A primeira tentativa caiu no limite de uso da sessão e foi refeita. Transcrição em <code>council-transcript-2026-10-07-produto.md</code>. Também houve conselhos hoje sobre multi-nicho, preço percebido e custo.</footer>
+</div>
+</body>
+</html>

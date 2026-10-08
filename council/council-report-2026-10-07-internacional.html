@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conselho: EUA e Europa?</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#1c1f24; --muted:#5d6570; --line:#e4e7eb; --soft:#f6f7f9;
+    --accent:#2f5bd3; --no:#b42318; --no-bg:#fdecea; --yes:#127a46; --yes-bg:#e6f4ec;
+    --mid:#9a6400; --mid-bg:#fff4dc;
+    --c1:#b42318; --c2:#5b3cc4; --c3:#127a46; --c4:#7a7f87; --c5:#c25e00;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 60px}
+  .eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+  h1{font-size:28px;line-height:1.25;margin:0 0 10px}
+  .q{color:var(--muted);margin:0 0 28px;font-style:italic}
+  .verdict{border:1px solid var(--line);border-left:5px solid var(--no);border-radius:10px;
+    padding:22px 24px;background:var(--soft);margin-bottom:28px}
+  .verdict .big{font-size:22px;font-weight:700;margin:0 0 8px}
+  .verdict p{margin:0 0 10px}
+  .first{border:1px solid #cbd7f7;background:#eef3ff;border-radius:10px;padding:18px 22px;margin:0 0 32px}
+  .first h3{margin:0 0 6px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+  .first p{margin:0}
+  h2{font-size:19px;margin:36px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  ul,ol{padding-left:22px;margin:8px 0} li{margin:5px 0}
+  .markets{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:12px 0}
+  .mkt{border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .mkt h4{margin:0 0 6px;font-size:15px}
+  .mkt p{margin:6px 0 0;font-size:14px;color:var(--muted)}
+  .mkt.no{border-top:4px solid var(--no)} .mkt.later{border-top:4px solid var(--mid)}
+  .order{counter-reset:o;list-style:none;padding:0;margin:12px 0}
+  .order li{counter-increment:o;border:1px solid var(--line);border-radius:10px;padding:12px 14px 12px 52px;position:relative;margin:8px 0}
+  .order li::before{content:counter(o);position:absolute;left:14px;top:11px;width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:14px}
+  .gates{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:12px 0}
+  .gate{border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-size:14px}
+  .gate b{display:block;font-size:20px;color:var(--accent);line-height:1.15;margin-bottom:4px}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin:10px 0}
+  table{border-collapse:collapse;width:100%;min-width:640px;font-size:14px}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--soft);font-weight:600;font-size:13px}
+  tr:last-child td{border-bottom:0}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .p-no{background:var(--no-bg);color:var(--no)} .p-yes{background:var(--yes-bg);color:var(--yes)}
+  .p-mid{background:var(--mid-bg);color:var(--mid)}
+  .warn{border:1px solid #f1d39a;background:var(--mid-bg);border-radius:10px;padding:12px 16px;margin:12px 0;font-size:14px}
+  .quote{border-left:3px solid var(--accent);padding:6px 14px;margin:12px 0;color:var(--ink);font-size:15px}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:1px}
+  details{border:1px solid var(--line);border-radius:10px;margin:10px 0;background:#fff}
+  summary{cursor:pointer;padding:13px 16px;font-weight:600;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";float:right;color:var(--muted);font-weight:400}
+  details[open] summary::after{content:"–"}
+  details .body{padding:0 18px 16px;border-top:1px solid var(--line)}
+  details .body p{margin:12px 0}
+  .tag{font-weight:400;color:var(--muted);font-size:13px;margin-left:6px}
+  .note{font-size:13px;color:var(--muted)}
+  footer{margin-top:44px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="eyebrow">Conselho · 07/10/2026</p>
+<h1>Expandir para os Estados Unidos e a Europa?</h1>
+<p class="q">“o que vcs pensam sobre expandir esse crm para estados unidos e europa? mais facil de vender, maior poder de compra”</p>
+
+<div class="verdict">
+  <p class="big">Agora, não. E “mais fácil de vender” é o contrário do que os números mostram.</p>
+  <p>Nenhuma loja comprou pela tabela no Brasil, onde você tem a língua, o fuso, FIPE, placa, contrato e a agência como canal. Lá fora todas essas vantagens somem. A sua força é de <b>mercado</b>, não de produto: um bot de WhatsApp num país onde o WhatsApp é onde tudo acontece, vendido por uma agência em que a loja já confia.</p>
+  <p>O gargalo também vai junto na viagem. Um bot que fica mudo sem dar erro, num fuso 5 horas à frente, quebra na sua madrugada.</p>
+</div>
+
+<div class="first">
+  <h3>A primeira coisa a fazer</h3>
+  <p>Abra uma planilha e liste <b>toda loja que você não conhecia e que já recebeu a tabela de R$1.497–1.997</b>, com a data e a resposta. Se der menos de 20 linhas, a próxima semana inteira vai para oferecer a tabela a lojas brasileiras, e não para pensar em outro país.</p>
+</div>
+
+<h2>Mercado por mercado</h2>
+<div class="markets">
+  <div class="mkt no"><h4>EUA tradicional</h4><span class="pill p-no">Não</span><p>Descartar por escrito. Lá o canal é SMS, há regras como a TCPA, os sistemas das lojas (DMS) são fechados, o mercado usa Carfax e KBB e os concorrentes têm dinheiro. Seria outro produto.</p></div>
+  <div class="mkt no"><h4>Europa continental</h4><span class="pill p-no">Não</span><p>São 5 idiomas, 5 portais, a GDPR e um contrato diferente por país. Só volta à pauta se Portugal der certo.</p></div>
+  <div class="mkt later"><h4>Portugal</h4><span class="pill p-mid">Depois do critério</span><p>É o Brasil com euro: mesma língua, WhatsApp dominante e o App Review da Meta já vale lá.</p></div>
+  <div class="mkt later"><h4>Brasileiros e latinos na Flórida</h4><span class="pill p-mid">Depois do critério</span><p>A única ideia internacional com lógica própria: lojas que já atendem por WhatsApp em português, com só 1 hora de fuso. Antes, é preciso confirmar a regra da Meta e a lei da Flórida (FTSA).</p></div>
+  <div class="mkt later"><h4>América Latina hispânica</h4><span class="pill p-mid">Depois</span><p>WhatsApp ainda mais forte, mas exige traduzir o produto de verdade.</p></div>
+</div>
+
+<h2>O que destrava a conversa</h2>
+<div class="gates">
+  <div class="gate"><b>10 lojas</b>que você não conhecia, pagando a tabela cheia</div>
+  <div class="gate"><b>0 João</b>no onboarding</div>
+  <div class="gate"><b>60 dias</b>seguidos sem o bot ficar mudo</div>
+</div>
+<p class="note">Até lá, tradução só nas telas novas, sem refatorar nada.</p>
+
+<h3 style="font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:22px 0 8px">Ordem quando destravar</h3>
+<ol class="order">
+  <li><b>Portugal.</b> A placa vira campo manual e o contrato vira PDF. Testar com um anúncio da própria agência, com teto de €300. Se não sair nenhuma reunião, a ideia morre barata.</li>
+  <li><b>Diáspora na Flórida.</b> Só depois de confirmar a regra da Meta sobre mensagens de marketing para números dos EUA e o risco de processo pela FTSA.</li>
+  <li><b>América Latina hispânica.</b> Exige traduzir o produto de verdade.</li>
+</ol>
+
+<div class="warn"><b>A confirmar antes de qualquer decisão sobre os EUA:</b> um revisor afirmou que, desde abril de 2025, a Meta não entrega mensagens de marketing (templates) para números americanos. Se for verdade, os disparos (campanhas, aniversário, reengajamento) não funcionariam nem para a diáspora. Ninguém conferiu isso na documentação da Meta nesta sessão.</div>
+
+<h2>Uma coisa que o conselho disse com todas as letras</h2>
+<p class="quote">Esta é a quinta pergunta de expansão ou preço no mesmo dia, e todas tentam resolver em outro lugar um problema de conversão que está aqui. O Brasil tem dezenas de milhares de revendas, e você ainda não tentou vender para elas o suficiente para saber se o preço funciona. Mudar de país não cria tração. A tração vem de oferecer a tabela para mais lojas.</p>
+
+<h2>Onde cada conselheiro ficou</h2>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Conselheiro</th><th>Agora?</th><th>EUA</th><th>Se um dia sair</th></tr></thead>
+  <tbody>
+    <tr><td><span class="dot" style="background:var(--c1)"></span>Contrarian</td><td><span class="pill p-no">Não</span></td><td>Seria reescrever o produto</td><td>Depois do onboarding sem você</td></tr>
+    <tr><td><span class="dot" style="background:var(--c2)"></span>Primeiros Princípios</td><td><span class="pill p-no">Não</span></td><td>Por último</td><td>Portugal ou Espanha, depois das 10 lojas</td></tr>
+    <tr><td><span class="dot" style="background:var(--c3)"></span>Expansionista</td><td><span class="pill p-yes">Sim, nos bolsões de WhatsApp</span></td><td>Só a diáspora</td><td>Flórida já, depois Portugal e América Latina</td></tr>
+    <tr><td><span class="dot" style="background:var(--c4)"></span>Outsider</td><td><span class="pill p-no">Não</span></td><td>“Nada aqui é o meu mundo”</td><td>Portugal ou América Latina</td></tr>
+    <tr><td><span class="dot" style="background:var(--c5)"></span>Executor</td><td><span class="pill p-no">Não</span></td><td>Descartar por escrito</td><td>Portugal, com teto de €300</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="note">Revisão às cegas: o <b>Executor</b> levou 3 votos como resposta mais forte e o Pensador de Primeiros Princípios levou 2. O <b>Expansionista</b> foi o maior ponto cego por 5 votos a 0. Os números dele (“centenas de revendas”, “US$600–900 sem negociar”) não têm fonte, e “quase sem mudança” ignora placa, cobrança em dólar e as leis americanas. Mesmo assim, a revisão reconheceu que a diáspora é a primeira da fila <i>depois</i> do critério.</p>
+
+<h2>Pontos cegos que só a revisão pegou</h2>
+<ul>
+  <li><b>Quantas lojas receberam a oferta.</b> Se a tabela foi oferecida a quase ninguém, o preço não falhou: faltou tentar.</li>
+  <li><b>O teste de preço mais barato já está em casa:</b> os 2 clientes atuais renovariam pela tabela?</li>
+  <li><b>Custo por cliente:</b> a Meta cobra as mensagens por país, e EUA e Europa são mais caros. A IA é paga em dólar, e ainda há câmbio e IOF. O ticket maior pode virar a mesma margem.</li>
+  <li><b>Infraestrutura e GDPR:</b> o banco fica numa região só. A Europa pede contrato de tratamento de dados (DPA), cláusulas-padrão e muitas vezes servidor dentro da UE.</li>
+  <li><b>Cobrança:</b> o Asaas não cobra em euro. O Stripe exige empresa aberta fora (LLC) ou câmbio pela sua empresa brasileira, e a tributação da exportação de serviço tem detalhes.</li>
+  <li><b>A agência como porta de entrada:</b> vender gestão de anúncios lá fora testaria a demanda sem mexer no código. Mas também gasta as suas horas.</li>
+</ul>
+
+<h2>Respostas completas</h2>
+
+<details><summary><span class="dot" style="background:var(--c1)"></span>O Contrarian <span class="tag">“outro país é nicho novo com 10× o atrito”</span></summary><div class="body">
+<p>A premissa “mais fácil de vender” é desmentida pelos próprios números: você não vendeu pela tabela onde tem todas as vantagens.</p>
+<p><b>EUA:</b> produto de WhatsApp num mercado de SMS. Exigiria TCPA e 10DLC, integração com sistemas fechados e briga com startups capitalizadas. <b>Europa:</b> 5 idiomas, 5 portais, GDPR, contrato por país, e o Asaas não cobra em euro. <b>Suporte:</b> um bot mudo às 15h em Munique cai na sua madrugada.</p>
+<p>O ticket maior vem com custo de aquisição maior, ciclo de venda longo, SOC2 e SLA. Veredito: não, e reabrir quando o onboarding funcionar sem você.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c2)"></span>O Pensador de Primeiros Princípios <span class="tag">“o problema vai na mala”</span></summary><div class="body">
+<p>A pergunta pressupõe que já existe algo pronto para expandir. A venda não está difícil por causa do poder de compra. Está difícil porque ninguém comprou sem você fazer a ponte, e isso viaja junto, só que maior.</p>
+<p>Pouca coisa é portável. A vantagem é de mercado, não de produto. A pergunta certa é: por que uma loja brasileira que não te conhece não paga R$1.497? Expandir para fora é o prêmio por resolver isso.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c3)"></span>O Expansionista <span class="tag">“o mercado é onde o WhatsApp manda”</span></summary><div class="body">
+<p><b>Diáspora:</b> revendas de donos brasileiros e latinos em Orlando, Miami, Framingham, Newark e Houston atendem pelo WhatsApp, em português ou espanhol. <b>Portugal</b> é o Brasil com euro. <b>América Latina hispânica:</b> WhatsApp ainda mais forte. <b>White-label</b> para agências de Meta Ads de outros países. Uma tabela em dólar paga seria teste de preço.</p>
+<p>Primeiro passo proposto: R$2 mil em anúncio para donos de revenda brasileiros na Flórida, nesta semana. <span class="note">(A revisão respondeu: isso viola o critério e os números não têm fonte.)</span></p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c4)"></span>O Outsider <span class="tag">“dono de concessionária em Ohio”</span></summary><div class="body">
+<p>Nada aqui é o meu mundo. Meu CRM já integra o sistema da loja, o Carfax e o KBB. Quantas lojas usam? Duas, no Brasil. Quem me atende no sábado às 10h? Uma pessoa só, em outro fuso. Se o bot ignorar um lead de US$40 mil, eu cancelo na segunda.</p>
+<p>Eu compro de fornecedor com vendedor na rua e referência de outro dealer. O alemão quer tudo em alemão, integração com o mobile.de e servidor na UE.</p>
+<p>A sua vantagem é ser brasileiro, e lá fora ela vira passivo. Se um dia sair, vá para Portugal ou América Latina.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c5)"></span>O Executor <span class="tag">eleito o mais forte (3 votos)</span></summary><div class="body">
+<p>Segunda-feira, não faça nada pelos EUA nem pela Europa, nem “pesquise mercado”, que seria fuga com cara de estratégia.</p>
+<p>Escreva o critério: “10 lojas pela tabela, onboarding sem o João, 60 dias sem bot mudo”. Tradução só nas telas novas. Quando bater o critério, teste Portugal com €300. Os EUA, descarte por escrito.</p>
+</div></details>
+
+<details><summary>Revisão cruzada (5 revisores, às cegas)</summary><div class="body">
+<p><b>Mais forte:</b> Executor com 3 votos, pelo critério verificável e pelo teste com teto. Pensador de Primeiros Princípios com 2, pelo melhor diagnóstico da causa.</p>
+<p><b>Maior ponto cego:</b> Expansionista, 5 de 5. A favor dele: o fuso da Flórida, de 1 hora, derruba a objeção de suporte nesse nicho.</p>
+<p><b>Ângulos que cada revisor trouxe:</b> a agência como porta de entrada e o custo da Meta por país; a parte legal e fiscal (empresa nos EUA, exportação de serviço, lei da Flórida e a regra da Meta a confirmar); a ansiedade, quantas lojas receberam a oferta e o tamanho do mercado brasileiro; de onde veio a ideia e o câmbio; o banco numa região só, a GDPR e a latência.</p>
+</div></details>
+
+<footer>Conselho rodado em 07/10/2026. Tema: expandir o CRM e o bot da Amply para os EUA e a Europa. Cinco conselheiros independentes, cinco revisões anônimas e uma síntese. Transcrição em <code>council-transcript-2026-10-07-internacional.md</code>. Quinto conselho do dia, depois dos de multi-nicho, preço percebido, custo e produto.</footer>
+</div>
+</body>
+</html>

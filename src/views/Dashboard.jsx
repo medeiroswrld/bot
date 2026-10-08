@@ -7,6 +7,7 @@ import {
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import PrimeirosPassos from './PrimeirosPassos.jsx';
 import ResultadosAssistente from './ResultadosAssistente.jsx';
+import VendasDoAssistente from './VendasDoAssistente.jsx';
 import { supabase } from '../lib/supabase.js';
 
 const STATUS_LABELS = {
@@ -350,6 +351,7 @@ const Dashboard = () => {
                 feito por conta propria. Some sozinho para quem nao tem
                 assistente contratado. */}
             <ResultadosAssistente />
+            <VendasDoAssistente />
 
             {/* ── Métricas principais ──────────────────────────────────────── */}
             <div className="metrics-grid">
