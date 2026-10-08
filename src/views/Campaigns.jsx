@@ -390,8 +390,13 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
 // ─── Página ───────────────────────────────────────────────────────────────────
 const Campaigns = () => {
     const navigate = useNavigate();
-    const { campaigns, deleteCampaign } = useAppContext();
+    const { campaigns, deleteCampaign, companySettings } = useAppContext();
     const [wizard, setWizard] = useState(false);
+    // Disparo nao entra no teste de 7 dias (migration 107). A trava de verdade
+    // e no servidor; isto aqui so evita o beco sem saida de montar a campanha
+    // inteira e descobrir no clique de enviar.
+    const semDisparo = companySettings?.disparos_contratado === false;
+    const emTeste = companySettings?.assinatura_status === 'trial';
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
     const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
@@ -403,10 +408,28 @@ const Campaigns = () => {
                     <h1>Disparos em massa</h1>
                     <p>Dispare mensagens em massa usando templates aprovados pela Meta.</p>
                 </div>
-                <button className="btn-primary" onClick={() => setWizard(true)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button className="btn-primary" onClick={() => setWizard(true)}
+                    disabled={semDisparo}
+                    title={semDisparo ? 'Disparo em massa não está incluído neste momento.' : undefined}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6,
+                             opacity: semDisparo ? 0.5 : 1,
+                             cursor: semDisparo ? 'not-allowed' : 'pointer' }}>
                     <Plus size={18} /> Novo disparo
                 </button>
             </header>
+
+            {semDisparo && (
+                <p style={{ fontSize: '0.84rem', color: '#0369a1', background: '#e0f2fe',
+                            border: '1px solid #bae6fd', borderRadius: 10,
+                            padding: '11px 14px', lineHeight: 1.55, marginBottom: '1rem' }}>
+                    {emTeste
+                        ? <>O disparo em massa <strong>não entra no teste</strong> — cada mensagem
+                           enviada assim é cobrada pela Meta por template. O atendimento automático
+                           está liberado normalmente nos seus 7 dias.{' '}</>
+                        : <>O envio em massa não faz parte do seu plano.{' '}</>}
+                    <a href="/plano" style={{ color: '#0369a1', fontWeight: 600 }}>Ver os planos</a>.
+                </p>
+            )}
 
             <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
                 {(campaigns || []).length === 0 ? (

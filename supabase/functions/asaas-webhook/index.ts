@@ -216,7 +216,7 @@ Deno.serve(async (req) => {
       if (pendente?.plano_pretendido) {
         const { data: plano } = await admin
           .from('planos')
-          .select('slug, preco, inclui_bot')
+          .select('slug, preco, inclui_bot, inclui_disparos')
           .eq('slug', pendente.plano_pretendido)
           .maybeSingle();
 
@@ -243,8 +243,21 @@ Deno.serve(async (req) => {
           // — e fecharia o caminho de volta para quem desce de plano.
           atualizacao.bot_contratado = plano.inclui_bot === true;
 
+          // Disparo fica FORA do teste (migration 107): custa template a Meta,
+          // e iniciado pelo lojista e escala com um clique — o unico pedaco do
+          // produto onde um cadastro gratis gasta dinheiro nosso sem ninguem do
+          // outro lado ter pedido nada. Entao e o pagamento que liga, aqui.
+          //
+          // Coluna propria em `planos`, e nao `inclui_bot` reaproveitado: a 071
+          // separou os dois de proposito porque a venda pede CRM + disparo sem
+          // bot. Hoje nenhum plano usa essa combinacao; amarrar aqui quebraria
+          // calado no dia em que usar.
+          atualizacao.disparos_contratado = plano.inclui_disparos === true;
+
           console.log('[asaas] plano promovido pelo pagamento', {
-            userId, plano: plano.slug, bot: plano.inclui_bot === true,
+            userId, plano: plano.slug,
+            bot: plano.inclui_bot === true,
+            disparos: plano.inclui_disparos === true,
           });
         } else {
           console.error('[asaas] plano pretendido nao existe mais na tabela', {
