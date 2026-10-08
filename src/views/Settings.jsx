@@ -1764,7 +1764,10 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                                         border: '1px solid #bae6fd', borderRadius: 8,
                                         padding: '10px 12px', lineHeight: 1.5, marginBottom: 14 }}>
                                 O bot não faz parte do seu plano. As configurações abaixo ficam
-                                salvas, mas ele não responde. Fale com a gente para incluir.
+                                salvas, mas ele não responde.{' '}
+                                <a href="/plano" style={{ color: '#0369a1', fontWeight: 600 }}>
+                                    Ver os planos
+                                </a>.
                             </p>
                         )}
                         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14,

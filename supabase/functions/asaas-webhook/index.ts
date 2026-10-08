@@ -216,7 +216,7 @@ Deno.serve(async (req) => {
       if (pendente?.plano_pretendido) {
         const { data: plano } = await admin
           .from('planos')
-          .select('slug, preco')
+          .select('slug, preco, inclui_bot')
           .eq('slug', pendente.plano_pretendido)
           .maybeSingle();
 
@@ -224,7 +224,28 @@ Deno.serve(async (req) => {
           atualizacao.plano            = plano.slug;
           atualizacao.billing_amount   = Number(plano.preco);
           atualizacao.plano_pretendido = null;
-          console.log('[asaas] plano promovido pelo pagamento', { userId, plano: plano.slug });
+
+          // ── Pagar tem que LIGAR o bot ────────────────────────────────────
+          //
+          // `bot_contratado` nasce `false` (migration 070), de quando o bot era
+          // liberado a mao pelo administrador ao fechar a venda. Ninguem
+          // reconectou essa ponta quando o pagamento por cartao passou a
+          // existir: a assinatura virava 'ativa' e o bot continuava desligado.
+          // O lojista pagaria a mensalidade e ficaria sem atendimento
+          // automatico ate alguem reparar no painel.
+          //
+          // Nunca aconteceu porque todo cliente de hoje foi ligado a mao antes
+          // da cobranca existir — o primeiro a pagar pelo cartao e que
+          // descobriria, e da pior forma.
+          //
+          // Vem de `inclui_bot`, e nao um `true` fixo: o plano CRM existe e NAO
+          // tem bot. Fixar aqui entregaria de graca o que separa ele dos outros
+          // — e fecharia o caminho de volta para quem desce de plano.
+          atualizacao.bot_contratado = plano.inclui_bot === true;
+
+          console.log('[asaas] plano promovido pelo pagamento', {
+            userId, plano: plano.slug, bot: plano.inclui_bot === true,
+          });
         } else {
           console.error('[asaas] plano pretendido nao existe mais na tabela', {
             userId, pretendido: pendente.plano_pretendido,
