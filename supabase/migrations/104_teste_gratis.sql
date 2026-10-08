@@ -32,6 +32,19 @@
 alter table public.company_settings
   add column if not exists trial_termina_em timestamptz;
 
+-- O CHECK de `assinatura_status` nao conhecia 'trial', e foi a segunda trava
+-- que derrubou o primeiro teste. A primeira foi o trigger de protecao; esta so
+-- apareceu DEPOIS de resolver aquela, porque uma escondia a outra.
+alter table public.company_settings
+  drop constraint if exists company_settings_assinatura_status_check;
+
+alter table public.company_settings
+  add constraint company_settings_assinatura_status_check
+  check (assinatura_status = any (array[
+    'sem_assinatura'::text, 'ativa'::text, 'atrasada'::text,
+    'cancelada'::text, 'isento'::text, 'trial'::text
+  ]));
+
 comment on column public.company_settings.trial_termina_em is
   'Fim do teste gratis. Nulo = nunca testou ou ja saiu do teste. A expiracao e comparacao de data, nao um estado que alguem precisa lembrar de virar.';
 
@@ -56,8 +69,11 @@ alter view public.em_teste set (security_invoker = on);
 -- quem já testou e quer uma segunda semana.
 
 create or replace function public.comecar_teste(p_user_id uuid)
-returns timestamptz language plpgsql security definer set search_path = '' as $$
-declare v_fim timestamptz;
+returns timestamptz language plpgsql security definer set search_path = ''
+as $fn$
+declare
+  v_fim    timestamptz;
+  v_claims text;
 begin
   select trial_termina_em into v_fim
     from public.company_settings where user_id = p_user_id;
@@ -66,6 +82,19 @@ begin
   if v_fim is not null then return v_fim; end if;
 
   v_fim := now() + interval '7 days';
+
+  -- O trigger `protege_campos_do_plano` barra mudanca em assinatura_status
+  -- quando a claim do JWT diz 'authenticated' — e barra com razao: sem ela,
+  -- qualquer usuario logado se daria assinatura ativa por update direto.
+  --
+  -- SECURITY DEFINER troca o papel do BANCO, nao a claim, que vem do PostgREST
+  -- e continua dizendo 'authenticated'. Por isso a protecao pegava justamente
+  -- a funcao que deveria passar por ela. Trocar a claim pelo tempo do update
+  -- libera SO por aqui, onde as travas vivem: nao reinicia teste e nao alcanca
+  -- quem ja pagou.
+  v_claims := current_setting('request.jwt.claims', true);
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+
   update public.company_settings
      set assinatura_status = 'trial',
          trial_termina_em  = v_fim,
@@ -73,8 +102,11 @@ begin
    where user_id = p_user_id
      and ultimo_pagamento_em is null;   -- quem ja pagou nao volta para teste
 
+  perform set_config('request.jwt.claims', coalesce(v_claims, ''), true);
+
   return v_fim;
-end; $$;
+end;
+$fn$;
 
 revoke all on function public.comecar_teste(uuid) from public, anon;
 grant execute on function public.comecar_teste(uuid) to authenticated, service_role;
