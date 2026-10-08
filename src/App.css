@@ -997,58 +997,91 @@
 }
 .planos-cabecalho p { color: var(--color-text-muted); line-height: 1.6; margin: 0; }
 
+/* ── Dois erros de token que deixavam estes cartões sem cara de cartão ──────
+   Este bloco usava `var(--border-color)` e `var(--color-text)`. Nenhum dos
+   dois existe: os tokens são `--border` e `--color-text-main`. Propriedade
+   com variável indefinida é inválida no tempo de cálculo e cai no valor
+   inicial — a borda virava `currentColor`, ou seja, a cor do TEXTO. No tema
+   claro passava por cinza e ninguém viu; no escuro o cartão deixava de se
+   separar do fundo. */
+
 .planos-grade {
-  display: grid; gap: 16px; max-width: 1120px; margin: 0 auto;
-  grid-template-columns: repeat(4, 1fr);
-  align-items: start;
+  display: grid; gap: 14px; max-width: 1120px; margin: 0 auto 18px;
+  /* `auto-fit`, e não um número fixo de colunas.
+     Era `repeat(4, 1fr)`, escrito quando havia quatro planos à vista. O plano
+     CRM saiu da vitrine e sobraram três cartões numa grade de quatro: uma
+     coluna fantasma à direita empurrava tudo para a esquerda, enquanto a faixa
+     "Personalizado" ocupava a largura inteira logo abaixo — e a tela parecia
+     torta sem motivo visível. Assim a grade acompanha quantos planos
+     estiverem visíveis, hoje e na próxima vez que a escada mudar. */
+  grid-template-columns: repeat(auto-fit, minmax(min(258px, 100%), 1fr));
+  /* `start` dava a cada cartão a altura do próprio texto, e os botões
+     "Assinar" caíam em alturas diferentes. O olho lê isso como desalinho, não
+     como conteúdo diferente. Esticados, o `margin-top: auto` do botão põe os
+     três na mesma linha. */
+  align-items: stretch;
 }
-@media (max-width: 1080px) { .planos-grade { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 560px)  { .planos-grade { grid-template-columns: 1fr; } }
 
 .plano-card {
-  background: var(--card-bg); border: 1px solid var(--border-color);
-  border-radius: 16px; padding: 24px 20px; display: flex; flex-direction: column;
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 16px; padding: 24px 22px 22px;
+  display: flex; flex-direction: column; position: relative;
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
-.plano-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md, 0 10px 30px rgba(0,0,0,.08)); }
-
-/* O destacado sobe um degrau e ganha a borda da marca. Sem animação de
-   entrada: a página é a primeira coisa que o cliente novo vê, e ela precisa
-   estar legível no primeiro frame, não depois de uma coreografia. */
-.plano-card.destaque {
-  border-color: var(--accent); border-width: 2px; padding: 26px 20px;
-  position: relative; box-shadow: 0 12px 34px rgba(91, 91, 255, .14);
+.plano-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .07);
 }
-@media (min-width: 1081px) { .plano-card.destaque { margin-top: -12px; } }
+html.dark .plano-card:hover { box-shadow: 0 10px 28px rgba(0, 0, 0, .45); }
+
+/* O plano atual ganha a borda da marca. Não sobe mais um degrau: com os
+   cartões esticados, o deslocamento vertical desalinhava justamente a linha
+   de botões que o `stretch` existe para alinhar. */
+.plano-card.destaque {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 12px 34px rgba(91, 91, 255, .14);
+}
 
 .plano-selo {
-  position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
+  position: absolute; top: -10px; left: 22px;
   background: var(--accent); color: #fff; font-size: .68rem; font-weight: 700;
   letter-spacing: .4px; padding: 4px 12px; border-radius: 999px; white-space: nowrap;
 }
 
 .plano-nome {
-  font-size: .78rem; font-weight: 700; letter-spacing: .8px; text-transform: uppercase;
-  color: var(--color-text-muted); margin: 0 0 12px;
+  font-size: .72rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--color-text-muted); margin: 0 0 14px;
 }
-.plano-preco { display: flex; align-items: baseline; gap: 4px; margin-bottom: 4px; }
-.plano-preco strong { font-size: 2.1rem; font-weight: 700; letter-spacing: -1px; color: var(--color-text); }
+.plano-preco { display: flex; align-items: baseline; gap: 5px; margin-bottom: 6px; }
+.plano-preco strong {
+  font-size: 2.1rem; font-weight: 700; letter-spacing: -1.5px;
+  color: var(--color-text-main); font-variant-numeric: tabular-nums; line-height: 1;
+}
 .plano-preco span { font-size: .85rem; color: var(--color-text-muted); }
-.plano-limite { font-size: .82rem; color: var(--color-text-muted); margin: 0 0 18px; line-height: 1.5; }
 
-.plano-itens { list-style: none; padding: 0; margin: 0 0 20px; display: flex; flex-direction: column; gap: 9px; }
-.plano-itens li { display: flex; gap: 8px; font-size: .86rem; line-height: 1.45; color: var(--color-text); }
+/* O limite é o que separa um plano do outro — o resto da lista é quase igual
+   entre as faixas. Por isso ele fecha o cabeçalho do cartão com uma linha, em
+   vez de se perder como mais uma frase cinza. */
+.plano-limite {
+  font-size: .84rem; color: var(--color-text-muted); line-height: 1.5;
+  margin: 0 0 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border);
+}
+.plano-limite strong { color: var(--color-text-main); font-weight: 600; }
+
+.plano-itens { list-style: none; padding: 0; margin: 0 0 22px; display: flex; flex-direction: column; gap: 10px; }
+.plano-itens li { display: flex; gap: 9px; font-size: .86rem; line-height: 1.45; color: var(--color-text-main); }
 .plano-itens svg { flex-shrink: 0; margin-top: 2px; color: var(--accent); }
 
 .plano-botao { width: 100%; margin-top: auto; justify-content: center; }
 
 .plano-personalizado {
-  max-width: 1120px; margin: 20px auto 0; background: var(--card-bg);
-  border: 1px dashed var(--border-color); border-radius: 16px; padding: 22px 26px;
+  max-width: 1120px; margin: 0 auto; background: var(--card-bg);
+  border: 1px dashed var(--border); border-radius: 16px; padding: 22px 26px;
   display: flex; gap: 18px; align-items: center; justify-content: space-between; flex-wrap: wrap;
 }
-.plano-personalizado h3 { margin: 0 0 4px; font-size: 1rem; }
-.plano-personalizado p  { margin: 0; font-size: .86rem; color: var(--color-text-muted); line-height: 1.5; }
+.plano-personalizado h3 { margin: 0 0 4px; font-size: 1rem; color: var(--color-text-main); }
+.plano-personalizado p  { margin: 0; font-size: .86rem; color: var(--color-text-muted); line-height: 1.5; max-width: 62ch; }
 
 .planos-rodape {
   max-width: 1120px; margin: 28px auto 0; text-align: center;

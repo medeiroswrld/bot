@@ -340,7 +340,7 @@ const Plano = () => {
             Sem fidelidade. Dá para subir ou descer de faixa quando quiser.
           </p>
 
-          <div className="planos-grade" style={{ margin: '0 0 16px' }}>
+          <div className="planos-grade">
             {pagos.map((p) => {
               const ehAtual = atual === p.slug && status === 'ativa';
               return (
