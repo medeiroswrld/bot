@@ -82,7 +82,13 @@ const EscolherPlano = () => {
     setErro(''); setTestando(true);
     const { error } = await supabase.rpc('comecar_teste', { p_user_id: user?.id });
     setTestando(false);
-    if (error) { setErro('Nao consegui liberar o teste. Tente de novo.'); return; }
+    // Devolve o motivo, nao "tente de novo". A primeira falha aqui foi o
+    // trigger de protecao recusando a mudanca de assinatura, e a mensagem
+    // generica custou uma ida e volta para descobrir isso.
+    if (error) {
+      setErro(error.message || 'Não consegui liberar o teste.');
+      return;
+    }
     await refreshCompanySettings?.();
   };
 
