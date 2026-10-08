@@ -11,6 +11,7 @@ import { prepararImagem, ehHeic } from '../lib/imagem.js';
 import { detectar, aplicar } from '../lib/marcadores.js';
 import DoisFatores from './DoisFatores.jsx';
 import OutrosContratos from './OutrosContratos.jsx';
+import NotaFiscal from './NotaFiscal.jsx';
 import VitrineWhatsApp from './VitrineWhatsApp.jsx';
 import Assinatura from './Assinatura.jsx';
 
@@ -1675,6 +1676,11 @@ const Settings = () => {
             {/* -- Outros modelos de contrato ----------------------------------- */}
             <div style={{ marginTop: '2rem' }}>
                 <OutrosContratos />
+            </div>
+
+            {/* -- Nota Fiscal -------------------------------------------------- */}
+            <div style={{ marginTop: '2rem' }}>
+                <NotaFiscal />
             </div>
 
             {/* -- Senha -------------------------------------------------------- */}

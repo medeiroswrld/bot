@@ -67,9 +67,10 @@ Deno.serve(async (req) => {
     // logado emitiria nota de uma venda de outra loja.
     const { data: carro } = await admin
       .from('cars')
-      .select('id, brand, model, version, year, model_year, chassi, renavam, plate, color, '
+      .select('id, brand, model, version, year, model_year, chassi, renavam, plate, color, ncm, '
             + 'sold_price, price, purchase_price, sold_at, '
-            + 'buyer_name, buyer_cpf, buyer_address, buyer_phone, buyer_email')
+            + 'buyer_name, buyer_cpf, buyer_address, buyer_phone, buyer_email, '
+            + 'buyer_numero, buyer_bairro, buyer_municipio, buyer_uf, buyer_cep')
       .eq('id', carId).eq('user_id', user.id).maybeSingle();
 
     if (!carro)             return json({ error: 'Veículo não encontrado nesta conta.' }, 404);
@@ -78,7 +79,7 @@ Deno.serve(async (req) => {
     const { data: loja } = await admin
       .from('company_settings')
       .select('company_name, cnpj, address, phone_number, inscricao_estadual, '
-            + 'nf_ativo, nf_ambiente, nf_serie, nf_cfop, nf_provedor, nf_token_set')
+            + 'nf_ativo, nf_ambiente, nf_serie, nf_cfop, nf_ncm, nf_provedor, nf_token_set')
       .eq('user_id', user.id).maybeSingle();
 
     if (!loja?.nf_ativo) {
@@ -97,8 +98,20 @@ Deno.serve(async (req) => {
     if (!loja.nf_token_set)                      falta.push('Token do provedor de NF-e');
     if (!String(carro.buyer_name ?? ''))         falta.push('Nome do comprador');
     if (soDigitos(carro.buyer_cpf).length < 11)  falta.push('CPF ou CNPJ do comprador');
-    if (!String(carro.buyer_address ?? ''))      falta.push('Endereço do comprador');
     if (!carro.chassi)                           falta.push('Chassi do veículo');
+
+    // Endereço ESTRUTURADO, não o texto corrido do contrato. A NF-e precisa das
+    // partes separadas, e a UF define a tributação interestadual — partir a
+    // string por vírgula seria chute, e errar a UF troca o imposto da operação.
+    if (!String(carro.buyer_municipio ?? ''))    falta.push('Município do comprador');
+    if (!String(carro.buyer_uf ?? ''))           falta.push('UF do comprador');
+    if (soDigitos(carro.buyer_cep).length !== 8) falta.push('CEP do comprador');
+    if (!String(carro.buyer_address ?? ''))      falta.push('Logradouro do comprador');
+
+    // NCM é obrigatório em todo item de NF-e. O do veículo vence o padrão da
+    // loja, para a revenda que mistura carro e moto.
+    const ncm = soDigitos(carro.ncm) || soDigitos(loja.nf_ncm);
+    if (ncm.length !== 8) falta.push('NCM do veículo, 8 dígitos (peça ao seu contador)');
 
     // O preço de compra define a MARGEM, que é sobre o que o imposto de usado
     // incide. Emitir sem ele é emitir com base de cálculo errada.
@@ -152,6 +165,11 @@ Deno.serve(async (req) => {
       [soDigitos(carro.buyer_cpf).length > 11 ? 'cnpj_destinatario' : 'cpf_destinatario']:
         soDigitos(carro.buyer_cpf),
       logradouro_destinatario: carro.buyer_address,
+      numero_destinatario: carro.buyer_numero || 'S/N',
+      bairro_destinatario: carro.buyer_bairro || undefined,
+      municipio_destinatario: carro.buyer_municipio,
+      uf_destinatario: String(carro.buyer_uf).toUpperCase(),
+      cep_destinatario: soDigitos(carro.buyer_cep),
       telefone_destinatario: soDigitos(carro.buyer_phone) || undefined,
       email_destinatario: carro.buyer_email || undefined,
 
@@ -163,6 +181,7 @@ Deno.serve(async (req) => {
         descricao: `${descricao} — Chassi ${carro.chassi}`
                  + (carro.plate ? ` — Placa ${carro.plate}` : ''),
         cfop: loja.nf_cfop,
+        codigo_ncm: ncm,
         unidade_comercial: 'UN',
         quantidade_comercial: 1,
         valor_unitario_comercial: valor,
