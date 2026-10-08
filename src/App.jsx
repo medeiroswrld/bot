@@ -393,8 +393,20 @@ const AvisoTeste = () => {
   const fim = companySettings?.trial_termina_em ? new Date(companySettings.trial_termina_em) : null;
   if (!fim) return null;
 
+  // Vencido e "ultimo dia" NAO sao o mesmo estado, e o `Math.max(0, ...)`
+  // juntava os dois em "0 dias".
+  //
+  // Existe uma janela de ate 16 horas entre as duas coisas: a trava confere
+  // `trial_termina_em` no minuto, e o cron que vira o `assinatura_status` so
+  // roda as 6h. Quem vence as 14h de terca fica a tarde inteira e a noite com
+  // o bot JA mudo, o CRM ainda aberto, e este aviso dizendo que o assistente
+  // para de responder "depois disso" — no futuro, como se ainda funcionasse.
+  //
+  // Bot calado sem explicacao e o defeito mais caro deste produto: o lojista
+  // nao abre chamado, ele conclui que nao funciona.
+  const venceu = fim.getTime() <= Date.now();
   const dias = Math.max(0, Math.ceil((fim - Date.now()) / 864e5));
-  const apertando = dias <= 2;
+  const apertando = venceu || dias <= 2;
 
   return (
     <div style={{
@@ -406,14 +418,17 @@ const AvisoTeste = () => {
       color: apertando ? '#92400e' : 'var(--text-primary)',
     }}>
       <span>
-        {dias === 0
-          ? <><strong>Hoje é o último dia do teste.</strong> Depois disso o assistente para de responder.</>
-          : <><strong>{dias} {dias === 1 ? 'dia' : 'dias'}</strong> de teste {dias === 1 ? 'restante' : 'restantes'}.</>}
+        {venceu
+          ? <><strong>Seu teste terminou.</strong> O assistente parou de responder — mas as
+             mensagens dos seus clientes continuam chegando e ficam em Conversas, nada se perde.</>
+          : dias === 0
+            ? <><strong>Hoje é o último dia do teste.</strong> Depois disso o assistente para de responder.</>
+            : <><strong>{dias} {dias === 1 ? 'dia' : 'dias'}</strong> de teste {dias === 1 ? 'restante' : 'restantes'}.</>}
       </span>
       <button type="button" className="btn-primary"
         style={{ fontSize: '0.8rem', padding: '4px 12px', marginLeft: 'auto' }}
         onClick={() => navigate('/plano')}>
-        Escolher plano
+        {venceu ? 'Assinar agora' : 'Escolher plano'}
       </button>
     </div>
   );
