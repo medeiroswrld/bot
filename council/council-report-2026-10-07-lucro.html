@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conselho: cortar custo</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#1c1f24; --muted:#5d6570; --line:#e4e7eb; --soft:#f6f7f9;
+    --accent:#2f5bd3; --no:#b42318; --no-bg:#fdecea; --yes:#127a46; --yes-bg:#e6f4ec;
+    --mid:#9a6400; --mid-bg:#fff4dc;
+    --c1:#b42318; --c2:#5b3cc4; --c3:#127a46; --c4:#7a7f87; --c5:#c25e00;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:900px;margin:0 auto;padding:40px 20px 60px}
+  .eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+  h1{font-size:28px;line-height:1.25;margin:0 0 10px}
+  .q{color:var(--muted);margin:0 0 28px;font-style:italic}
+  .verdict{border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:10px;
+    padding:22px 24px;background:var(--soft);margin-bottom:28px}
+  .verdict .big{font-size:22px;font-weight:700;margin:0 0 8px}
+  .verdict p{margin:0 0 10px}
+  .first{border:1px solid #cbd7f7;background:#eef3ff;border-radius:10px;padding:18px 22px;margin:0 0 32px}
+  .first h3{margin:0 0 6px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+  .first p{margin:0 0 6px} .first p:last-child{margin:0}
+  h2{font-size:19px;margin:36px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  ul,ol{padding-left:22px;margin:8px 0} li{margin:5px 0}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:12px 0}
+  .stat{border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .stat b{display:block;font-size:24px;line-height:1.1;margin-bottom:4px;font-variant-numeric:tabular-nums}
+  .stat span{font-size:13px;color:var(--muted)}
+  .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin:12px 0}
+  .card{border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .card h4{margin:0 0 8px;font-size:14px}
+  .card.cut{border-top:4px solid var(--yes)} .card.measure{border-top:4px solid var(--accent)} .card.dont{border-top:4px solid var(--no)}
+  .card ul{padding-left:18px;font-size:14px}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin:10px 0}
+  table{border-collapse:collapse;width:100%;min-width:620px;font-size:14px}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  th{background:var(--soft);font-weight:600;font-size:13px}
+  tr:last-child td{border-bottom:0}
+  .pos{color:var(--yes);font-weight:700} .neg{color:var(--no);font-weight:700}
+  .warn{border:1px solid #f1d39a;background:var(--mid-bg);border-radius:10px;padding:12px 16px;margin:12px 0;font-size:14px}
+  .quote{border-left:3px solid var(--accent);padding:6px 14px;margin:12px 0;font-size:16px}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .p-no{background:var(--no-bg);color:var(--no)} .p-yes{background:var(--yes-bg);color:var(--yes)} .p-mid{background:var(--mid-bg);color:var(--mid)}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:1px}
+  details{border:1px solid var(--line);border-radius:10px;margin:10px 0;background:#fff}
+  summary{cursor:pointer;padding:13px 16px;font-weight:600;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";float:right;color:var(--muted);font-weight:400}
+  details[open] summary::after{content:"–"}
+  details .body{padding:0 18px 16px;border-top:1px solid var(--line)}
+  details .body p{margin:12px 0}
+  .tag{font-weight:400;color:var(--muted);font-size:13px;margin-left:6px}
+  .note{font-size:13px;color:var(--muted)}
+  code{font-size:13px;background:var(--soft);padding:1px 5px;border-radius:4px}
+  footer{margin-top:44px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="eyebrow">Conselho · 07/10/2026</p>
+<h1>Como diminuir o custo para aumentar o lucro?</h1>
+<p class="q">“sabem como eu diminio meu custo para aumentar meu lucro?”</p>
+
+<div class="verdict">
+  <p class="big">Quase não há o que cortar com segurança. O lucro vem do cliente nº 2 e de proteger o nº 1.</p>
+  <p>O seu custo em dinheiro fica entre <b>R$700 e R$1.000 por mês</b>. Mesmo zerando tudo, o que é impossível, o ganho seria menor do que a margem de um segundo cliente. Os cortes que pareciam óbvios (modelo mais barato, travas no bot, PIX com desconto, mudar o enquadramento do imposto) <b>pioram a situação ou rendem perto de zero hoje</b>.</p>
+  <p>Há um risco real que pode estar te custando dinheiro: o excedente de R$3 aprovado mais cedo pode dar prejuízo se o custo por conversa foi medido no modelo barato.</p>
+</div>
+
+<div class="first">
+  <h3>A primeira coisa a fazer, hoje</h3>
+  <p>Abra os painéis de cobrança da <b>OpenAI e da Anthropic</b>, pegue o gasto de setembro e divida pelas conversas de cada loja.</p>
+  <p>Se o custo por conversa no Claude Sonnet passar de <b>~R$2,60</b>, o excedente de R$3 perde dinheiro e precisa ser revisto antes de entrar em qualquer contrato.</p>
+</div>
+
+<h2>Os números que decidem</h2>
+<div class="stats">
+  <div class="stat"><b>R$700–1.000</b><span>é o máximo que dá para ganhar cortando custo em dinheiro, já que zerar tudo é impossível</span></div>
+  <div class="stat"><b>~R$14/mês</b><span>de ganho líquido hoje ao trocar o anexo do Simples (fator R)</span></div>
+  <div class="stat"><b>~2,1×</b><span>é quanto o custo de IA pode subir antes de o excedente de R$3 dar prejuízo</span></div>
+  <div class="stat"><b>100%</b><span>da receita vem de um cliente só, a DSC</span></div>
+</div>
+
+<h3 style="font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:22px 0 8px">Por que o imposto não ajuda agora</h3>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Conta</th><th class="n">Valor</th></tr></thead>
+  <tbody>
+    <tr><td>Imposto economizado ao passar do Anexo V (15,5%) para o III (6%): 9,5% × R$2.000</td><td class="n pos">+R$190</td></tr>
+    <tr><td>INSS de 11% sobre o pró-labore mínimo (~R$1.600, um salário mínimo)</td><td class="n neg">−R$176</td></tr>
+    <tr><td><b>Ganho líquido hoje</b></td><td class="n"><b>~R$14</b></td></tr>
+    <tr><td>Receita a partir da qual passa a compensar (176 ÷ 0,095)</td><td class="n">~R$1.850</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="note">Três conselheiros prometeram de R$100 a R$190 por mês. Um revisor derrubou o número lembrando que o pró-labore não pode ficar abaixo de um salário mínimo. O valor de R$1.600 é aproximado; confirme com o contador. Com mais clientes, a troca passa a valer.</p>
+
+<h3 style="font-size:14px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:22px 0 8px">O risco no excedente de R$3</h3>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Se a IA custar por conversa…</th><th class="n">Recebe (R$3 − 13%)</th><th class="n">Resultado</th></tr></thead>
+  <tbody>
+    <tr><td>R$1,24 (o valor medido)</td><td class="n">R$2,61</td><td class="n pos">+R$1,37</td></tr>
+    <tr><td>R$2,61 (≈2,1× o medido)</td><td class="n">R$2,61</td><td class="n">empate</td></tr>
+    <tr><td>R$3,72 (3× o medido)</td><td class="n">R$2,61</td><td class="n neg">−R$1,11</td></tr>
+    <tr><td>R$6,20 (5× o medido)</td><td class="n">R$2,61</td><td class="n neg">−R$3,59</td></tr>
+  </tbody>
+</table>
+</div>
+<div class="warn"><b>Ajuste da conferência:</b> o presidente calculou o empate em 2,4× sem descontar imposto e cartão do excedente. Descontando os ~13%, o empate cai para <b>~2,1×</b>. Ninguém sabe ainda se os R$1,24 foram medidos no gpt-5-mini, onde a DSC está em teste, ou no Claude Sonnet, que é o padrão.</div>
+
+<h2>A recomendação</h2>
+<div class="cols">
+  <div class="card cut"><h4>Cortar agora</h4><ul>
+    <li><b>Horas de polimento sem pedido de cliente.</b> Foram 4 commits de tour animado. Nada novo entra sem pedido escrito até o 3º cliente</li>
+    <li><b>Trabalho de agência de graça.</b> Se a gestão de anúncios da DSC está embutida nos R$2.000, cobre à parte (R$800–1.500) na renovação</li>
+  </ul></div>
+  <div class="card measure"><h4>Medir antes de mexer</h4><ul>
+    <li>Gasto de IA de setembro por provedor ÷ conversas de cada loja</li>
+    <li>4 semanas de horas por categoria: onboarding, suporte, incidente, produto e agência. Compare quanto vale sua hora na agência e no CRM</li>
+    <li>De quem é o cartão cadastrado na conta de WhatsApp do Leandrinho. Se for o seu, você paga os disparos dele</li>
+    <li>Contador: o regime atual e quando a troca de anexo passa a compensar</li>
+  </ul></div>
+  <div class="card dont"><h4>Não fazer</h4><ul>
+    <li><b>Travas no bot</b> (menos iterações, menos histórico, saída mais curta). Podem calar ou quebrar o bot do único cliente pagante para economizar R$50–100</li>
+    <li><b>Trocar o modelo da DSC agora</b>: economiza ~R$150 e arrisca R$2.000</li>
+    <li><b>Desconto no PIX</b>: custa R$100 para evitar R$60–80 de taxa</li>
+    <li><b>Mudar de anexo hoje</b>: o INSS come R$176 dos R$190</li>
+    <li><b>Automatizar o onboarding</b>: não há cliente na fila para aproveitar</li>
+    <li><b>Cobrar por venda atribuída</b>: o envio da venda para a Meta (CAPI) não existe e a atribuição já falhou uma vez</li>
+  </ul></div>
+</div>
+
+<p class="quote">Para um fundador solo, lucro é quanto entra por hora trabalhada. A hora mais cara é a que você gasta em algo que não traz o cliente nº 2 nem protege o nº 1.</p>
+
+<h2>Onde cada conselheiro ficou</h2>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Conselheiro</th><th>Mexer na IA?</th><th>Imposto</th><th>Tese</th></tr></thead>
+  <tbody>
+    <tr><td><span class="dot" style="background:var(--c1)"></span>Contrarian</td><td><span class="pill p-no">Não, medir antes</span></td><td>R$100–150 líquido <span class="note">(otimista)</span></td><td>O excedente de R$3 pode dar prejuízo</td></tr>
+    <tr><td><span class="dot" style="background:var(--c2)"></span>Primeiros Princípios</td><td><span class="pill p-no">Não</span></td><td>—</td><td>Teto de ~R$1.000; lucro = R$ por hora</td></tr>
+    <tr><td><span class="dot" style="background:var(--c3)"></span>Expansionista</td><td>—</td><td>—</td><td>Instagram primeiro, revenda por agências</td></tr>
+    <tr><td><span class="dot" style="background:var(--c4)"></span>Outsider</td><td><span class="pill p-no">Não, medir antes</span></td><td>R$190 <span class="note">(bruto)</span></td><td>Problema de escala; agência dada de graça?</td></tr>
+    <tr><td><span class="dot" style="background:var(--c5)"></span>Executor</td><td><span class="pill p-yes">Sim, com travas</span></td><td>R$190 <span class="note">(bruto)</span></td><td>Lista de tarefas para segunda de manhã</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="note">Revisão às cegas: o <b>Contrarian</b> foi o mais forte com 4 votos, e o Pensador de Primeiros Princípios teve 1. O maior ponto cego foi do <b>Executor</b> (3 votos): as travas no bot podem calar o robô. Outsider e Expansionista levaram 1 voto cada, por causa do desconto no PIX e do plano Instagram primeiro.</p>
+
+<h2>Pontos cegos que só a revisão pegou</h2>
+<ul>
+  <li><b>Saída limitada a 1.500 tokens no gpt-5 pode zerar a resposta</b>, porque o raciocínio do modelo consome esse limite. É o mesmo tipo de bot mudo sem erro de outubro.</li>
+  <li><b>PIX automático e boleto dependem de o cliente pagar.</b> O cartão recorrente cobra sozinho. Com um único pagante, um mês de atraso apaga um ano da economia.</li>
+  <li><b>Instagram primeiro não substitui o WhatsApp:</b> os leads da DSC chegam por anúncio que abre conversa no WhatsApp, e o Instagram não permite disparo.</li>
+  <li><b>Pró-labore zerado:</b> hoje o “lucro” é o seu tempo financiando a empresa.</li>
+  <li><b>Incidente é custo:</b> cada vez que o bot cala, você gasta horas e aumenta o risco de perder a DSC.</li>
+  <li><b>Premissa desatualizada:</b> o painel de resultados e a tela de vendas atribuídas foram commitados durante a sessão (<code>4ebc37f</code> e <code>faf7f85</code>). O envio de vendas para a Meta continua não existindo.</li>
+</ul>
+
+<h2>Respostas completas</h2>
+
+<details><summary><span class="dot" style="background:var(--c1)"></span>O Contrarian <span class="tag">eleito o mais forte (4 votos)</span></summary><div class="body">
+<p>Zerar todo o custo sobe o lucro em uns R$700 por mês, o que é otimizar o arredondamento. Um cliente novo vale de 2 a 3 vezes isso.</p>
+<p>Riscos: (1) os R$1,24 provavelmente foram medidos no gpt-5-mini; se o Sonnet custar de 3 a 5 vezes mais, o excedente de R$3 dá prejuízo, então meça os dois provedores no mesmo mês. (2) Cortar a IA é atirar no produto. (3) Automatizar o onboarding sem cliente na fila tem retorno negativo. (4) O único corte sem risco é o imposto <span class="note">(a revisão mostrou que hoje rende quase zero)</span>.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c2)"></span>O Pensador de Primeiros Princípios <span class="tag">“o problema é o denominador”</span></summary><div class="body">
+<p>Mesmo zerando todo o custo em dinheiro, o ganho fica em uns R$1.000 por mês. Um segundo cliente traz cerca de R$1.100 de margem, sem esse teto. O custo fixo pesa de 20% a 25% com um cliente pagante e cerca de 3% com oito.</p>
+<p>O custo que importa é o que impede o próximo cliente: onboarding, incidentes e deploy frágil. Meça em horas por cliente por mês. Num negócio solo, lucro é o que entra por hora. Não troque o modelo da DSC, porque a economia é de uns R$150 e o risco é de R$2.000.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c3)"></span>O Expansionista <span class="tag">“o custo que mais pesa é vender pouco”</span></summary><div class="body">
+<p>O App Review aprovado permite um plano que começa pelo Instagram, onde a loja se conecta sozinha. O custo fixo se dilui com escala. Outras agências poderiam revender o produto e fazer o onboarding. Anúncio e bot juntos, com taxa por venda atribuída. O caso Celta → Sandero vira depoimento.</p>
+<p class="note">A revisão rebateu: o Instagram serve como porta de entrada, mas não substitui o WhatsApp. Cobrar por venda atribuída não se sustenta enquanto o envio para a Meta não existir.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c4)"></span>O Outsider <span class="tag">“problema de escala, não de custo”</span></summary><div class="body">
+<p>São R$2.000 de receita contra uns R$700 de custo, ou 65% de margem. Os cortes reais seriam o imposto, a taxa do cartão (com desconto no PIX) e não criar nada novo sem pedido de cliente.</p>
+<p>A pergunta-chave: a gestão de anúncios da DSC está embutida nos R$2.000? Se estiver, o maior custo escondido é trabalho de agência feito de graça. E não otimize o modelo antes de saber em qual deles o custo foi medido.</p>
+<p class="note">A revisão mostrou que o desconto de 5% no PIX custa R$100, mais que a taxa do cartão.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c5)"></span>O Executor <span class="tag">maior ponto cego (3 votos)</span></summary><div class="body">
+<p>Contador (Anexo III ou V), trocar o cartão por PIX ou boleto, conferir os painéis de cobrança de IA, travar o bot (iterações de 10 para 4, saída de 4.096 para 1.500, histórico de 20 para 12), planilha de horas e roteiro do onboarding. Não caçar economia em Supabase, Resend ou Vercel.</p>
+<p class="note">A revisão manteve os painéis de IA e a planilha de horas. Derrubou as travas no bot, porque podem calá-lo, e a troca do cartão, por causa do risco de inadimplência.</p>
+</div></details>
+
+<details><summary>Revisão cruzada (5 revisores, às cegas)</summary><div class="body">
+<p><b>Mais forte:</b> Contrarian com 4 votos, por ligar o custo a uma decisão já tomada (o excedente) e descontar o INSS. Pensador de Primeiros Princípios com 1 voto, pelo teto do corte e pela métrica de R$ por hora.</p>
+<p><b>Maior ponto cego:</b> Executor com 3 votos, Outsider com 1 e Expansionista com 1.</p>
+<p><b>Ângulos que cada revisor trouxe:</b> custo das mensagens da Meta do Leandrinho e concentração de receita; pró-labore mínimo derrubando a conta do imposto e saída do gpt-5 que pode zerar a resposta; incidente como custo e comparação de R$ por hora entre agência e CRM; precisão factual (commits novos e números sem fonte); PIX contra cartão e pró-labore zerado.</p>
+</div></details>
+
+<footer>Conselho rodado em 07/10/2026. Tema: reduzir custo para aumentar lucro. Cinco conselheiros independentes, cinco revisões anônimas e uma síntese, com a aritmética conferida e ajustada depois. Transcrição em <code>council-transcript-2026-10-07-lucro.md</code>. Sexto conselho do dia.</footer>
+</div>
+</body>
+</html>
