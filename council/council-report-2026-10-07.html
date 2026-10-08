@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conselho: CRM multi-nicho?</title>
+<style>
+  :root{
+    --bg:#ffffff; --ink:#1c1f24; --muted:#5d6570; --line:#e4e7eb; --soft:#f6f7f9;
+    --accent:#2f5bd3; --no:#b42318; --no-bg:#fdecea; --yes:#127a46; --yes-bg:#e6f4ec;
+    --mid:#9a6400; --mid-bg:#fff4dc;
+    --c1:#b42318; --c2:#5b3cc4; --c3:#127a46; --c4:#7a7f87; --c5:#c25e00;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:860px;margin:0 auto;padding:40px 20px 60px}
+  .eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+  h1{font-size:28px;line-height:1.25;margin:0 0 10px}
+  .q{color:var(--muted);margin:0 0 28px;font-style:italic}
+  .verdict{border:1px solid var(--line);border-left:5px solid var(--no);border-radius:10px;
+    padding:22px 24px;background:var(--soft);margin-bottom:28px}
+  .verdict .big{font-size:22px;font-weight:700;margin:0 0 8px}
+  .verdict p{margin:0 0 10px}
+  .first{border:1px solid #cbd7f7;background:#eef3ff;border-radius:10px;padding:18px 22px;margin:0 0 32px}
+  .first h3{margin:0 0 6px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+  .first p{margin:0}
+  h2{font-size:19px;margin:36px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+  ul{padding-left:20px;margin:8px 0} li{margin:4px 0}
+  .gates{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:12px 0}
+  .gate{border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+  .gate b{display:block;font-size:22px;color:var(--accent);line-height:1.1;margin-bottom:4px}
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+  table{border-collapse:collapse;width:100%;min-width:640px;font-size:14px}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--soft);font-weight:600;font-size:13px}
+  tr:last-child td{border-bottom:0}
+  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap}
+  .no{background:var(--no-bg);color:var(--no)} .yes{background:var(--yes-bg);color:var(--yes)}
+  .mid{background:var(--mid-bg);color:var(--mid)}
+  .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:1px}
+  details{border:1px solid var(--line);border-radius:10px;margin:10px 0;background:#fff}
+  summary{cursor:pointer;padding:13px 16px;font-weight:600;list-style:none}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:"+";float:right;color:var(--muted);font-weight:400}
+  details[open] summary::after{content:"–"}
+  details .body{padding:0 18px 16px;border-top:1px solid var(--line)}
+  details .body p{margin:12px 0}
+  .tag{font-weight:400;color:var(--muted);font-size:13px;margin-left:6px}
+  .note{font-size:13px;color:var(--muted)}
+  footer{margin-top:44px;padding-top:14px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="eyebrow">Conselho · 07/10/2026</p>
+<h1>Transformar o CRM + bot de concessionária em CRM multi-nicho?</h1>
+<p class="q">“pense sobre a ideia de transformar esse crm+bot em um crm para varios nichos e não so de concessionaria”</p>
+
+<div class="verdict">
+  <p class="big">Não, por enquanto. E nenhuma linha de refatoração para isso.</p>
+  <p>O conselho votou 5 a 0 contra virar multi-nicho agora. Até quem defendia expandir limitou a ideia a verticais que também têm estoque, um de cada vez. A pergunta que importa não é “quantos nichos?”. É “<b>isto vende sem desconto, para quem não conhece o João?</b>” Hoje a resposta é desconhecida: são 2 clientes, os dois isentos, e nenhuma venda pela tabela.</p>
+  <p>O valor do produto está no domínio: estoque ao vivo no bot, FIPE e placa, lista de espera e atribuição do anúncio até a venda. Virar genérico joga isso fora e deixa só o que Kommo, Blip e ChatGuru também têm.</p>
+</div>
+
+<div class="first">
+  <h3>A primeira coisa a fazer</h3>
+  <p>Esta semana, cruze as conversas da DSC desde agosto com as vendas que a loja fechou, resolvendo na mão os casos em que comprou outra pessoa da casa. Monte uma página com <b>“R$ X pagos → Y vendas atribuídas ao bot → R$ Z de margem para a loja”</b>. Ela serve para três coisas: segura a renovação da DSC, vira material de venda para as próximas lojas e responde se o cliente paga pelo software ou por você.</p>
+</div>
+
+<h2>Quando reabrir a decisão</h2>
+<p>As três condições são obrigatórias:</p>
+<div class="gates">
+  <div class="gate"><b>10 lojas</b>pagando a tabela por 3 meses seguidos, sendo pelo menos 3 sem relação prévia com a Amply</div>
+  <div class="gate"><b>&lt; 2 h</b>de onboarding por cliente, feito sem você colocar a mão</div>
+  <div class="gate"><b>1 pedido</b>de um vertical vizinho com estoque (moto 0km, náutica, máquinas, caminhão), com cliente disposto a pagar</div>
+</div>
+<p class="note">Com as três atendidas: entrar em <b>um</b> vertical e só então fazer a refatoração já mapeada (tabela <code>sales</code> separada, <code>cars</code> → itens com atributos por vertical). Se as lojas novas só fecharem quando levam os anúncios junto, o negócio é serviço com software próprio, e aí o preço é que precisa mudar, não o nicho.</p>
+
+<h2>Onde cada conselheiro ficou</h2>
+<div class="tablewrap">
+<table>
+  <thead><tr><th>Conselheiro</th><th>Multi-nicho agora?</th><th>Próximo passo que defende</th><th>Se expandir, para onde</th></tr></thead>
+  <tbody>
+    <tr><td><span class="dot" style="background:var(--c1)"></span>Contrarian</td><td><span class="pill no">Não</span></td><td>Vender 10 lojas de carro primeiro</td><td>—</td></tr>
+    <tr><td><span class="dot" style="background:var(--c2)"></span>Primeiros Princípios</td><td><span class="pill no">Não</span> pergunta errada</td><td>5 lojas pela tabela em 60 dias + onboarding sem o João</td><td>Vizinho de estoque</td></tr>
+    <tr><td><span class="dot" style="background:var(--c3)"></span>Expansionista</td><td><span class="pill mid">Sim, com recorte</span></td><td>Plataforma vertical + white-label para agências</td><td>Imobiliária, náutica, máquinas, moto 0km</td></tr>
+    <tr><td><span class="dot" style="background:var(--c4)"></span>Outsider</td><td><span class="pill no">Não</span></td><td>Vender 5 contas pela tabela</td><td>UM vertical com estoque</td></tr>
+    <tr><td><span class="dot" style="background:var(--c5)"></span>Executor</td><td><span class="pill no">Não refatorar</span></td><td>Cobrar tabela + campanha de R$300 + teste por prompt</td><td>Teste barato com cliente da agência</td></tr>
+  </tbody>
+</table>
+</div>
+<p class="note">Revisão cruzada: os 5 revisores (às cegas) escolheram o <b>Pensador de Primeiros Princípios</b> como resposta mais forte e o <b>Expansionista</b> como a de maior ponto cego.</p>
+
+<h2>Onde o conselho concorda</h2>
+<ul>
+  <li><b>Ninguém pagou a tabela ainda.</b> Se um lojista desconhecido não paga R$1.497, cinco nichos vão dar cinco “nãos”.</li>
+  <li><b>O gargalo é você, não o mercado.</b> Onboarding na Meta, bot mudo e incidentes caem todos numa pessoa só. O mercado real é limitado pelas suas horas de suporte.</li>
+  <li><b>Refatorar agora ameaça a DSC.</b> São cerca de 35 arquivos, a tabela <code>cars</code> e migrations fora de sincronia, e a DSC é o único caso de sucesso.</li>
+  <li><b>O fosso é o domínio.</b> A infraestrutura (canal Meta, CAPI, cobrança, multi-tenant) já é genérica e foi a parte cara. O que o cliente percebe como “entende meu negócio” é o que é específico de veículo.</li>
+</ul>
+
+<h2>Onde diverge</h2>
+<ul>
+  <li><b>Expansionista × resto:</b> ele vê uma plataforma de venda de bens caros pelo WhatsApp, com white-label para agências e “fosso de dados”. Os revisores responderam que white-label multiplica justamente o onboarding na Meta, e que uma venda atribuída não forma fosso nenhum.</li>
+  <li><b>Executor × Contrarian e Outsider:</b> o Executor quer um teste em outro nicho já, com prompt reescrito à mão e sem mexer no schema. Os outros dois querem provar o vertical de carros antes.</li>
+</ul>
+
+<h2>Pontos cegos que só a revisão pegou</h2>
+<ul>
+  <li><b>SaaS ou agência?</b> Os dois clientes vieram da Amply. A DSC pode estar pagando por você (anúncio, ajuste e suporte) e não pelo software. Nesse caso o produto é o pacote “anúncio + bot + atribuição”, talvez cobrado por venda atribuída.</li>
+  <li><b>Concentração:</b> a DSC é quase toda a receita, o único case e a única prova de atribuição. Ninguém propôs protegê-la.</li>
+  <li><b>O teste do vizinho já existe:</b> o Leandrinho é loja de motos e não adotou o bot, e o schema nem cobre moto 0km sem separar a venda do veículo.</li>
+  <li><b>Margem por hora:</b> R$1,24 por conversa é pouco perto das suas horas de onboarding e incidente.</li>
+  <li><b>Risco de plataforma:</b> a Meta restringe chatbot de IA de uso geral na API do WhatsApp. Isso pesa contra o bot genérico e a favor do bot especializado. <span class="note">(Confira os termos atuais.)</span></li>
+  <li><b>Correção ao Executor:</b> para o Leandrinho, o teste é sair do isento e pagar o plano CRM de R$800, não o plano com bot.</li>
+</ul>
+
+<h2>Respostas completas</h2>
+
+<details><summary><span class="dot" style="background:var(--c1)"></span>O Contrarian <span class="tag">“venda 10 lojas de carro primeiro”</span></summary><div class="body">
+<p>A falha fatal é esta: você quer multiplicar o mercado sem ter provado que vende para o mercado que já tem. São 2 clientes, os dois com preço "isento/personalizado" e nenhuma venda pela tabela pública. Ainda não existe um produto validado para generalizar. O que existe é uma hipótese que funcionou duas vezes com preço camarada. Ir para multi-nicho agora é fugir da pergunta que dói: "um lojista que eu não conheço paga R$1.497 pela tabela?" Se a resposta for não, cinco nichos vão dar cinco "nãos".</p>
+<p>Segundo problema: o gargalo não é mercado, é você. Onboarding da Meta cheio de armadilhas, bot que fica mudo sem erro e incidentes de produção recentes. Tudo isso cai numa pessoa só. Cada nicho novo traz clientes com outro vocabulário, outro funil e outras expectativas de suporte. Com dez clínicas e dez imobiliárias você não escala, você afoga.</p>
+<p>Terceiro problema: a refatoração. São 35 de 50 arquivos, 190 menções no prompt e a tabela <code>cars</code> no centro. Você vai quebrar a DSC, que é o único caso de sucesso real, para atender clientes que ainda nem existem.</p>
+<p>Quarto problema: lá fora você vira commodity. Sua única vantagem é o bot entender carro: FIPE, lista de espera, estoque ao vivo e venda atribuída. Generalizar é jogar fora o único fosso que você tem.</p>
+<p>As perguntas que você está evitando: quantas lojas de veículos você abordou pela tabela e quantas recusaram, e por quê? Algum cliente de outro nicho pediu isso, com dinheiro na mão, ou é especulação? Se não tem um cliente pagante de fora esperando, a resposta é não.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c2)"></span>O Pensador de Primeiros Princípios <span class="tag">eleito o mais forte</span></summary><div class="body">
+<p><b>A pergunta está errada.</b> "Multi-nicho ou não" é uma pergunta de arquitetura. O problema real é outro: ninguém pagou pela tabela ainda. Multiplicar o mercado endereçável por 10 não serve de nada quando a taxa de conversão medida é zero.</p>
+<p>O que você vende não é CRM, que é commodity. O ativo é um <b>bot que vende consultando estoque em tempo real</b>, com atribuição de anúncio fechando o ciclo até a venda. Separando assim, o acoplamento a veículo se divide em duas coisas. A <b>infraestrutura genérica</b> (canal Meta aprovado, coexistência, disparos, CAPI, cobrança, multi-tenant) já é agnóstica de nicho e foi a parte cara. O <b>conhecimento do domínio</b> (FIPE, placa, lista de espera, test-drive) é o que o cliente percebe como "entende meu negócio". Multi-nicho joga fora o segundo e vende o primeiro, justamente a parte que os concorrentes também têm.</p>
+<p>Você é o gargalo de onboarding. Para um fundador solo, o mercado endereçável real é limitado pelas horas de suporte, não pelo número de segmentos.</p>
+<p>As perguntas certas são duas. Consigo vender <b>5 lojas de veículos pela tabela</b> em 60 dias, usando a gestão de anúncios como canal de entrada? O onboarding pode deixar de depender de mim? Se a primeira falhar com o nicho que você domina, trocar de nicho não conserta. Se der certo, o próximo nicho é o "vizinho de estoque", não clínica.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c3)"></span>O Expansionista <span class="tag">maior ponto cego, segundo a revisão</span></summary><div class="body">
+<p><b>O ativo que vale mais é o encanamento da Meta.</b> Você tem App Review aprovado, coexistência funcionando e o caminho anúncio → conversa → venda fechado com <code>ctwa_clid</code> → CAPI. Kommo, RD, Blip e ChatGuru vendem caixa de entrada. Nenhum deles prova ao dono da loja que aquele real de anúncio virou aquela venda. E você ainda gerencia os anúncios.</p>
+<p><b>1. Verticais com estoque, não qualquer nicho.</b> Imobiliária, náutica, máquina agrícola, moto 0km, caminhão. A tabela <code>cars</code> vira itens com atributos por vertical, e o prompt vira um pacote de vertical. Imobiliária é o passo natural: ticket maior, portais ZAP e VivaReal, financiamento junto.</p>
+<p><b>2. A agência como canal.</b> Cada cliente de anúncio é um cliente do bot com custo de aquisição zero. Um white-label "bot + atribuição" para outras agências de tráfego.</p>
+<p><b>3. O dado de atribuição como fosso.</b> Com N lojas mandando vendas pela CAPI, você sabe qual criativo vende carro, imóvel ou moto.</p>
+<p>O movimento grande é virar uma plataforma vertical de venda de bens de alto valor pelo WhatsApp, com atribuição embutida, abrindo um vertical por vez.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c4)"></span>O Outsider <span class="tag">“ninguém compra ‘CRM multi-nicho’”</span></summary><div class="body">
+<p>Olhando de fora: você não tem um produto de concessionária pronto para generalizar. A pergunta parte de uma premissa que não está provada, a de que o nicho atual já foi vencido.</p>
+<p><b>1.</b> R$1.497 a R$2.497 por mês é só um número no site. Antes de procurar dono de clínica, descubra se o terceiro lojista de carro paga. <b>2.</b> Seu diferencial só faz sentido para quem é do ramo. Para uma academia você vira "mais um", e mais caro. <b>3.</b> Token, WABA e bot mudo são operação, não produto, e cada nicho multiplica isso. <b>4.</b> Ninguém acorda querendo um "CRM multi-nicho". O lojista quer vender mais carro pelo WhatsApp, e você já prova isso com o caso do Celta que virou Sandero.</p>
+<p>Próximo passo: vender 5 contas pela tabela para lojas de veículos. Se der certo, escolha um segundo vertical específico, com estoque.</p>
+</div></details>
+
+<details><summary><span class="dot" style="background:var(--c5)"></span>O Executor <span class="tag">“segunda você não mexe numa linha”</span></summary><div class="body">
+<p>Generalizar leva de 2 a 3 meses sem cliente esperando do outro lado, e nesse tempo a DSC vai ter incidente sem você olhando. Plano da semana:</p>
+<ul>
+<li><b>Segunda:</b> o Leandrinho sai do isento e passa a pagar a tabela. <span class="note">(Correção da revisão: o plano CRM de R$800, já que ele não usa o bot.)</span></li>
+<li><b>Terça e quarta:</b> campanha de R$300 para lojas de seminovos de uma região, usando a venda da DSC como argumento. Meta: 3 demos.</li>
+<li><b>Quinta:</b> se algum cliente da agência for de outro nicho, ofereça o bot grátis por 30 dias com o prompt reescrito à mão, sem tocar no schema.</li>
+<li><b>Sexta:</b> confira o resultado. Só vale abstrair o que esse cliente realmente usou.</li>
+</ul>
+<p>Multi-nicho é decisão para quando houver 10 clientes pagando a tabela.</p>
+</div></details>
+
+<details><summary>Revisão cruzada (5 revisores, às cegas)</summary><div class="body">
+<p><b>Mais forte:</b> Primeiros Princípios, 5 de 5 votos. É a única resposta que separa a infraestrutura genérica do conhecimento de domínio e aponta o onboarding como teto do negócio. O Executor foi citado como o melhor complemento prático.</p>
+<p><b>Maior ponto cego:</b> Expansionista, 5 de 5 votos. Propõe plataforma e white-label sem nenhuma venda pela tabela, com o fundador já afogado em suporte, e cada agência parceira multiplica o onboarding na Meta.</p>
+<p><b>O que todos deixaram passar:</b></p>
+<ul>
+<li>SaaS ou agência? Levantado por 4 de 5 revisores.</li>
+<li>Concentração de receita na DSC. Levantado por 4 de 5.</li>
+<li>O Leandrinho como teste do vizinho, que não adotou o bot.</li>
+<li>Margem por hora do fundador.</li>
+<li>Restrição da Meta a bots de IA de uso geral e a IA nativa dela.</li>
+<li>Tamanho do mercado de revendas: dezenas de milhares no Brasil.</li>
+<li>Os dados de ROI da DSC, que já existem e só precisam ser cruzados.</li>
+</ul>
+</div></details>
+
+<footer>Conselho rodado em 07/10/2026. Tema: transformar o CRM + bot de concessionária (Amply) em CRM multi-nicho. Cinco conselheiros independentes, cinco revisões anônimas e uma síntese. Transcrição completa em <code>council-transcript-2026-10-07.md</code>.</footer>
+</div>
+</body>
+</html>

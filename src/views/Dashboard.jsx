@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import PrimeirosPassos from './PrimeirosPassos.jsx';
+import ResultadosAssistente from './ResultadosAssistente.jsx';
 import { supabase } from '../lib/supabase.js';
 
 const STATUS_LABELS = {
@@ -343,6 +344,12 @@ const Dashboard = () => {
                 "aqui não acontece nada". A lista diz o que fazer para que
                 acontecam. Some sozinha quando os quatro passos estiverem feitos. */}
             <PrimeirosPassos />
+
+            {/* Logo abaixo da lista de tarefas e ACIMA das metricas de operacao:
+                a lista diz o que falta fazer, este painel diz o que ja foi
+                feito por conta propria. Some sozinho para quem nao tem
+                assistente contratado. */}
+            <ResultadosAssistente />
 
             {/* ── Métricas principais ──────────────────────────────────────── */}
             <div className="metrics-grid">
