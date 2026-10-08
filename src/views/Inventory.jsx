@@ -628,7 +628,9 @@ const SellModal = ({ car, onClose, onConfirm }) => {
     // realmente os tem em maos. Pedir depois significa nao pedir.
     const [comprador, setComprador] = useState({
         buyer_name: '', buyer_cpf: '', buyer_rg: '',
-        buyer_address: '', buyer_phone: '', payment_terms: '',
+        buyer_address: '', buyer_numero: '', buyer_bairro: '',
+        buyer_municipio: '', buyer_uf: '', buyer_cep: '',
+        buyer_phone: '', payment_terms: '',
         buyer_email: '', buyer_birth_date: '',
         trade_in_plate: '', trade_in_brand: '', trade_in_model: '', trade_in_year: '',
         trade_in_color: '', trade_in_chassi: '', trade_in_renavam: '',
@@ -652,7 +654,43 @@ const SellModal = ({ car, onClose, onConfirm }) => {
     const setV = (campo, valor) => setVeiculo((v) => ({ ...v, [campo]: valor }));
     const faltando = Object.entries(veiculo).filter(([, v]) => !String(v ?? '').trim()).length;
     const [erroCpf, setErroCpf] = useState('');
+    const [buscandoCep, setBuscandoCep] = useState(false);
     const [buscandoTroca, setBuscandoTroca] = useState(false);
+
+    // CEP preenche o resto do endereco.
+    //
+    // A nota fiscal exige logradouro, numero, bairro, municipio, UF e CEP
+    // separados — seis campos que ninguem digita no fim de uma venda. Com a
+    // busca, o vendedor digita UM e confere cinco, que e a diferenca entre o
+    // campo ser preenchido e nao ser.
+    //
+    // A UF importa mais que as outras: e ela que define a tributacao da
+    // operacao. Vinda do CEP, ela vem certa.
+    const buscarCep = async (valor) => {
+        const cep = String(valor ?? '').replace(/\D/g, '');
+        if (cep.length !== 8) return;
+        setBuscandoCep(true);
+        try {
+            const r = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+            const d = await r.json();
+            if (d?.erro) return;
+            setComprador((c) => ({
+                ...c,
+                // Nao sobrescreve o que o vendedor ja digitou: ele pode ter
+                // corrigido algo que o CEP traz errado, e desfazer isso seria
+                // pior que nao preencher.
+                buyer_address:   c.buyer_address   || d.logradouro || '',
+                buyer_bairro:    c.buyer_bairro    || d.bairro     || '',
+                buyer_municipio: c.buyer_municipio || d.localidade || '',
+                buyer_uf:        c.buyer_uf        || d.uf         || '',
+            }));
+        } catch {
+            // CEP fora do ar nao pode travar uma venda: os campos continuam
+            // editaveis a mao.
+        } finally {
+            setBuscandoCep(false);
+        }
+    };
     const [erroTroca, setErroTroca] = useState('');
 
     if (!car) return null;
@@ -757,10 +795,45 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                                     onChange={e => setC('buyer_rg', e.target.value)} />
                             </div>
                         </div>
-                        <div className="form-group">
-                            <label>Endereço</label>
-                            <input type="text" value={comprador.buyer_address}
-                                onChange={e => setC('buyer_address', e.target.value)} />
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            <div className="form-group" style={{ flex: '0 1 140px' }}>
+                                <label>CEP</label>
+                                <input type="text" value={comprador.buyer_cep}
+                                    placeholder="00000-000" inputMode="numeric"
+                                    onChange={e => { setC('buyer_cep', e.target.value); buscarCep(e.target.value); }}
+                                    onBlur={e => buscarCep(e.target.value)} />
+                                <small style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                                    {buscandoCep ? 'Buscando...' : 'Preenche o resto sozinho'}
+                                </small>
+                            </div>
+                            <div className="form-group" style={{ flex: '2 1 220px' }}>
+                                <label>Endereço</label>
+                                <input type="text" value={comprador.buyer_address}
+                                    onChange={e => setC('buyer_address', e.target.value)} />
+                            </div>
+                            <div className="form-group" style={{ flex: '0 1 100px' }}>
+                                <label>Número</label>
+                                <input type="text" value={comprador.buyer_numero}
+                                    onChange={e => setC('buyer_numero', e.target.value)} />
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                            <div className="form-group" style={{ flex: '1 1 160px' }}>
+                                <label>Bairro</label>
+                                <input type="text" value={comprador.buyer_bairro}
+                                    onChange={e => setC('buyer_bairro', e.target.value)} />
+                            </div>
+                            <div className="form-group" style={{ flex: '1 1 160px' }}>
+                                <label>Cidade</label>
+                                <input type="text" value={comprador.buyer_municipio}
+                                    onChange={e => setC('buyer_municipio', e.target.value)} />
+                            </div>
+                            <div className="form-group" style={{ flex: '0 1 90px' }}>
+                                <label>UF</label>
+                                <input type="text" maxLength={2} value={comprador.buyer_uf}
+                                    onChange={e => setC('buyer_uf', e.target.value.toUpperCase())} />
+                            </div>
                         </div>
                         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                             <div className="form-group" style={{ flex: '1 1 150px' }}>

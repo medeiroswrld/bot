@@ -1144,6 +1144,14 @@ export const AppProvider = ({ children }) => {
             buyer_cpf: String(comprador.buyer_cpf ?? '').replace(/\D/g, '') || null,
             buyer_rg: comprador.buyer_rg || null,
             buyer_address: comprador.buyer_address || null,
+            // Endereço em partes, além do texto corrido. O contrato usa a linha
+            // inteira; a nota fiscal exige os pedaços separados, e a UF é o que
+            // define a tributação da operação.
+            buyer_numero: comprador.buyer_numero || null,
+            buyer_bairro: comprador.buyer_bairro || null,
+            buyer_municipio: comprador.buyer_municipio || null,
+            buyer_uf: comprador.buyer_uf ? String(comprador.buyer_uf).toUpperCase() : null,
+            buyer_cep: String(comprador.buyer_cep ?? '').replace(/\D/g, '') || null,
             buyer_phone: comprador.buyer_phone || null,
             payment_terms: comprador.payment_terms || null,
             buyer_email: comprador.buyer_email || null,
