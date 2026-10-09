@@ -606,6 +606,7 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
         // conversa espere um humano de verdade, e assumir isso pelo cliente
         // seria o bot atropelando um atendimento em andamento.
         devolver: false, devolverMin: 15,
+        followup: false, followupHoras: 3, followupMsg: '',
     });
     const [bloqueados, setBloqueados] = useState([]);
     const [novoBloqueio, setNovoBloqueio] = useState('');
@@ -637,6 +638,10 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                 // so foi buscar uma informacao, e a varredura roda de 5 em 5 —
                 // prometer 2 minutos seria promessa que o cron nao cumpre.
                 auto_return_minutes: Math.max(5, Number(botCfg.devolverMin) || 15),
+                followup_enabled: botCfg.followup === true,
+                // 1h e o minimo util: menos que isso o cliente ainda esta lendo.
+                followup_horas: Math.min(20, Math.max(1, Number(botCfg.followupHoras) || 3)),
+                followup_mensagem: botCfg.followupMsg.trim() || null,
                 bot_blocked_numbers: bloqueados,
                 updated_at: new Date().toISOString(),
             })
@@ -783,6 +788,9 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
             fim:    String(s.bot_end   ?? '18:00').slice(0, 5),
             devolver: s.auto_return_enabled === true,
             devolverMin: Number(s.auto_return_minutes ?? 15),
+            followup: s.followup_enabled === true,
+            followupHoras: Number(s.followup_horas ?? 3),
+            followupMsg: s.followup_mensagem ?? '',
         });
         setBloqueados(Array.isArray(s.bot_blocked_numbers) ? s.bot_blocked_numbers : []);
         // Equipe e contatos por setor
@@ -1861,6 +1869,66 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                                     Conta a partir da última mensagem da conversa. Se o cliente
                                     estiver esperando, o bot responde na hora que retomar.
                                 </p>
+                            </div>
+                        )}
+
+                        {/* Follow-up.
+                            Fica junto do "devolver ao bot" porque os dois tratam
+                            do mesmo assunto: conversa que parou. Aquele cobre o
+                            atendente que sumiu; este, o cliente. */}
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 14,
+                                      paddingTop: 14, borderTop: '1px solid var(--border)',
+                                      opacity: botCfg.enabled ? 1 : 0.45 }}>
+                            <button type="button" disabled={!botCfg.enabled}
+                                onClick={() => setBotCfg(b => ({ ...b, followup: !b.followup }))}
+                                title={botCfg.followup ? 'Desativar' : 'Ativar'}
+                                style={{ background: 'none', border: 'none', padding: 0, flexShrink: 0,
+                                         cursor: botCfg.enabled ? 'pointer' : 'not-allowed',
+                                         color: botCfg.followup ? '#10b981' : '#94a3b8' }}>
+                                {botCfg.followup ? <ToggleRight size={26} /> : <ToggleLeft size={26} />}
+                            </button>
+                            <div>
+                                <span style={{ fontSize: '0.9rem', fontWeight: 500 }}>
+                                    Voltar a falar com quem parou de responder
+                                </span>
+                                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                                    O cliente pergunta do carro, recebe as fotos e some. O assistente
+                                    puxa o assunto <strong>uma vez</strong> e para por aí — e só com quem
+                                    conversou de verdade, nunca com quem mandou só &quot;oi&quot;.
+                                    Não custa nada: é mensagem comum, dentro das 24h.
+                                </p>
+                            </div>
+                        </div>
+
+                        {botCfg.enabled && botCfg.followup && (
+                            <div style={{ marginTop: 10 }}>
+                                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end',
+                                              flexWrap: 'wrap', marginBottom: 10 }}>
+                                    <div className="form-group" style={{ flex: '0 1 150px', marginBottom: 0 }}>
+                                        <label>Depois de quantas horas</label>
+                                        <input type="number" min="1" max="20" value={botCfg.followupHoras}
+                                            onChange={e => setBotCfg(b => ({ ...b, followupHoras: e.target.value }))} />
+                                    </div>
+                                    <p style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)',
+                                                flex: '1 1 220px', margin: '0 0 4px' }}>
+                                        Conta da última mensagem <strong>do cliente</strong>. Acima de 20h não
+                                        dá: o WhatsApp e o Instagram fecham a conversa em 24h, e depois disso
+                                        só passa mensagem paga.
+                                    </p>
+                                </div>
+
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                    <label>O que ele vai mandar</label>
+                                    <textarea rows={2} value={botCfg.followupMsg}
+                                        onChange={e => setBotCfg(b => ({ ...b, followupMsg: e.target.value }))}
+                                        placeholder="E aí, o que achou? Se bateu alguma dúvida sobre o carro, é só me chamar por aqui."
+                                        style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+                                    <p style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)',
+                                                marginTop: 4, lineHeight: 1.5 }}>
+                                        Em branco usa o texto do exemplo. É sempre a mesma frase — se o
+                                        cliente responder, o assistente volta a conversar normalmente.
+                                    </p>
+                                </div>
                             </div>
                         )}
 
