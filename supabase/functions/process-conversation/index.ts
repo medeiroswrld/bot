@@ -1599,8 +1599,21 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
     type CarRow = { id: string; brand: string | null; model: string | null; specs_image_url: string | null; video_url: string | null };
     let car: CarRow | null = null;
 
+    // O modelo manda o NOME no campo do id com frequência.
+    //
+    // Visto em produção: `car_id = "Chevrolet Onix 1.4 LTZ"`. Como `id` é uuid,
+    // o PostgREST devolve 400, o plano B só rodava quando `marca`/`modelo`
+    // vinham preenchidos — e nesse turno não vieram. Resultado: o bot disse
+    // "tive um probleminha técnico pra puxar o vídeo" com o nome do carro na
+    // mão o tempo todo, no campo errado.
+    //
+    // Conferir o formato antes evita o 400 e, melhor, aproveita o texto.
+    const ehUuid = (v: string) =>
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.trim());
+    const carIdEhTexto = Boolean(carId) && !ehUuid(String(carId));
+
     // 1. Busca pelo id (só do dono do bot)
-    if (carId) {
+    if (carId && !carIdEhTexto) {
       const { data, error: carErr } = await supabase
         .from('cars')
         .select(CAR_COLS)
@@ -1633,6 +1646,44 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
           action: 'enviar_midia_carro', carId, marca, modelo,
           recoveredCarId: car.id, matches: matches.length,
         });
+      }
+    }
+
+    // 1c. Plano C: sobrou texto em algum campo — acha pelo nome.
+    //
+    // Pontua os carros ativos da loja pelas palavras que batem em
+    // marca/modelo/versão, em vez de um `ilike` na frase inteira: "Chevrolet
+    // Onix 1.4 LTZ" nunca casaria com `model = 'ONIX '` num LIKE direto, e é
+    // exatamente assim que o modelo escreve.
+    if (!car) {
+      const texto = [carIdEhTexto ? String(carId) : '', marca ?? '', modelo ?? '']
+        .join(' ').toLowerCase().trim();
+      const palavras = texto.split(/[^0-9a-zà-ÿ.]+/i).filter((w) => w.length >= 2);
+
+      if (palavras.length) {
+        const { data: ativos } = await supabase
+          .from('cars')
+          .select('id, brand, model, version, specs_image_url, video_url, user_id')
+          .eq('user_id', userId)
+          .in('status', ['available', 'reserved'])
+          .limit(200);
+
+        let melhor: { row: CarRow; pontos: number } | null = null;
+        for (const linha of (ativos ?? []) as Array<CarRow & { version?: string | null }>) {
+          const alvo = [linha.brand, linha.model, linha.version]
+            .filter(Boolean).join(' ').toLowerCase();
+          const pontos = palavras.filter((w) => alvo.includes(w)).length;
+          if (pontos > (melhor?.pontos ?? 0)) melhor = { row: linha as CarRow, pontos };
+        }
+
+        // Duas palavras é o piso: uma só casa "Chevrolet" com meia loja.
+        if (melhor && melhor.pontos >= 2) {
+          car = melhor.row;
+          log.warn('carro recuperado pelo NOME vindo no campo do id', {
+            action: 'enviar_midia_carro', carId, marca, modelo,
+            recoveredCarId: car.id, pontos: melhor.pontos,
+          });
+        }
       }
     }
 
