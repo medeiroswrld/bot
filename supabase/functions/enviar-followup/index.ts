@@ -92,7 +92,7 @@ Deno.serve(async (req) => {
     tokenSocial: Record<string, string>;
   }>();
 
-  let enviados = 0, pulados = 0;
+  let enviados = 0, pulados = 0, deVendedor = 0;
 
   for (const c of candidatas) {
     const userId = String(c.user_id);
@@ -175,13 +175,30 @@ Deno.serve(async (req) => {
     // Marca ANTES de contar: se algo falhar depois daqui, o pior caso é o
     // follow-up não ter saído. O contrário — marcar depois e falhar — mandaria
     // a mesma mensagem de novo na próxima rodada.
-    await supabase.from('conversations')
-      .update({ followup_em: new Date().toISOString(), last_message_at: new Date().toISOString() })
-      .eq('id', c.conversation_id);
+    const agora = new Date().toISOString();
+    const mudanca: Record<string, unknown> = { followup_em: agora, last_message_at: agora };
+
+    // Quem puxa o assunto assume a conversa.
+    //
+    // Numa conversa em `human` o assistente não responde. Mandar o follow-up e
+    // deixar o status como estava criaria uma armadilha: o cliente recebe "e
+    // aí, o que achou?", responde — e ninguém atende. Isso é pior que não ter
+    // mandado nada, porque gasta a boa vontade dele e confirma que a loja não
+    // responde.
+    //
+    // Não é atropelar o vendedor: a régua dele é mais longa justamente para
+    // cobrir o caso de ele ainda estar trabalhando o lead. Chegar aqui
+    // significa que já faz horas que ninguém fala.
+    if (String(c.status ?? '') === 'human') mudanca.status = 'bot';
+
+    await supabase.from('conversations').update(mudanca).eq('id', c.conversation_id);
 
     enviados++;
+    if (String(c.status ?? '') === 'human') deVendedor++;
   }
 
-  console.log('[followup] rodada concluída', { candidatas: candidatas.length, enviados, pulados });
-  return json({ candidatas: candidatas.length, enviados, pulados });
+  console.log('[followup] rodada concluída', {
+    candidatas: candidatas.length, enviados, pulados, deVendedor,
+  });
+  return json({ candidatas: candidatas.length, enviados, pulados, de_vendedor: deVendedor });
 });

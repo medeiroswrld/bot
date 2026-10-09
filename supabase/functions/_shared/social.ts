@@ -191,16 +191,18 @@ export async function miniaturaDoStory(
 }
 
 /** Envia uma imagem por URL. */
-export async function enviarImagemSocial(
+/** Imagem e vídeo só diferem no `type`. O resto do caminho é o mesmo. */
+async function enviarAnexoSocial(
   contaId: string,
   para: string,
   url: string,
   token: string,
-  canal: CanalSocial = 'instagram',
+  canal: CanalSocial,
+  tipo: 'image' | 'video',
 ): Promise<{ ok: boolean; erro?: string; mid?: string }> {
   const corpo = JSON.stringify({
     recipient: { id: para },
-    message: { attachment: { type: 'image', payload: { url, is_reusable: true } } },
+    message: { attachment: { type: tipo, payload: { url, is_reusable: true } } },
     messaging_type: 'RESPONSE',
   });
 
@@ -212,7 +214,7 @@ export async function enviarImagemSocial(
       body: corpo,
     });
     if (res.ok) {
-      // O mid tambem e necessario aqui, nao so no texto: cada foto enviada gera
+      // O mid tambem e necessario aqui, nao so no texto: cada anexo enviado gera
       // um eco, e eco nao reconhecido marca a conversa como humana. Com 7 fotos,
       // o bot se entregava pro atendente sozinho.
       const j = await res.json().catch(() => ({})) as { message_id?: string };
@@ -221,6 +223,60 @@ export async function enviarImagemSocial(
     ultimoErro = `HTTP ${res.status} em ${host}: ${(await res.text()).slice(0, 250)}`;
   }
   return { ok: false, erro: ultimoErro };
+}
+
+export async function enviarImagemSocial(
+  contaId: string,
+  para: string,
+  url: string,
+  token: string,
+  canal: CanalSocial = 'instagram',
+): Promise<{ ok: boolean; erro?: string; mid?: string }> {
+  return await enviarAnexoSocial(contaId, para, url, token, canal, 'image');
+}
+
+/** Limite de anexo de vídeo no Direct e no Messenger, pela documentação da Meta. */
+const LIMITE_VIDEO_MB = 25;
+
+/**
+ * Vídeo no Instagram e no Messenger.
+ *
+ * ── Por que isto não existia ───────────────────────────────────────────────
+ *
+ * O caminho da foto ganhou o desvio de canal há tempos; o do vídeo não. O bot
+ * chamava o `sendVideo` do WhatsApp mesmo numa conversa de Instagram, onde o
+ * "telefone" é na verdade um IGSID — e falhava calado, depois de o bot já ter
+ * dito que ia mandar o vídeo. No envio pelo CRM o vídeo era simplesmente
+ * pulado. Dois caminhos, o mesmo sintoma para o lojista: "não manda vídeo".
+ *
+ * ── Por que a conferência de tamanho ──────────────────────────────────────
+ *
+ * A Meta recusa acima de 25MB, e vídeo de revenda passa disso com facilidade —
+ * é gente filmando o carro com o celular na mão. Sem esta conferência, a
+ * recusa volta como um HTTP 400 genérico e vira de novo uma falha sem
+ * explicação. Com ela, o log diz o motivo e o tamanho.
+ *
+ * O HEAD é best-effort: servidor que não responde `content-length` não impede
+ * a tentativa. Errar para o lado de TENTAR enviar é melhor que recusar o
+ * vídeo de quem está dentro do limite.
+ */
+export async function enviarVideoSocial(
+  contaId: string,
+  para: string,
+  url: string,
+  token: string,
+  canal: CanalSocial = 'instagram',
+): Promise<{ ok: boolean; erro?: string; mid?: string }> {
+  try {
+    const head = await fetch(url, { method: 'HEAD' });
+    const tam = Number(head.headers.get('content-length') ?? 0);
+    if (tam > LIMITE_VIDEO_MB * 1024 * 1024) {
+      const mb = (tam / 1024 / 1024).toFixed(1);
+      return { ok: false, erro: `vídeo de ${mb}MB passa do limite de ${LIMITE_VIDEO_MB}MB do ${canal}` };
+    }
+  } catch { /* sem content-length: tenta assim mesmo */ }
+
+  return await enviarAnexoSocial(contaId, para, url, token, canal, 'video');
 }
 
 /**

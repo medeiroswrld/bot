@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendMessageComId, sendImage, sendVideo, resolveWhatsAppToken, sendListaInterativa, sendCatalogo } from '../_shared/whatsapp.ts';
-import { enviarSocial, enviarImagemSocial } from '../_shared/social.ts';
+import { enviarSocial, enviarImagemSocial, enviarVideoSocial } from '../_shared/social.ts';
 import { maskName } from '../_shared/maskPII.ts';
 import { withRequest, type Logger } from '../_shared/logger.ts';
 import { botPodeResponder, COLUNAS_GUARDA } from '../_shared/botGuards.ts';
@@ -1748,11 +1748,28 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
     // 5. Vídeo depois
     if (mandarVideo && videoUrl) {
       try {
-        const ok = await sendVideo(customerPhone, videoUrl, pid, undefined, token, log);
+        // Mesmo desvio da foto, logo acima — e pela mesma razão. Esta linha
+        // chamava o `sendVideo` do WhatsApp em QUALQUER canal: numa conversa
+        // de Instagram o "telefone" é um IGSID, então a chamada ia pro Graph
+        // errado e falhava calada, depois de o bot já ter dito que ia mandar.
+        // Quem consertou o caminho da foto não desceu dez linhas.
+        let ok: boolean;
+        let midVideo: string | null = null;
+        if (ctxCanal === 'whatsapp') {
+          ok = await sendVideo(customerPhone, videoUrl, pid, undefined, token, log);
+        } else {
+          const r = await enviarVideoSocial(ctxContaId, customerPhone, videoUrl, ctxTokenSocial, ctxCanal as 'instagram' | 'messenger');
+          ok = r.ok;
+          // O eco do vídeo também volta, e eco não reconhecido marca a conversa
+          // como humana — o mesmo defeito que a galeria de fotos já causou.
+          midVideo = r.mid ?? null;
+          if (!r.ok) log.error('falha ao enviar vídeo no canal social', { action: 'enviar_midia_carro', erro: r.erro });
+        }
         if (ok) {
           sentItems.push('vídeo');
           await supabase.from('messages').insert({
             conversation_id: conversationId, role: 'bot', content: `[vídeo] ${videoUrl}`,
+            ...(midVideo ? { wa_message_id: midVideo } : {}),
           });
         }
       } catch (e) {

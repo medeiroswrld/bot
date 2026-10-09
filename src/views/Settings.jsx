@@ -607,6 +607,7 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
         // seria o bot atropelando um atendimento em andamento.
         devolver: false, devolverMin: 15,
         followup: false, followupHoras: 3, followupMsg: '',
+        followupVendedor: false, followupHorasVendedor: 5,
     });
     const [bloqueados, setBloqueados] = useState([]);
     const [novoBloqueio, setNovoBloqueio] = useState('');
@@ -642,6 +643,10 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                 // 1h e o minimo util: menos que isso o cliente ainda esta lendo.
                 followup_horas: Math.min(20, Math.max(1, Number(botCfg.followupHoras) || 3)),
                 followup_mensagem: botCfg.followupMsg.trim() || null,
+                // Nulo = nao faz follow-up em conversa de vendedor.
+                followup_horas_vendedor: botCfg.followupVendedor
+                    ? Math.min(20, Math.max(1, Number(botCfg.followupHorasVendedor) || 5))
+                    : null,
                 bot_blocked_numbers: bloqueados,
                 updated_at: new Date().toISOString(),
             })
@@ -791,6 +796,8 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
             followup: s.followup_enabled === true,
             followupHoras: Number(s.followup_horas ?? 3),
             followupMsg: s.followup_mensagem ?? '',
+            followupVendedor: s.followup_horas_vendedor != null,
+            followupHorasVendedor: Number(s.followup_horas_vendedor ?? 5),
         });
         setBloqueados(Array.isArray(s.bot_blocked_numbers) ? s.bot_blocked_numbers : []);
         // Equipe e contatos por setor
@@ -1915,6 +1922,42 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                                         dá: o WhatsApp e o Instagram fecham a conversa em 24h, e depois disso
                                         só passa mensagem paga.
                                     </p>
+                                </div>
+
+                                {/* Conversa que o vendedor assumiu e largou.
+                                    Dois tercos da base de uma loja real estao
+                                    nesse estado — deixar de fora era deixar de
+                                    fora a maior parte dos leads. */}
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10,
+                                              marginBottom: 12, paddingBottom: 12,
+                                              borderBottom: '1px solid var(--border)' }}>
+                                    <button type="button"
+                                        onClick={() => setBotCfg(b => ({ ...b, followupVendedor: !b.followupVendedor }))}
+                                        title={botCfg.followupVendedor ? 'Desativar' : 'Ativar'}
+                                        style={{ background: 'none', border: 'none', padding: 0, flexShrink: 0,
+                                                 cursor: 'pointer',
+                                                 color: botCfg.followupVendedor ? '#10b981' : '#94a3b8' }}>
+                                        {botCfg.followupVendedor ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
+                                    </button>
+                                    <div style={{ flex: 1 }}>
+                                        <span style={{ fontSize: '0.88rem', fontWeight: 500 }}>
+                                            Também quando quem falou por último foi um vendedor
+                                        </span>
+                                        <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', margin: '2px 0 0' }}>
+                                            O vendedor assumiu, respondeu e o cliente sumiu. Prazo maior
+                                            que o do assistente, porque pode ser que ele ainda volte ao
+                                            lead. <strong>Ao mandar, o assistente reassume a conversa</strong> —
+                                            senão o cliente responderia e ninguém atenderia.
+                                        </p>
+                                        {botCfg.followupVendedor && (
+                                            <div className="form-group" style={{ margin: '10px 0 0', maxWidth: 170 }}>
+                                                <label>Depois de quantas horas</label>
+                                                <input type="number" min="1" max="20"
+                                                    value={botCfg.followupHorasVendedor}
+                                                    onChange={e => setBotCfg(b => ({ ...b, followupHorasVendedor: e.target.value }))} />
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
 
                                 <div className="form-group" style={{ marginBottom: 0 }}>

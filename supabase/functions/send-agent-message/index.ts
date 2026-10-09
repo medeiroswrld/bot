@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
-import { enviarSocial, enviarImagemSocial } from '../_shared/social.ts';
+import { enviarSocial, enviarImagemSocial, enviarVideoSocial } from '../_shared/social.ts';
 import { buildCors } from '../_shared/cors.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
@@ -177,12 +177,26 @@ serve(async (req) => {
     }
 
     if (carro.video_url) {
-      // Video so no WhatsApp: os canais sociais aceitam video, mas por URL
-      // remota o comportamento varia e nao testei. Melhor nao mandar do que
-      // mandar quebrado.
-      const ok = ehSocial
-        ? false
-        : await sendVideo(fone, String(carro.video_url), pid || undefined, undefined, tk);
+      // Video nos canais sociais existe agora.
+      //
+      // Antes esta linha pulava o video quando o canal era social, com a nota
+      // de que o comportamento por URL remota nao tinha sido testado. A
+      // cautela era justa, mas o efeito era o vendedor mandar o carro pelo CRM
+      // no Instagram e o cliente receber as fotos sem o video, sem ninguem
+      // saber por que.
+      //
+      // `enviarVideoSocial` fecha isso: confere o limite de 25MB antes de
+      // tentar e devolve o motivo quando recusa, em vez de sumir em silencio.
+      let ok: boolean;
+      if (ehSocial) {
+        const r = await enviarVideoSocial(
+          contaSocial, fone, String(carro.video_url), tokenSocial, canal as 'instagram' | 'messenger',
+        );
+        ok = r.ok;
+        if (!ok) console.error('[SAM] falha ao enviar video social:', r.erro);
+      } else {
+        ok = await sendVideo(fone, String(carro.video_url), pid || undefined, undefined, tk);
+      }
       if (ok) await userClient.from('messages').insert({ conversation_id, role: 'agent', content: `[vídeo] ${carro.video_url}` });
     }
 
