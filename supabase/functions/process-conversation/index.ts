@@ -663,17 +663,32 @@ async function executeTool(
     const comFiltros = (q: any) => {
       if (input.marca)       q = q.ilike('brand', `%${input.marca}%`);
       if (input.modelo) {
-        // "T-Cross", "T Cross" e "TCross" são o mesmo carro pro cliente, mas o
-        // ilike é literal: bastava a loja ter cadastrado com espaço em vez de
-        // hífen pro bot dizer que não tinha. Casa com qualquer variante.
-        // Busca em `version` também, e não só em `model`.
+        // Procura por PALAVRA, não pela frase inteira.
         //
-        // O cliente pede pelo nome que a lataria tem: "GTX", "Highline",
-        // "Sport". Isso quase nunca está em `model` — está em `version`. Sem
-        // olhar essa coluna, "GTX" não achava o Vectra GT-X e o bot dizia que
-        // a loja não tinha um carro que estava no pátio.
-        const vs = variantesDeModelo(String(input.modelo));
-        q = q.or(vs.flatMap((v) => [`model.ilike.%${v}%`, `version.ilike.%${v}%`]).join(','));
+        // O cliente escreve o carro como fala — "Onix 1.4 LTZ" — e o banco
+        // guarda isso partido em `brand`, `model` e `version`. Procurar a frase
+        // inteira em cada coluna, uma de cada vez, nunca casa: ela atravessa
+        // duas delas. Medido em produção: "Onix" achava 4 carros,
+        // "Onix 1.4 LTZ" achava zero — e o assistente, depois de cinco buscas
+        // vazias seguidas, disse ao cliente que não conseguia puxar as fotos de
+        // um carro que estava no pátio.
+        //
+        // `busca_texto` (migration 111) junta as três colunas, e cada palavra
+        // vira uma condição. Chamadas `.or()` encadeadas o PostgREST combina
+        // com E — então é "tem Onix E tem 1.4 E tem LTZ", em qualquer campo.
+        //
+        // As variantes continuam, agora por palavra: "T-Cross", "T Cross" e
+        // "TCross" são o mesmo carro pro cliente, e bastava a loja ter
+        // cadastrado com espaço em vez de hífen pro bot dizer que não tinha.
+        const palavras = String(input.modelo)
+          .split(/\s+/)
+          .map((w) => w.trim())
+          .filter((w) => w.length >= 2);
+        const termos = palavras.length ? palavras : [String(input.modelo)];
+        for (const termo of termos) {
+          const vs = variantesDeModelo(termo);
+          q = q.or(vs.map((v) => `busca_texto.ilike.%${v}%`).join(','));
+        }
       }
       if (input.preco_min)   q = q.gte('price', Number(input.preco_min));
       if (input.preco_max)   q = q.lte('price', Number(input.preco_max));
