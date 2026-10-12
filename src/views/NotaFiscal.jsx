@@ -25,6 +25,13 @@ const NotaFiscal = () => {
   const [serie, setSerie]   = useState('');
   const [cfop, setCfop]     = useState('');
   const [token, setToken]   = useState('');
+  const [ncm, setNcm]           = useState('');
+  const [cst, setCst]           = useState('');
+  const [aliquota, setAliquota] = useState('');
+  const [reducao, setReducao]   = useState('');
+  const [modoBase, setModoBase] = useState('');
+  const [cfopTrib, setCfopTrib] = useState('');
+  const [infoComp, setInfoComp] = useState('');
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg]       = useState('');
 
@@ -37,6 +44,13 @@ const NotaFiscal = () => {
     setIe(companySettings.inscricao_estadual ?? '');
     setSerie(companySettings.nf_serie ?? '');
     setCfop(companySettings.nf_cfop ?? '');
+    setNcm(companySettings.nf_ncm ?? '');
+    setCst(companySettings.nf_cst ?? '');
+    setAliquota(companySettings.nf_icms_aliquota ?? '');
+    setReducao(companySettings.nf_icms_reducao_base ?? '');
+    setModoBase(companySettings.nf_base_modo ?? '');
+    setCfopTrib(companySettings.nf_cfop_tributado ?? '');
+    setInfoComp(companySettings.nf_info_complementar ?? '');
   }, [companySettings]);
 
   const gravar = async (campos) => {
@@ -60,6 +74,15 @@ const NotaFiscal = () => {
         inscricao_estadual: ie.trim() || null,
         nf_serie: serie ? Number(serie) : null,
         nf_cfop: cfop.trim() || null,
+        nf_ncm: ncm.replace(/\D/g, '') || null,
+        nf_cst: cst.trim() || null,
+        // Nulo, nunca zero: zero e uma aliquota valida e o sistema nao pode
+        // confundir "o contador disse 0%" com "ninguem preencheu".
+        nf_icms_aliquota: aliquota === '' ? null : Number(aliquota),
+        nf_icms_reducao_base: reducao === '' ? null : Number(reducao),
+        nf_base_modo: modoBase || null,
+        nf_cfop_tributado: cfopTrib.trim() || null,
+        nf_info_complementar: infoComp.trim() || null,
         nf_provedor: 'focus',
         updated_at: new Date().toISOString(),
       })
@@ -167,6 +190,87 @@ const NotaFiscal = () => {
                   varia conforme o estado e o regime da loja.
                 </p>
               </div>
+            </div>
+
+            {/* Tributacao.
+                Tudo aqui vem do contador da loja. O sistema nao escolhe
+                imposto e RECUSA emitir enquanto estiver em branco — base
+                errada nao e bug nosso, e autuacao no cliente. */}
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <div className="form-group" style={{ flex: '1 1 150px' }}>
+                <label>NCM padrão</label>
+                <input type="text" value={ncm} onChange={(e) => setNcm(e.target.value)}
+                  placeholder="8 dígitos" />
+                <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 }}>
+                  Carro e moto têm NCM diferente. O cadastro do veículo pode ter o próprio.
+                </p>
+              </div>
+
+              <div className="form-group" style={{ flex: '1 1 130px' }}>
+                <label>CST / CSOSN</label>
+                <input type="text" value={cst} onChange={(e) => setCst(e.target.value)}
+                  placeholder="Ex.: 20" />
+                <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 }}>
+                  <strong>20</strong> é o de redução de base. Sem zero na frente.
+                </p>
+              </div>
+
+              <div className="form-group" style={{ flex: '1 1 120px' }}>
+                <label>Alíquota de ICMS (%)</label>
+                <input type="number" step="0.01" value={aliquota}
+                  onChange={(e) => setAliquota(e.target.value)} placeholder="Ex.: 18" />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Como a base de cálculo é apurada</label>
+              <select value={modoBase} onChange={(e) => setModoBase(e.target.value)}
+                style={{ width: '100%', padding: '0.65rem 1rem', borderRadius: 10,
+                         border: '1px solid var(--border)', background: 'var(--card-bg)',
+                         color: 'var(--text-primary)' }}>
+                <option value="">Pergunte ao seu contador…</option>
+                <option value="margem">Sobre a margem (venda − compra)</option>
+                <option value="reducao">Redução percentual sobre o valor da venda</option>
+                <option value="integral">Valor integral da venda</option>
+              </select>
+              <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 }}>
+                São mecanismos <strong>diferentes</strong>, e qual vale muda por estado e por
+                regime. Esta é a pergunta mais importante da lista — é ela que define sobre
+                quanto o imposto incide.
+              </p>
+            </div>
+
+            {modoBase === 'reducao' && (
+              <div className="form-group" style={{ maxWidth: 220 }}>
+                <label>Redução da base (%)</label>
+                <input type="number" step="0.01" value={reducao}
+                  onChange={(e) => setReducao(e.target.value)} placeholder="Ex.: 90" />
+                <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 }}>
+                  Varia por estado e já mudou no tempo. Confirme o percentual vigente.
+                </p>
+              </div>
+            )}
+
+            <div className="form-group">
+              <label>CFOP para veículo que entrou com ICMS</label>
+              <input type="text" value={cfopTrib} onChange={(e) => setCfopTrib(e.target.value)}
+                placeholder="Deixe em branco se não se aplica" />
+              <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 }}>
+                Veículo comprado de pessoa física costuma entrar no benefício; comprado com
+                ICMS destacado, nem sempre. Quando for o caso, a nota sai por este CFOP — e
+                o veículo é marcado no cadastro dele.
+              </p>
+            </div>
+
+            <div className="form-group">
+              <label>Informações complementares</label>
+              <textarea rows={2} value={infoComp} onChange={(e) => setInfoComp(e.target.value)}
+                placeholder="Citação da legislação que concede a redução da base"
+                style={{ resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5 }} />
+              <p style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 }}>
+                É o que fundamenta o benefício na nota. Sem a citação, o fiscal não tem de
+                onde a base menor saiu.
+              </p>
             </div>
 
             <div className="form-group">

@@ -68,7 +68,7 @@ Deno.serve(async (req) => {
     const { data: carro } = await admin
       .from('cars')
       .select('id, brand, model, version, year, model_year, chassi, renavam, plate, color, ncm, '
-            + 'sold_price, price, purchase_price, sold_at, '
+            + 'sold_price, price, purchase_price, sold_at, entrada_com_icms, nota_entrada, '
             + 'buyer_name, buyer_cpf, buyer_address, buyer_phone, buyer_email, '
             + 'buyer_numero, buyer_bairro, buyer_municipio, buyer_uf, buyer_cep')
       .eq('id', carId).eq('user_id', user.id).maybeSingle();
@@ -79,7 +79,9 @@ Deno.serve(async (req) => {
     const { data: loja } = await admin
       .from('company_settings')
       .select('company_name, cnpj, address, phone_number, inscricao_estadual, '
-            + 'nf_ativo, nf_ambiente, nf_serie, nf_cfop, nf_ncm, nf_provedor, nf_token_set')
+            + 'nf_ativo, nf_ambiente, nf_serie, nf_cfop, nf_ncm, nf_provedor, nf_token_set, '
+            + 'nf_cst, nf_icms_aliquota, nf_icms_reducao_base, nf_base_modo, '
+            + 'nf_cfop_tributado, nf_info_complementar, nf_icms_origem, nf_icms_modalidade_bc')
       .eq('user_id', user.id).maybeSingle();
 
     if (!loja?.nf_ativo) {
@@ -95,6 +97,25 @@ Deno.serve(async (req) => {
     if (!String(loja.address ?? ''))             falta.push('Endereço da loja');
     if (!loja.nf_serie)                          falta.push('Série da nota (Configurações)');
     if (!String(loja.nf_cfop ?? ''))             falta.push('CFOP (peça ao seu contador)');
+
+    // Imposto NAO tem padrao aqui, e a funcao recusa em vez de inventar.
+    //
+    // Veiculo usado e tributado sobre a MARGEM ou sobre base reduzida — nunca
+    // sobre o valor cheio da venda. Sem estes tres, a nota sairia com a base
+    // errada, que nao e um bug nosso: e autuacao no cliente.
+    if (!String(loja.nf_cst ?? ''))              falta.push('CST ou CSOSN do ICMS (peça ao seu contador)');
+    if (loja.nf_icms_aliquota == null)           falta.push('Alíquota de ICMS (peça ao seu contador)');
+    if (!String(loja.nf_base_modo ?? ''))        falta.push('Como a base de cálculo é apurada (peça ao seu contador)');
+    if (loja.nf_base_modo === 'reducao' && loja.nf_icms_reducao_base == null) {
+      falta.push('Percentual de redução da base (peça ao seu contador)');
+    }
+
+    // Veiculo que entrou COM ICMS nao cabe no beneficio e sai por outro CFOP.
+    // Sem ele configurado, a loja nao consegue emitir essa nota — e e melhor
+    // avisar aqui do que mandar com o CFOP do beneficio.
+    if (carro.entrada_com_icms === true && !String(loja.nf_cfop_tributado ?? '')) {
+      falta.push('CFOP para veículo que entrou com ICMS (este veículo não entra no benefício)');
+    }
     if (!loja.nf_token_set)                      falta.push('Token do provedor de NF-e');
     if (!String(carro.buyer_name ?? ''))         falta.push('Nome do comprador');
     if (soDigitos(carro.buyer_cpf).length < 11)  falta.push('CPF ou CNPJ do comprador');
@@ -147,6 +168,53 @@ Deno.serve(async (req) => {
     const descricao = [carro.brand, carro.model, carro.version, carro.year]
       .filter(Boolean).join(' ').trim();
 
+    // ── A base de cálculo ────────────────────────────────────────────────────
+    //
+    // Três mecanismos diferentes aparecem na prática para veículo usado, e as
+    // fontes divergem sobre qual se aplica a cada caso:
+    //
+    //   margem    base = venda − compra          (tributa só o lucro)
+    //   reducao   base = venda × (1 − redução%)  (RICMS, percentual por estado)
+    //   integral  base = venda                   (quando não cabe benefício)
+    //
+    // O sistema NÃO escolhe. Ele calcula o que o contador da loja definiu em
+    // `nf_base_modo` — e recusa emitir se não estiver definido, o que a lista
+    // de pendências acima já garante.
+    const compra = Number(carro.purchase_price ?? 0);
+    const modo   = String(loja.nf_base_modo ?? '');
+    const reducao = Number(loja.nf_icms_reducao_base ?? 0);
+
+    let baseCalculo: number;
+    if (modo === 'margem')        baseCalculo = Math.max(0, valor - compra);
+    else if (modo === 'reducao')  baseCalculo = valor * (1 - reducao / 100);
+    else                          baseCalculo = valor;
+
+    // Centavos, sempre. Diferença de arredondamento entre a base e o valor do
+    // imposto é motivo de rejeição da SEFAZ.
+    const cent = (n: number) => Math.round(n * 100) / 100;
+    baseCalculo = cent(baseCalculo);
+
+    const aliquota  = Number(loja.nf_icms_aliquota ?? 0);
+    const valorIcms = cent(baseCalculo * aliquota / 100);
+
+    // Veículo que entrou com ICMS destacado não cabe no benefício e sai pelo
+    // outro CFOP. Ver a Resposta à Consulta 23496/2021 de São Paulo, que é o
+    // motivo de existir a coluna `entrada_com_icms` no veículo.
+    const cfopDaNota = carro.entrada_com_icms === true
+      ? String(loja.nf_cfop_tributado ?? '')
+      : String(loja.nf_cfop ?? '');
+
+    // Informações complementares.
+    //
+    // A citação da legislação que concede a redução é o que fundamenta o
+    // benefício na nota; sem ela o fiscal não tem como saber de onde saiu a
+    // base menor. O número da nota de entrada vincula esta saída à entrada do
+    // veículo, que é o que sustenta a margem.
+    const complementares = [
+      String(loja.nf_info_complementar ?? '').trim(),
+      carro.nota_entrada ? `Nota de entrada: ${carro.nota_entrada}` : '',
+    ].filter(Boolean).join(' | ') || undefined;
+
     // O payload leva o CFOP CONFIGURADO pela loja. O sistema não escolhe
     // tributação — ele transmite o que o contador definiu.
     const payload = {
@@ -175,12 +243,14 @@ Deno.serve(async (req) => {
 
       serie: loja.nf_serie,
 
+      informacoes_adicionais_contribuinte: complementares,
+
       items: [{
         numero_item: 1,
         codigo_produto: carro.chassi,
         descricao: `${descricao} — Chassi ${carro.chassi}`
                  + (carro.plate ? ` — Placa ${carro.plate}` : ''),
-        cfop: loja.nf_cfop,
+        cfop: cfopDaNota,
         codigo_ncm: ncm,
         unidade_comercial: 'UN',
         quantidade_comercial: 1,
@@ -189,8 +259,28 @@ Deno.serve(async (req) => {
         unidade_tributavel: 'UN',
         quantidade_tributavel: 1,
         valor_unitario_tributavel: valor,
+
+        // ICMS. Nomes conferidos na documentação da Focus — campo errado é
+        // rejeição da SEFAZ, não erro de aplicação.
+        //
+        // Atenção ao CST: a Focus usa "20", não "020".
+        icms_origem: String(loja.nf_icms_origem ?? '0'),
+        icms_situacao_tributaria: String(loja.nf_cst ?? ''),
+        icms_modalidade_base_calculo: String(loja.nf_icms_modalidade_bc ?? '3'),
+        icms_base_calculo: baseCalculo,
+        icms_aliquota: aliquota,
+        icms_valor: valorIcms,
+        // Só vai quando há redução — a SEFAZ recusa `pRedBC` fora do CST que
+        // o comporta.
+        ...(modo === 'reducao' ? { icms_reducao_base_calculo: reducao } : {}),
       }],
     };
+
+    console.log('[emitir-nf] base apurada', {
+      user: user.id, car: carro.id, modo,
+      venda: valor, compra, base: baseCalculo, aliquota, icms: valorIcms,
+      cfop: cfopDaNota, entradaComIcms: carro.entrada_com_icms === true,
+    });
 
     const res = await fetch(
       `${FOCUS[ambiente]}?ref=${encodeURIComponent(ref)}`,
