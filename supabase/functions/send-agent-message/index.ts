@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { enviarSocial, enviarImagemSocial, enviarVideoSocial } from '../_shared/social.ts';
+import { paraEnvio } from '../_shared/imagemUrl.ts';
 import { buildCors } from '../_shared/cors.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
@@ -102,10 +103,16 @@ serve(async (req) => {
     return r.ok;
   };
 
-  /** Envia imagem no canal certo. */
+  /** Envia imagem no canal certo, redimensionada para envio.
+   *
+   *  O `url` original e o que vai para `messages` em quem chama — aqui so
+   *  muda o que a Meta baixa. Foto de carro tem 2,6 MB em media e a Meta
+   *  recomprime tudo que recebe, entao mandar o original e banda jogada fora
+   *  sem o cliente ver diferenca. */
   const enviarFoto = async (destino: string, url: string, pid: string, tokenWa: string) => {
-    if (!ehSocial) return await sendImage(destino, url, pid || undefined, tokenWa);
-    const r = await enviarImagemSocial(contaSocial, destino, url, tokenSocial, canal as 'instagram' | 'messenger');
+    const urlEnvio = paraEnvio(url);
+    if (!ehSocial) return await sendImage(destino, urlEnvio, pid || undefined, tokenWa);
+    const r = await enviarImagemSocial(contaSocial, destino, urlEnvio, tokenSocial, canal as 'instagram' | 'messenger');
     if (!r.ok) console.error('[SAM] falha ao enviar foto social:', r.erro);
     return r.ok;
   };

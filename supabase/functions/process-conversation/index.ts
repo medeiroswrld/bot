@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendMessageComId, sendImage, sendVideo, resolveWhatsAppToken, sendListaInterativa, sendCatalogo } from '../_shared/whatsapp.ts';
 import { enviarSocial, enviarImagemSocial, enviarVideoSocial } from '../_shared/social.ts';
+import { paraEnvio } from '../_shared/imagemUrl.ts';
 import { maskName } from '../_shared/maskPII.ts';
 import { withRequest, type Logger } from '../_shared/logger.ts';
 import { botPodeResponder, COLUNAS_GUARDA } from '../_shared/botGuards.ts';
@@ -1783,10 +1784,18 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
         // depois de o bot dizer que ia mandar.
         let ok: boolean;
         let midFoto: string | null = null;
+
+        // Redimensionada SO para o envio. O `url` original continua sendo o
+        // que vai para `messages` logo abaixo, porque e com aquela string que
+        // o bot sabe que ja mandou esta foto nesta conversa — trocar ali faria
+        // a comparacao deixar de bater com todo o historico e o bot reenviaria
+        // a galeria inteira para quem ja recebeu.
+        const urlEnvio = paraEnvio(url);
+
         if (ctxCanal === 'whatsapp') {
-          ok = await sendImage(customerPhone, url, pid, token, log);
+          ok = await sendImage(customerPhone, urlEnvio, pid, token, log);
         } else {
-          const r = await enviarImagemSocial(ctxContaId, customerPhone, url, ctxTokenSocial, ctxCanal as 'instagram' | 'messenger');
+          const r = await enviarImagemSocial(ctxContaId, customerPhone, urlEnvio, ctxTokenSocial, ctxCanal as 'instagram' | 'messenger');
           ok = r.ok;
           // Guarda o id: o eco de cada foto volta e, sem reconhecer, marca a
           // conversa como humana — o bot se entregava sozinho ao mandar galeria.
