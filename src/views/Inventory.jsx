@@ -10,6 +10,7 @@ import { montarContrato, dadosDoContrato, imprimirContrato, formatarCPF, cpfVali
 import { useModelosContrato, SeletorModelo } from '../lib/useModelosContrato.jsx';
 import { estoqueEmTexto, copiarTexto } from '../lib/estoqueTexto.js';
 import { supabase } from '../lib/supabase.js';
+import { miniatura, cartao, grande } from '../lib/imagemUrl.js';
 import { prepararImagem, ehHeic } from '../lib/imagem.js';
 import MatchFoundModal from './MatchFoundModal.jsx';
 
@@ -746,7 +747,7 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                 </div>
                 <div className="sell-modal-body">
                     <div className="sell-car-info">
-                        {car.images?.[0] ? <img src={car.images[0]} alt={car.model} className="sell-car-thumb" /> : <div className="sell-car-thumb" style={{display:'flex',alignItems:'center',justifyContent:'center',background:'var(--input-bg)',borderRadius:'8px',width:'64px',height:'64px'}}><Camera size={24} color="#94a3b8" /></div>}
+                        {car.images?.[0] ? <img src={miniatura(car.images[0])} alt={car.model} className="sell-car-thumb" loading="lazy" /> : <div className="sell-car-thumb" style={{display:'flex',alignItems:'center',justifyContent:'center',background:'var(--input-bg)',borderRadius:'8px',width:'64px',height:'64px'}}><Camera size={24} color="#94a3b8" /></div>}
                         <div>
                             <h3>{car.brand} {car.model}</h3>
                             <p className="text-muted">{car.version} • {car.year}</p>
@@ -1076,7 +1077,7 @@ const DetailDrawer = ({ car, onClose }) => {
                     <div className="detail-gallery">
                         <div className="gallery-main">
                             {images.length > 0 ? (
-                                <img src={images[activeImg]} alt={car.model} />
+                                <img src={grande(images[activeImg])} alt={car.model} />
                             ) : (
                                 <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'280px',background:'var(--input-bg)',borderRadius:'12px',color:'#94a3b8',gap:'0.5rem'}}>
                                     <Camera size={48} strokeWidth={1.5} />
@@ -1092,7 +1093,7 @@ const DetailDrawer = ({ car, onClose }) => {
                                         className={`thumb-item ${activeImg === idx ? 'active' : ''}`}
                                         onClick={() => setActiveImg(idx)}
                                     >
-                                        <img src={img} alt={`Thumb ${idx}`} />
+                                        <img src={miniatura(img)} alt={`Thumb ${idx}`} loading="lazy" />
                                     </div>
                                 ))}
                             </div>
@@ -1317,7 +1318,7 @@ const Inventory = () => {
                     <div key={car.id} className="inv-card card">
                         <div className="inv-card-img">
                             {car.images?.length > 0 ? (
-                                <img src={car.images[0]} alt={`${car.brand} ${car.model}`} />
+                                <img src={cartao(car.images[0])} alt={`${car.brand} ${car.model}`} loading="lazy" />
                             ) : (
                                 <CarPlaceholder />
                             )}

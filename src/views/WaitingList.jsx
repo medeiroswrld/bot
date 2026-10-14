@@ -4,6 +4,7 @@ import {
     Rocket, Loader2, Plus
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
+import { miniatura } from '../lib/imagemUrl.js';
 
 const STATUS_CFG = {
     active:    { label: 'Aguardando',       color: '#64748b', bg: '#f1f5f9' },
@@ -98,7 +99,7 @@ const MatchesModal = ({ interest, cars, onClose }) => (
                     {cars.map(car => (
                         <div key={car.id} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 12, border: '1px solid var(--border)', borderRadius: 10 }}>
                             {car.images?.[0]
-                                ? <img src={car.images[0]} alt="" style={{ width: 72, height: 52, borderRadius: 6, objectFit: 'cover' }} />
+                                ? <img src={miniatura(car.images[0])} loading="lazy" alt="" style={{ width: 72, height: 52, borderRadius: 6, objectFit: 'cover' }} />
                                 : <div style={{ width: 72, height: 52, borderRadius: 6, background: 'var(--input-bg)' }} />}
                             <div style={{ flex: 1 }}>
                                 <p style={{ margin: 0, fontWeight: 700 }}>{car.brand} {car.model}</p>

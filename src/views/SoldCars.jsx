@@ -4,6 +4,7 @@ import { useAppContext, formatDateStr } from '../context/AppContext.jsx';
 import { montarContrato, dadosDoContrato, imprimirContrato, formatarCPF } from '../lib/contrato.js';
 import { useModelosContrato, SeletorModelo } from '../lib/useModelosContrato.jsx';
 import CustosDoVeiculo from './CustosDoVeiculo.jsx';
+import { grande, miniatura } from '../lib/imagemUrl.js';
 
 // Par rotulo/valor. Valor ausente vira travessao em vez de sumir: espaco vazio
 // mostra que o dado FALTA, e e assim que a loja descobre o que nao coletou.
@@ -100,7 +101,7 @@ const DetailDrawer = ({ car, onClose }) => {
                     <div className="detail-gallery">
                         <div className="gallery-main">
                             {images.length > 0 ? (
-                                <img src={images[activeImg]} alt={`${car.brand} ${car.model}`} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 12 }} />
+                                <img src={grande(images[activeImg])} alt={`${car.brand} ${car.model}`} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 12 }} />
                             ) : (
                                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 240, background: 'var(--input-bg)', borderRadius: 12, color: '#94a3b8', gap: 8 }}>
                                     <Camera size={40} strokeWidth={1.5} />
@@ -116,7 +117,7 @@ const DetailDrawer = ({ car, onClose }) => {
                                         className={`thumb-item ${activeImg === idx ? 'active' : ''}`}
                                         onClick={() => setActiveImg(idx)}
                                     >
-                                        <img src={img} alt={`Thumb ${idx}`} />
+                                        <img src={miniatura(img)} alt={`Thumb ${idx}`} loading="lazy" />
                                     </div>
                                 ))}
                             </div>
