@@ -918,6 +918,28 @@ export const AppProvider = ({ children }) => {
         dbUpdates.status = 'available';
       }
 
+      // Campo em branco vira NULL, nunca string vazia.
+      //
+      // O formulario inicializa todo campo como '' e devolve o objeto inteiro
+      // no salvar. Um campo de data deixado em branco chega aqui como '', e o
+      // Postgres responde `invalid input syntax for type date: ""` — que
+      // derruba o PATCH INTEIRO, nao so aquele campo. O lojista ve "Erro ao
+      // atualizar veiculo" e perde tudo que digitou.
+      //
+      // Foi assim que a ficha de compra parou de salvar: `purchase_price` e
+      // `model_year` tinham tratamento individual, `purchase_date` nao.
+      // Tratar um campo por vez garante que o proximo campo novo repita isto,
+      // entao a lista cobre TODA coluna que nao aceita texto.
+      const COLUNAS_SEM_TEXTO = [
+        'purchase_date', 'buyer_birth_date', 'sold_at',
+        'mileage', 'model_year', 'trade_in_km', 'year',
+        'price', 'purchase_price', 'sold_price', 'trade_in_value',
+        'entrada_com_icms', 'purchase_financed',
+      ];
+      for (const coluna of COLUNAS_SEM_TEXTO) {
+        if (dbUpdates[coluna] === '') dbUpdates[coluna] = null;
+      }
+
       const { data: updatedCar, error } = await supabase
         .from('cars')
         .update(dbUpdates)
@@ -925,7 +947,7 @@ export const AppProvider = ({ children }) => {
         .eq('user_id', user.id)
         .select()
         .single();
-        
+
       if (error) throw error;
 
       const finalImageUrls = await syncCarImages(id, updates.images || []);
@@ -936,7 +958,15 @@ export const AppProvider = ({ children }) => {
       return savedCar;
     } catch (error) {
       console.error('Erro ao atualizar', error);
-      addToast('Erro ao atualizar veículo.', 'error');
+      // O motivo, nao so "deu erro".
+      //
+      // "Erro ao atualizar veiculo." sozinho custou uma investigacao inteira:
+      // era um campo de data em branco, e nada na tela dizia qual campo nem
+      // por que. O lojista nao vai entender a mensagem do Postgres, mas vai
+      // conseguir REPETIR ela pra gente — e isso e a diferenca entre um
+      // diagnostico de minutos e um de horas.
+      const motivo = error?.message ? ` (${String(error.message).slice(0, 120)})` : '';
+      addToast(`Erro ao atualizar veículo.${motivo}`, 'error');
       throw error; // re-lança para o modal manter-se aberto
     }
   };
