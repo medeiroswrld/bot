@@ -39,10 +39,17 @@ import { buildCors } from '../_shared/cors.ts';
 
 const PADRAO = 'E aí, o que achou? Se bateu alguma dúvida sobre o carro, é só me chamar por aqui.';
 
-/** Hora atual em São Paulo, como número (14.5 = 14h30). */
-function horaBR(): number {
+/**
+ * Hora atual NA LOJA, como número (14.5 = 14h30).
+ *
+ * O fuso vem da loja porque esta hora decide se o follow-up sai agora. Fixo em
+ * São Paulo, um stand em Lisboa receberia a varredura das 9h-20h aplicada ao
+ * horário brasileiro — ou seja, mensagem saindo de madrugada pra ele.
+ */
+function horaLocal(tz: string): number {
   const s = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: tz || 'America/Sao_Paulo',
+    hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date());
   const [h, m] = s.split(':').map(Number);
   return h + m / 60;
@@ -124,7 +131,7 @@ Deno.serve(async (req) => {
     // manhã. Responder tarde é serviço; puxar assunto tarde é incômodo.
     const g = (loja.guardas ?? {}) as Record<string, unknown>;
     if (g.bot_schedule_enabled !== true) {
-      const agora = horaBR();
+      const agora = horaLocal(String(g.timezone ?? ''));
       if (agora < 9 || agora >= 20) { pulados++; continue; }
     }
 

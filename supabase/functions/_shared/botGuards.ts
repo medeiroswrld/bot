@@ -19,6 +19,7 @@ export interface GuardasDoBot {
   trial_termina_em?: string | null;
   ultimo_pagamento_em?: string | null;
   assinatura_motivo?: string | null;
+  timezone?: string | null;
 }
 
 /**
@@ -89,10 +90,10 @@ export function assinaturaEmDia(
 
 /** Colunas que qualquer webhook precisa ler para decidir. */
 export const COLUNAS_GUARDA =
-  'bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso, bot_contratado, bot_blocked_numbers, assinatura_status, trial_termina_em, ultimo_pagamento_em, assinatura_motivo';
+  'bot_enabled, bot_schedule_enabled, bot_start, bot_end, suspenso, bot_contratado, bot_blocked_numbers, assinatura_status, trial_termina_em, ultimo_pagamento_em, assinatura_motivo, timezone';
 
 /** Colunas necessárias para checar disparo em massa. */
-export const COLUNAS_DISPARO = 'suspenso, disparos_contratado, assinatura_status, trial_termina_em, ultimo_pagamento_em, assinatura_motivo';
+export const COLUNAS_DISPARO = 'suspenso, disparos_contratado, assinatura_status, trial_termina_em, ultimo_pagamento_em, assinatura_motivo, timezone';
 
 /**
  * A loja pode ENVIAR em massa (campanha, aniversário, template)?
@@ -145,8 +146,17 @@ export function botPodeResponder(s: GuardasDoBot | null | undefined): boolean {
   if (s?.bot_enabled === false) return false;
   if (s?.bot_schedule_enabled !== true) return true;
 
+  // O fuso e o DA LOJA, nao o do Brasil.
+  //
+  // Estava fixo em `America/Sao_Paulo`. Para um stand em Lisboa (UTC+0/+1
+  // contra os nossos UTC-3), uma janela de 9h as 19h viraria 5h as 15h: o bot
+  // mudo durante metade do expediente e falando de madrugada — sem erro
+  // nenhum na tela, que e o modo de falha mais caro deste produto.
+  //
+  // Padrao Sao Paulo: loja brasileira nao muda nada.
   const agora = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: String(s.timezone ?? 'America/Sao_Paulo'),
+    hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(new Date());
 
   // O Postgres devolve time como "18:00:00"; comparamos só HH:MM.

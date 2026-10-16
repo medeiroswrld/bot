@@ -5,14 +5,29 @@ import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 import { buildCors } from '../_shared/cors.ts';
 
-const BR_OFFSET = '-03:00'; // Brasil sem horário de verão desde 2019
-
-function brDate(offsetDays = 0): string {
-  const iso = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+/** Data de hoje (ou +N dias) NO FUSO DA LOJA, em AAAA-MM-DD. */
+function dataLocal(tz: string, offsetDays = 0): string {
+  const iso = new Intl.DateTimeFormat('sv-SE', { timeZone: tz || 'America/Sao_Paulo' }).format(new Date());
   if (offsetDays === 0) return iso;
   const d = new Date(`${iso}T12:00:00`);
   d.setDate(d.getDate() + offsetDays);
   return new Intl.DateTimeFormat('sv-SE').format(d);
+}
+
+/**
+ * Deslocamento do fuso da loja NAQUELE instante, como "-03:00" ou "+01:00".
+ *
+ * Calculado, e nao uma constante, por causa do horario de verao: o Brasil nao
+ * tem desde 2019, mas Portugal e Espanha tem. Um offset fixo acertaria metade
+ * do ano e erraria a outra metade — e o erro seria o lembrete chegando uma
+ * hora cedo ou tarde, que ninguem associa a fuso.
+ */
+function offsetDoFuso(tz: string, quando: Date): string {
+  const nome = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz || 'America/Sao_Paulo', timeZoneName: 'longOffset',
+  }).formatToParts(quando).find((p) => p.type === 'timeZoneName')?.value ?? '';
+  const off = nome.replace('GMT', '').trim();
+  return off || '+00:00';   // "GMT" puro = UTC
 }
 
 function fmtHora(t: string): string {
@@ -32,7 +47,7 @@ serve(async (req) => {
   // Tenants com lembrete ativo
   const { data: tenants } = await supabase
     .from('company_settings')
-    .select('user_id, visit_reminder_minutes_before, company_name, address, whatsapp_phone_number_id')
+    .select('user_id, visit_reminder_minutes_before, company_name, address, whatsapp_phone_number_id, timezone')
     .eq('visit_reminder_enabled', true);
 
   if (!tenants?.length) {
@@ -41,12 +56,16 @@ serve(async (req) => {
     });
   }
 
-  const today = brDate(0);
-  const tomorrow = brDate(1);
+  // A data agora e POR LOJA: duas lojas em fusos diferentes podem estar em dias
+  // diferentes no mesmo instante. Calcular uma vez para todas faria a loja
+  // europeia procurar os agendamentos do dia errado.
   const now = Date.now();
   let processed = 0, sent = 0, failed = 0, skipped = 0;
 
   for (const t of tenants) {
+    const tz = String(t.timezone ?? 'America/Sao_Paulo');
+    const today = dataLocal(tz, 0);
+    const tomorrow = dataLocal(tz, 1);
     const minutesBefore = Number(t.visit_reminder_minutes_before ?? 15);
     const pid = String(t.whatsapp_phone_number_id ?? '');
     const token = await resolveWhatsAppToken(supabase, t.user_id);
@@ -71,7 +90,10 @@ serve(async (req) => {
       .in('appointment_date', [today, tomorrow]);
 
     for (const a of (appts ?? [])) {
-      const epoch = Date.parse(`${a.appointment_date}T${String(a.appointment_time).substring(0, 5)}:00${BR_OFFSET}`);
+      const quando = new Date(`${a.appointment_date}T12:00:00Z`);
+      const epoch = Date.parse(
+        `${a.appointment_date}T${String(a.appointment_time).substring(0, 5)}:00${offsetDoFuso(tz, quando)}`,
+      );
       if (isNaN(epoch)) continue;
       const minutesUntil = (epoch - now) / 60000;
       if (minutesUntil < 2 || minutesUntil > minutesBefore) continue; // fora da janela

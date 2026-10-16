@@ -101,11 +101,11 @@ function generateTimeSlots(
 }
 
 // Retorna data e hora atual no fuso de Brasília
-function getBrazilDateInfo(): { label: string; iso: string } {
+function getBrazilDateInfo(tz = 'America/Sao_Paulo'): { label: string; iso: string } {
   const now = new Date();
 
   // ISO date no fuso América/São Paulo (sv-SE usa formato YYYY-MM-DD)
-  const iso = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(now);
+  const iso = new Intl.DateTimeFormat('sv-SE', { timeZone: tz }).format(now);
 
   // Rótulo legível SÓ com a data: "sexta-feira, 23/05/2026".
   // A hora NÃO entra aqui de propósito: o label vai no system prompt (cacheado) e
@@ -113,7 +113,7 @@ function getBrazilDateInfo(): { label: string; iso: string } {
   // silencioso). A validação de horário passado/fechado é server-side no
   // computeFreeSlots — o bot não perde nada.
   const label = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: 'America/Sao_Paulo',
+    timeZone: tz,
     weekday: 'long',
     day: '2-digit',
     month: '2-digit',
@@ -137,14 +137,16 @@ function getBrazilDateInfo(): { label: string; iso: string } {
  * system prompt e das tools, entao o cache continua valendo.
  */
 function notaDeHorario(settings: Record<string, unknown> | null): string {
+  // Fuso DA LOJA: e esta hora que impede o bot de oferecer um dia que ja acabou.
+  const tz = String(settings?.timezone ?? 'America/Sao_Paulo');
   const agora = new Date();
   const hhmm = new Intl.DateTimeFormat('pt-BR', {
-    timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(agora);
 
   const DIAS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   const diaCurto = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Sao_Paulo', weekday: 'short',
+    timeZone: tz, weekday: 'short',
   }).format(agora).toLowerCase().slice(0, 3);
   const dayKey = DIAS.includes(diaCurto) ? diaCurto : 'mon';
 
@@ -555,7 +557,7 @@ async function computeFreeSlots(
 
   const { data: settings } = await supabase
     .from('company_settings')
-    .select('business_hours, appointment_duration, appointment_interval, max_appointments_per_slot, working_days, business_hours_start, business_hours_end')
+    .select('business_hours, appointment_duration, appointment_interval, max_appointments_per_slot, working_days, business_hours_start, business_hours_end, timezone')
     .eq('user_id', userId)
     .single();
 
@@ -607,11 +609,13 @@ async function computeFreeSlots(
   const interval = Number(settings?.appointment_interval ?? 15);
   let slots = generateTimeSlots(slotStart, slotEnd, duration, interval);
 
-  // Se a data for HOJE (fuso de Brasília), remove horários que já passaram.
-  const { iso: todayIso } = getBrazilDateInfo();
+  // Se a data for HOJE, remove horários que já passaram — no fuso DA LOJA.
+  // Para um stand em Lisboa, usar Brasília descartaria a tarde inteira dele.
+  const tzLoja = String(settings?.timezone ?? 'America/Sao_Paulo');
+  const { iso: todayIso } = getBrazilDateInfo(tzLoja);
   if (dateStr === todayIso) {
     const nowHm = new Intl.DateTimeFormat('sv-SE', {
-      timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hour12: false,
+      timeZone: tzLoja, hour: '2-digit', minute: '2-digit', hour12: false,
     }).format(new Date()); // "HH:MM"
     slots = slots.filter((s) => s > nowHm);
   }
@@ -2095,7 +2099,7 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
     const end   = String(settings.business_hours_end   ?? '18:00');
     horarios = `${days.split(',').join(', ')}, das ${start} às ${end}`;
   }
-  const { label: todayLabel } = getBrazilDateInfo();
+  const { label: todayLabel } = getBrazilDateInfo(String(settings.timezone ?? 'America/Sao_Paulo'));
 
   const nomeCliente = customerName ? customerName.split(' ')[0] : null;
   // O nome JA e conhecido: proibir perguntar de novo e o ponto principal.

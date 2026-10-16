@@ -608,7 +608,7 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
         devolver: false, devolverMin: 15,
         followup: false, followupHoras: 3, followupMsg: '',
         followupVendedor: false, followupHorasVendedor: 5,
-        locale: 'pt-BR',
+        locale: 'pt-BR', timezone: 'America/Sao_Paulo', moeda: 'BRL',
     });
     const [bloqueados, setBloqueados] = useState([]);
     const [novoBloqueio, setNovoBloqueio] = useState('');
@@ -646,6 +646,8 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                 followup_mensagem: botCfg.followupMsg.trim() || null,
                 // Nulo = nao faz follow-up em conversa de vendedor.
                 locale: botCfg.locale || 'pt-BR',
+                timezone: botCfg.timezone || 'America/Sao_Paulo',
+                moeda: botCfg.moeda || 'BRL',
                 followup_horas_vendedor: botCfg.followupVendedor
                     ? Math.min(20, Math.max(1, Number(botCfg.followupHorasVendedor) || 5))
                     : null,
@@ -801,6 +803,8 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
             followupVendedor: s.followup_horas_vendedor != null,
             followupHorasVendedor: Number(s.followup_horas_vendedor ?? 5),
             locale: s.locale ?? 'pt-BR',
+            timezone: s.timezone ?? 'America/Sao_Paulo',
+            moeda: s.moeda ?? 'BRL',
         });
         setBloqueados(Array.isArray(s.bot_blocked_numbers) ? s.bot_blocked_numbers : []);
         // Equipe e contatos por setor
@@ -1902,12 +1906,53 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                                 <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)',
                                             marginTop: 6, lineHeight: 1.5 }}>
                                     Define o vocabulário do país — <strong>matrícula</strong> e não
-                                    &quot;placa&quot;, <strong>IUC</strong> e não &quot;IPVA&quot; —
-                                    e a moeda dos preços.{' '}
+                                    &quot;placa&quot;, <strong>IUC</strong> e não &quot;IPVA&quot;.{' '}
                                     <strong>O idioma da resposta acompanha o cliente:</strong> quem
                                     escrever em espanhol é respondido em espanhol, em inglês é
                                     respondido em inglês. Isto aqui é a base de quando não dá pra saber.
                                 </p>
+                            </div>
+
+                            {/* Fuso e moeda sao separados do idioma de proposito:
+                                Espanha e Portugal tem mais de um fuso, entao
+                                derivar do pais acertaria na maioria e erraria
+                                justo onde ninguem conferiria. */}
+                            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 12 }}>
+                                <div className="form-group" style={{ flex: '1 1 220px', marginBottom: 0 }}>
+                                    <label>Fuso horário</label>
+                                    <select value={botCfg.timezone}
+                                        onChange={e => setBotCfg(b => ({ ...b, timezone: e.target.value }))}
+                                        style={{ width: '100%', padding: '0.65rem 1rem', borderRadius: 10,
+                                                 border: '1px solid var(--border)', background: 'var(--card-bg)',
+                                                 color: 'var(--text-primary)' }}>
+                                        <option value="America/Sao_Paulo">Brasília (UTC−3)</option>
+                                        <option value="America/Manaus">Manaus (UTC−4)</option>
+                                        <option value="Europe/Lisbon">Lisboa (UTC+0/+1)</option>
+                                        <option value="Atlantic/Azores">Açores (UTC−1/+0)</option>
+                                        <option value="Europe/Madrid">Madri (UTC+1/+2)</option>
+                                        <option value="Atlantic/Canary">Canárias (UTC+0/+1)</option>
+                                    </select>
+                                    <p style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)',
+                                                marginTop: 4, lineHeight: 1.5 }}>
+                                        Decide o horário de atendimento do assistente, o follow-up,
+                                        o lembrete de visita e o aniversário. <strong>Errado aqui, o
+                                        assistente fica mudo no expediente e fala de madrugada</strong> —
+                                        sem erro nenhum na tela.
+                                    </p>
+                                </div>
+
+                                <div className="form-group" style={{ flex: '0 1 160px', marginBottom: 0 }}>
+                                    <label>Moeda</label>
+                                    <select value={botCfg.moeda}
+                                        onChange={e => setBotCfg(b => ({ ...b, moeda: e.target.value }))}
+                                        style={{ width: '100%', padding: '0.65rem 1rem', borderRadius: 10,
+                                                 border: '1px solid var(--border)', background: 'var(--card-bg)',
+                                                 color: 'var(--text-primary)' }}>
+                                        <option value="BRL">Real (R$)</option>
+                                        <option value="EUR">Euro (€)</option>
+                                        <option value="USD">Dólar (US$)</option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
 

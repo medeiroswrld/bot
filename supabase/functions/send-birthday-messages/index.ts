@@ -25,10 +25,20 @@ serve(async (req) => {
       });
     }
 
-    // Data de hoje no fuso de Brasília (dd/MM)
-    const parts = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit' }).format(new Date()).split('/');
-    const curDay = Number(parts[0]);
-    const curMonth = Number(parts[1]);
+    /**
+     * Dia e mes de hoje NO FUSO DA LOJA.
+     *
+     * Era calculado uma vez, no fuso de Brasilia, para todas as lojas. Duas
+     * lojas em fusos diferentes podem estar em DIAS diferentes no mesmo
+     * instante — e aniversario errado por um dia e pior que aniversario
+     * nenhum, porque chega e chega errado.
+     */
+    const diaMesLocal = (tz: string) => {
+      const p = new Intl.DateTimeFormat('pt-BR', {
+        timeZone: tz || 'America/Sao_Paulo', day: '2-digit', month: '2-digit',
+      }).format(new Date()).split('/');
+      return { dia: Number(p[0]), mes: Number(p[1]) };
+    };
 
     const { data: settingsList } = await supabase
       .from('company_settings')
@@ -46,6 +56,7 @@ serve(async (req) => {
     let totalFailed = 0;
 
     for (const settings of settingsList) {
+      const { dia: curDay, mes: curMonth } = diaMesLocal(String(settings.timezone ?? ''));
       // Aniversario e disparo em massa: entra no mesmo plano das campanhas.
       if (!podeDisparar(settings)) {
         console.log(`[birthday] user ${settings.user_id}: plano sem disparo — pulando`);
@@ -107,7 +118,7 @@ serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ sent: totalSent, failed: totalFailed, date: `${curDay}/${curMonth}` }), {
+    return new Response(JSON.stringify({ sent: totalSent, failed: totalFailed }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
