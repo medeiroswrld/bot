@@ -48,7 +48,16 @@ export function imagemRedimensionada(url, largura = LARGURA.cartao, qualidade = 
 
   const base = url.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
   const sep = base.includes('?') ? '&' : '?';
-  return `${base}${sep}width=${largura}&quality=${qualidade}`;
+  // `resize=contain` NAO e opcional.
+  //
+  // So com `width`, o Storage espreme a largura e MANTEM a altura original:
+  // uma foto 3024x3024 virava 600x3024. Toda foto do estoque ficou esmagada,
+  // e o mesmo saiu para o cliente pelo WhatsApp.
+  //
+  // Com `contain` ele respeita a proporcao — e de quebra o arquivo fica menor
+  // (50 KB contra 163 KB na mesma foto), porque nao carrega mais 3024 linhas
+  // de altura a toa.
+  return `${base}${sep}width=${largura}&resize=contain&quality=${qualidade}`;
 }
 
 /** Atalhos, para o chamador não precisar lembrar dos números. */

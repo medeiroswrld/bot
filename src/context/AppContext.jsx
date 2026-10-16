@@ -887,6 +887,18 @@ export const AppProvider = ({ children }) => {
       // não só o campo dela. Foi assim que editar veículo parou de salvar.
       delete dbUpdates.status_real;
 
+      // `busca_texto` e coluna GERADA (migration 111): o banco a calcula a
+      // partir de marca, modelo e versao, e recusa qualquer escrita com
+      // `column "busca_texto" can only be updated to DEFAULT`.
+      //
+      // Como o formulario faz `...car` e o carro vem de um `select('*')`, ela
+      // viajava de volta no update e derrubava a gravacao INTEIRA — mesmo
+      // efeito do `status_real` logo acima, por uma razao diferente.
+      //
+      // Qualquer coluna gerada que a gente criar no futuro precisa entrar
+      // aqui no mesmo momento em que for criada.
+      delete dbUpdates.busca_texto;
+
       // Resolve mídias do bot (mantém URL existente, sobe arquivo novo, ou null se removida)
       dbUpdates.specs_image_url = await uploadCarMedia(updates.specsImage, 'car-images');
       dbUpdates.video_url       = await uploadCarMedia(updates.video, 'car-videos');

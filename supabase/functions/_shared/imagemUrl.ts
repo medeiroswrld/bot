@@ -56,5 +56,8 @@ export function paraEnvio(url: string, largura = LARGURA_ENVIO): string {
 
   const base = url.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
   const sep = base.includes('?') ? '&' : '?';
-  return `${base}${sep}width=${largura}&quality=${QUALIDADE}`;
+  // `resize=contain` NAO e opcional: so com `width`, o Storage espreme a
+  // largura e MANTEM a altura original — uma foto 3024x3024 virava 600x3024.
+  // Foi o que o cliente recebeu pelo WhatsApp desde ontem.
+  return `${base}${sep}width=${largura}&resize=contain&quality=${QUALIDADE}`;
 }
