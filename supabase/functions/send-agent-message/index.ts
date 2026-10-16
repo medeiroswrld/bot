@@ -152,8 +152,17 @@ serve(async (req) => {
     ].filter(Boolean);
     const ficha = linhas.join('\n');
 
-    await enviarTexto(fone, ficha, pid, tk);
-    await userClient.from('messages').insert({ conversation_id, role: 'agent', content: ficha });
+    // A ficha tambem registra se chegou. Antes o insert era incondicional, e
+    // era por isso que so a FOTO sumia visivelmente: a foto so e gravada em
+    // caso de sucesso, o texto era gravado sempre.
+    const fichaOk = await enviarTexto(fone, ficha, pid, tk);
+    await userClient.from('messages').insert({
+      conversation_id, role: 'agent', content: ficha,
+      ...(fichaOk ? {} : {
+        wa_status: 'failed',
+        wa_error: 'Não foi possível entregar. Verifique a conexão do WhatsApp da loja.',
+      }),
+    });
 
     // Galeria: specs primeiro (quando existe), depois as fotos na ordem da loja.
     // Teto de 8, igual ao que o painel deixa cadastrar e ao que o bot envia.
@@ -241,8 +250,28 @@ serve(async (req) => {
 
   const sent = await enviarTexto(conv.customer_phone as string, text.trim(), phoneNumberId, token);
   if (!sent) {
-    console.error(`[SAM] Falha ao enviar WhatsApp para ${maskPhone(conv.customer_phone as string)} — mensagem salva no banco`);
+    console.error(`[SAM] Falha ao enviar WhatsApp para ${maskPhone(conv.customer_phone as string)}`);
+
+    // Marca a mensagem como NAO ENTREGUE.
+    //
+    // Antes isto so virava uma linha de log e a funcao devolvia sucesso: o
+    // vendedor via a mensagem no CRM e seguia achando que o cliente recebeu.
+    // Na Leandrinho, 319 conversas estavam presas num numero que perdeu acesso
+    // na Meta, e a equipe atendia no vazio sem saber.
+    //
+    // A tela JA sabe desenhar isso — `VistoWhats` trata `wa_status = 'failed'`
+    // e mostra `wa_error`. So faltava alguem marcar.
+    await adminClient
+      .from('messages')
+      .update({
+        wa_status: 'failed',
+        wa_error: 'Não foi possível entregar. Verifique a conexão do WhatsApp da loja.',
+      })
+      .eq('id', msg.id);
   }
 
-  return jsonResponse({ success: true, message_id: msg.id });
+  // `enviado` diz a verdade. A mensagem fica no historico de qualquer forma —
+  // perder o que o vendedor escreveu seria pior —, mas quem chamou sabe o que
+  // aconteceu.
+  return jsonResponse({ success: true, enviado: sent, message_id: msg.id });
 });
