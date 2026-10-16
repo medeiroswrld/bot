@@ -608,6 +608,7 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
         devolver: false, devolverMin: 15,
         followup: false, followupHoras: 3, followupMsg: '',
         followupVendedor: false, followupHorasVendedor: 5,
+        locale: 'pt-BR',
     });
     const [bloqueados, setBloqueados] = useState([]);
     const [novoBloqueio, setNovoBloqueio] = useState('');
@@ -644,6 +645,7 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                 followup_horas: Math.min(20, Math.max(1, Number(botCfg.followupHoras) || 3)),
                 followup_mensagem: botCfg.followupMsg.trim() || null,
                 // Nulo = nao faz follow-up em conversa de vendedor.
+                locale: botCfg.locale || 'pt-BR',
                 followup_horas_vendedor: botCfg.followupVendedor
                     ? Math.min(20, Math.max(1, Number(botCfg.followupHorasVendedor) || 5))
                     : null,
@@ -798,6 +800,7 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
             followupMsg: s.followup_mensagem ?? '',
             followupVendedor: s.followup_horas_vendedor != null,
             followupHorasVendedor: Number(s.followup_horas_vendedor ?? 5),
+            locale: s.locale ?? 'pt-BR',
         });
         setBloqueados(Array.isArray(s.bot_blocked_numbers) ? s.bot_blocked_numbers : []);
         // Equipe e contatos por setor
@@ -1878,6 +1881,35 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                                 </p>
                             </div>
                         )}
+
+                        {/* Idioma.
+                            Vem antes do resto porque muda TODA resposta, nao um
+                            comportamento especifico. */}
+                        <div style={{ marginTop: 14, paddingTop: 14,
+                                      borderTop: '1px solid var(--border)' }}>
+                            <div className="form-group" style={{ marginBottom: 0, maxWidth: 320 }}>
+                                <label>Onde a loja atende</label>
+                                <select value={botCfg.locale}
+                                    onChange={e => setBotCfg(b => ({ ...b, locale: e.target.value }))}
+                                    style={{ width: '100%', padding: '0.65rem 1rem', borderRadius: 10,
+                                             border: '1px solid var(--border)', background: 'var(--card-bg)',
+                                             color: 'var(--text-primary)' }}>
+                                    <option value="pt-BR">Brasil — português do Brasil</option>
+                                    <option value="pt-PT">Portugal — português de Portugal</option>
+                                    <option value="es-ES">Espanha — espanhol</option>
+                                    <option value="en">Inglês</option>
+                                </select>
+                                <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)',
+                                            marginTop: 6, lineHeight: 1.5 }}>
+                                    Define o vocabulário do país — <strong>matrícula</strong> e não
+                                    &quot;placa&quot;, <strong>IUC</strong> e não &quot;IPVA&quot; —
+                                    e a moeda dos preços.{' '}
+                                    <strong>O idioma da resposta acompanha o cliente:</strong> quem
+                                    escrever em espanhol é respondido em espanhol, em inglês é
+                                    respondido em inglês. Isto aqui é a base de quando não dá pra saber.
+                                </p>
+                            </div>
+                        </div>
 
                         {/* Follow-up.
                             Fica junto do "devolver ao bot" porque os dois tratam

@@ -2277,7 +2277,60 @@ Quem chega por aqui costuma vir de um story ou anúncio e faz uma pergunta curta
     ? `5. **Quando o cliente pedir um horário que está OCUPADO** (você confirmou via ver_horarios_disponiveis que ele NÃO aparece em horarios_livres): NÃO descarte na hora nem ofereça alternativa imediatamente — chame request_schedule_check e responda só "Deixa eu verificar com meu superior, te respondo em alguns minutos." A confirmação ou as alternativas chegam ao cliente depois, automaticamente. ATENÇÃO: isto vale SÓ para horário OCUPADO. Se o horário estiver livre, siga a regra 6 (agendar na hora).`
     : `5. **Quando o cliente pedir um horário ocupado** (não está em horarios_livres): confirme via ver_horarios_disponiveis e, sem soar seco, já ofereça na hora 2 horários próximos livres (um antes, um depois), no mesmo tom humano ("deixa eu ver aqui... consigo te encaixar às X ou Y, qual prefere?"). NÃO use request_schedule_check. Se o horário estiver livre, siga a regra 6.`;
 
-  const conductionBlock = `\n\n## Persona e tom
+  // ── Idioma ────────────────────────────────────────────────────────────────
+  //
+  // Duas coisas diferentes, e confundi-las e o erro comum:
+  //
+  //   a loja tem uma LOCALIDADE  -> define vocabulario e termos legais
+  //   o cliente tem um IDIOMA    -> define em que lingua a resposta sai
+  //
+  // Um brasileiro escrevendo para um stand em Lisboa e respondido no portugues
+  // dele, mas o documento do carro continua sendo "matricula" — e esse o nome
+  // da coisa naquele pais. Traduzir o termo legal seria dar informacao errada.
+  //
+  // O glossario e curto de proposito: so o que muda de verdade no dia a dia de
+  // uma revenda. Lista longa gasta contexto e o modelo ja sabe o resto.
+  const LOCAIS: Record<string, { nome: string; termos: string }> = {
+    'pt-BR': {
+      nome: 'Brasil, em portugues do Brasil',
+      termos: 'placa, celular, loja, IPVA, licenciamento, CNH, R$ (real)',
+    },
+    'pt-PT': {
+      nome: 'Portugal, em portugues de Portugal',
+      termos: 'matricula (nao "placa"), telemovel (nao "celular"), stand (nao "loja"), '
+            + 'IUC (nao "IPVA"), ISV, carta de conducao (nao "CNH"), EUR. '
+            + 'Fale como se fala em Portugal: "estou a ver", nao "estou vendo".',
+    },
+    'es-ES': {
+      nome: 'Espanha, em espanhol',
+      termos: 'matricula, movil, concesionario, ITV, permiso de conducir, EUR',
+    },
+    'en': {
+      nome: 'um mercado de lingua inglesa',
+      termos: 'license plate, mobile, dealership, driving licence',
+    },
+  };
+  const local = LOCAIS[String(settings.locale ?? 'pt-BR')] ?? LOCAIS['pt-BR'];
+
+  const idiomaBlock = [
+    '',
+    '## Idioma',
+    '',
+    `A loja atende em **${local.nome}**.`,
+    '',
+    '**Responda SEMPRE no mesmo idioma em que o cliente escreveu**, de forma nativa',
+    '— nunca traduzida. Se ele escreve em espanhol, responda em espanhol; em ingles,',
+    'responda em ingles. Se mudar de idioma no meio da conversa, acompanhe.',
+    '',
+    'Sem pistas do idioma (so "oi", um emoji, uma foto), use o da loja.',
+    '',
+    `**Os termos do pais da loja NAO se traduzem**: ${local.termos}.`,
+    'Esses sao os nomes das coisas onde a loja opera, e valem mesmo quando o cliente',
+    'escreve de outro jeito. Preco sempre na moeda da loja.',
+    '',
+  ].join('\n');
+
+  const conductionBlock = `${idiomaBlock}\n\n## Persona e tom
 
 Você é um vendedor experiente da loja, NÃO um bot. Nunca se identifique como assistente virtual, IA, chatbot ou robô. Aja como uma pessoa real conduzindo o atendimento.
 
