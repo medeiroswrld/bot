@@ -437,6 +437,9 @@ export interface Database {
           status: 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show'
           notes: string | null
           car_id: string | null
+          // Visita marcada DURANTE um evento da loja (feirão). Nulo = visita
+          // comum. Gravado na criação, não deduzido pela data. Migration 117.
+          evento_id: string | null
           created_at: string
           updated_at: string | null
         }
@@ -451,6 +454,7 @@ export interface Database {
           status?: 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show'
           notes?: string | null
           car_id?: string | null
+          evento_id?: string | null
           created_at?: string
           updated_at?: string | null
         }
@@ -463,7 +467,50 @@ export interface Database {
           status?: 'scheduled' | 'confirmed' | 'completed' | 'cancelled' | 'no_show'
           notes?: string | null
           car_id?: string | null
+          evento_id?: string | null
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+
+      // Feirão, mutirão, semana de ofertas — por loja. Migration 117.
+      eventos: {
+        Row: {
+          id: string
+          user_id: string
+          nome: string
+          data_inicio: string
+          data_fim: string
+          hora_inicio: string
+          hora_fim: string
+          // Texto livre escrito pela LOJA. O bot repete o que está aqui e tem
+          // ordem de não inventar nada além disto.
+          condicoes: string | null
+          ativo: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          nome?: string
+          data_inicio: string
+          data_fim: string
+          hora_inicio?: string
+          hora_fim?: string
+          condicoes?: string | null
+          ativo?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          nome?: string
+          data_inicio?: string
+          data_fim?: string
+          hora_inicio?: string
+          hora_fim?: string
+          condicoes?: string | null
+          ativo?: boolean
         }
         Relationships: []
       }
@@ -538,6 +585,10 @@ export interface Database {
           start_time: string | null
           end_time: string | null
           note: string | null
+          // Exceção criada POR um evento (os dias em que o feirão abre a loja).
+          // Serve pra apagar o evento remover só os dias dele, e não um feriado
+          // marcado à mão. Migration 117.
+          evento_id: string | null
           created_at: string
         }
         Insert: {
@@ -548,6 +599,7 @@ export interface Database {
           start_time?: string | null
           end_time?: string | null
           note?: string | null
+          evento_id?: string | null
           created_at?: string
         }
         Update: {
@@ -555,6 +607,7 @@ export interface Database {
           start_time?: string | null
           end_time?: string | null
           note?: string | null
+          evento_id?: string | null
         }
         Relationships: []
       }
