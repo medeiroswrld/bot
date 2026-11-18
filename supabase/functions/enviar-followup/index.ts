@@ -158,10 +158,25 @@ Deno.serve(async (req) => {
         ok = r.ok;
         if (!ok) console.error('[followup] envio social recusado:', r.erro);
       } else {
+        // Conversa sem número de origem não recebe follow-up.
+        //
+        // Passar `undefined` aqui faz o sendCloud cair no fallback
+        // `WHATSAPP_PHONE_NUMBER_ID` — o número do PROVEDOR, que existe como
+        // secret. O follow-up sairia pelo número da Amply assinando como a
+        // loja, e com o token global quando o da loja é nulo.
+        //
+        // Guardar por aqui é seguro: TODA conversa de WhatsApp real tem
+        // phone_number_id gravado pelo webhook (conferido: 305/305 numa loja,
+        // 1007/1007 na outra). Vazio aqui significa conversa órfã, não conversa
+        // válida sem o campo.
+        const pidConversa = String(c.phone_number_id ?? '').trim();
+        if (!pidConversa) {
+          console.warn(`[followup] conversa ${c.conversation_id} sem phone_number_id — pulada, nada enviado`);
+          pulados++;
+          continue;
+        }
         if (!loja.tokenWa) loja.tokenWa = await resolveWhatsAppToken(supabase, userId);
-        ok = await sendMessage(
-          destino, texto, String(c.phone_number_id ?? '') || undefined, loja.tokenWa,
-        );
+        ok = await sendMessage(destino, texto, pidConversa, loja.tokenWa);
       }
     } catch (e) {
       console.error('[followup] exceção no envio:', e instanceof Error ? e.message : String(e));

@@ -88,12 +88,17 @@ serve(async (req) => {
     const token = await resolveWhatsAppToken(supabase, campaign.user_id);
 
     const publicoBruto = await resolveAudience(supabase, campaign);
-    const { lista: recipients, excluidosIdade, excluidosJaReceberam } =
-      await refinarPublico(supabase, campaign, publicoBruto);
+    const {
+      lista: recipients, excluidosIdade, excluidosJaReceberam,
+      excluidosDuplicados, excluidosPeloLimite,
+    } = await refinarPublico(supabase, campaign, publicoBruto);
 
     console.log('[send-campaign] público', {
       bruto: publicoBruto.length, final: recipients.length,
       excluidosIdade, excluidosJaReceberam,
+      // Estes dois são o que protege o número: repetido nunca sai duas vezes, e
+      // o teto impede o disparo de uma base inteira num número recém-conectado.
+      excluidosDuplicados, excluidosPeloLimite,
     });
 
     if (recipients.length === 0) {
@@ -192,10 +197,39 @@ const DIAS_CLIENTE_NOVO = 30;
  */
 async function refinarPublico(
   supabase: DB, campaign: DB, recipients: Recipient[],
-): Promise<{ lista: Recipient[]; excluidosIdade: number; excluidosJaReceberam: number }> {
+): Promise<{
+  lista: Recipient[];
+  excluidosIdade: number;
+  excluidosJaReceberam: number;
+  excluidosDuplicados: number;
+  excluidosPeloLimite: number;
+}> {
   const filter = campaign.audience_filter ?? {};
   let lista = recipients;
   let excluidosIdade = 0;
+
+  // ── 0. MESMA PESSOA UMA VEZ SÓ ────────────────────────────────────────────
+  //
+  // Isto vem antes de tudo porque nenhum outro filtro protege contra ele. A
+  // base de uma loja real tinha 1215 leads e 706 pessoas: 509 envios repetidos
+  // concentrados em 11 números, sendo que UM aparecia 304 vezes. Sem este
+  // passo, esse número receberia 304 mensagens de marketing no mesmo disparo —
+  // o jeito mais rápido de ser denunciado e derrubar a qualidade do número, o
+  // que cala o bot inteiro, não só a campanha.
+  //
+  // A comparação é por DÍGITOS. "(15) 99999-9999" e "5515999999999" são a mesma
+  // pessoa, e comparar a string crua deixaria as duas passarem.
+  const soDigitos = (p: unknown) => String(p ?? '').replace(/\D/g, '');
+  const vistos = new Set<string>();
+  const antesDedup = lista.length;
+  lista = lista.filter((r) => {
+    const chave = soDigitos(r.phone);
+    if (!chave) return false;
+    if (vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+  const excluidosDuplicados = antesDedup - lista.length;
 
   // 1. Idade do cadastro. Só vale pra público vindo de `leads` — lista de
   //    espera e números avulsos não têm data de cadastro, então passam direto.
@@ -238,12 +272,39 @@ async function refinarPublico(
       const { data: enviados } = await sq;
       const jaReceberam = new Set((enviados ?? []).map((s: DB) => String(s.customer_phone)));
       const antes = lista.length;
-      lista = lista.filter((r) => !jaReceberam.has(String(r.phone)));
+      // Também por dígitos: o histórico guarda o telefone como foi enviado, e
+      // comparar string crua deixaria a mesma pessoa receber de novo só porque
+      // o cadastro dela tem a máscara diferente.
+      const jaNormalizado = new Set([...jaReceberam].map(soDigitos));
+      lista = lista.filter((r) => !jaNormalizado.has(soDigitos(r.phone)));
       excluidosJaReceberam = antes - lista.length;
     }
   }
 
-  return { lista, excluidosIdade, excluidosJaReceberam };
+  // ── 4. TETO POR DISPARO ───────────────────────────────────────────────────
+  //
+  // `audience_filter.limite` (não precisa de coluna: o campo já é JSONB).
+  //
+  // Existe por causa do número NOVO. Um número recém-conectado começa no menor
+  // degrau da Meta: **250 conversas iniciadas pela empresa por 24h**. Uma base
+  // de 706 pessoas não só estoura o teto — mandar tudo de uma vez num número de
+  // poucos dias é o padrão clássico de banimento, e as falhas por limite
+  // estourado ainda machucam a qualidade do número.
+  //
+  // Com o teto, o lojista aquece: manda 100 hoje, 100 amanhã, e usa
+  // `excluir_ja_recebeu` pra não repetir quem já recebeu. A ordem é preservada,
+  // então lotes consecutivos avançam na lista em vez de sortear de novo.
+  const limite = Number(filter.limite) || 0;
+  let excluidosPeloLimite = 0;
+  if (limite > 0 && lista.length > limite) {
+    excluidosPeloLimite = lista.length - limite;
+    lista = lista.slice(0, limite);
+  }
+
+  return {
+    lista, excluidosIdade, excluidosJaReceberam,
+    excluidosDuplicados, excluidosPeloLimite,
+  };
 }
 
 async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]> {
@@ -276,6 +337,39 @@ async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]>
         .select('customer_phone, customer_name, lead_id')
         .eq('user_id', uid).eq('status', 'active').ilike('model', `%${model}%`);
       return (data ?? []).map((v: DB) => ({ phone: v.customer_phone, name: v.customer_name, lead_id: v.lead_id }));
+    }
+    // Quem tem VISITA MARCADA num evento (feirão). É o público do lembrete:
+    // gente que já se comprometeu a aparecer, não gente que talvez queira.
+    //
+    // Lê `appointments.evento_id`, que o bot grava sozinho quando a data cai
+    // dentro do evento (migration 117). `filter.evento_id` escolhe o evento;
+    // sem ele, pega qualquer visita de qualquer evento ainda não cancelada.
+    //
+    // O nome vem do próprio agendamento, não do lead: quem marca visita informa
+    // o nome ao bot, e é esse que o cliente espera ver na mensagem.
+    case 'evento_agendados': {
+      let aq = supabase.from('appointments')
+        .select('customer_phone, customer_name, appointment_date')
+        .eq('user_id', uid)
+        .not('evento_id', 'is', null)
+        .not('customer_phone', 'is', null)
+        .in('status', ['scheduled', 'confirmed']);
+      if (filter.evento_id) aq = aq.eq('evento_id', filter.evento_id);
+      // Só as visitas que ainda vão acontecer, quando pedido — lembrete de
+      // visita que já passou é ruído.
+      if (filter.so_futuras) aq = aq.gte('appointment_date', new Date().toISOString().slice(0, 10));
+      aq = aq.order('appointment_date', { ascending: true });
+      const { data, error } = await aq;
+      if (error) {
+        // Banco sem a migration 117 não tem a coluna. Devolver vazio é melhor
+        // que estourar: a campanha termina como "nenhum destinatário" em vez de
+        // falhar no meio.
+        console.warn('[send-campaign] evento_agendados indisponível:', error.message);
+        return [];
+      }
+      return (data ?? []).map((a: DB) => ({
+        phone: a.customer_phone, name: a.customer_name, lead_id: null,
+      }));
     }
     case 'custom_phones': {
       const phones = filter.phones ?? [];

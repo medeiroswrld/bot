@@ -167,6 +167,24 @@ serve(async (req) => {
     // atendimento em andamento — sair pelo numero principal aqui seria o
     // cliente receber a continuacao de outro numero.
     const pid = String((conv as { phone_number_id?: string | null }).phone_number_id || settings.whatsapp_phone_number_id || '');
+
+    // Loja SEM número próprio não envia nada. Sem este guarda, o `pid` vazio
+    // faz o sendCloud cair no fallback `WHATSAPP_PHONE_NUMBER_ID` (o número do
+    // PROVEDOR, que existe como secret) e a resposta sai pelo número da Amply
+    // como se fosse a loja — com o token global, porque o da loja também é
+    // nulo. Dois estragos: o cliente recebe a continuação do atendimento de um
+    // número estranho, e a Meta vê o número do provedor falando por uma conta
+    // que não tem número.
+    //
+    // A DSC ficou exatamente nesse estado por 54 dias (WhatsApp banido em
+    // 24/09). Descartar é o certo, igual ao caso de idade > 30min acima:
+    // responder um pedido antigo por um número errado é pior que não responder.
+    if (!pid) {
+      console.warn(`[pending] ${conv.id}: loja sem phone_number_id — descartado, nada enviado`);
+      skipped++;
+      continue;
+    }
+
     const token = await resolveWhatsAppToken(supabase, conv.user_id);
     const nome = conv.customer_name ? String(conv.customer_name).split(' ')[0] : null;
     const greet = nome ? `${nome}, ` : '';
