@@ -14,11 +14,15 @@
 // Sem foto de propósito: foto é o que pesa, e quem copia texto quer colar em
 // qualquer lugar.
 
-const dinheiro = (v) =>
-  v == null || v === '' ? 'consulte' : `R$ ${Number(v).toLocaleString('pt-BR')}`;
+import { dinheiro as fmtDinheiro, numero } from './dinheiro.js';
 
-const km = (v) =>
-  v == null || v === '' ? null : `${Number(v).toLocaleString('pt-BR')} km`;
+// Recebem a moeda da loja porque este texto vai PARA O CLIENTE: um stand em
+// Lisboa colando "R$ 18.900" no WhatsApp perde a conversa na primeira linha.
+const dinheiroDe = (moeda, locale) => (v) =>
+  v == null || v === '' ? 'consulte' : fmtDinheiro(v, moeda, locale);
+
+const kmDe = (locale) => (v) =>
+  v == null || v === '' ? null : `${numero(v, locale)} km`;
 
 /**
  * Monta o texto a partir de uma lista de veículos já filtrada pela tela.
@@ -26,7 +30,9 @@ const km = (v) =>
  * Respeitar o filtro é o ponto: "as picapes até 80 mil" é uma mensagem que se
  * lê; o estoque inteiro é um documento que se ignora.
  */
-export function estoqueEmTexto(carros, { nomeDaLoja } = {}) {
+export function estoqueEmTexto(carros, { nomeDaLoja, moeda, locale } = {}) {
+  const dinheiro = dinheiroDe(moeda, locale);
+  const km = kmDe(locale);
   const lista = (carros ?? []).filter((c) => c && c.status !== 'sold');
   if (!lista.length) return '';
 

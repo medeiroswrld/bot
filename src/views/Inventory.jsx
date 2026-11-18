@@ -9,6 +9,7 @@ import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import { montarContrato, dadosDoContrato, imprimirContrato, formatarCPF, cpfValido } from '../lib/contrato.js';
 import { useModelosContrato, SeletorModelo } from '../lib/useModelosContrato.jsx';
 import { estoqueEmTexto, copiarTexto } from '../lib/estoqueTexto.js';
+import { useDinheiro } from '../lib/useDinheiro.js';
 import { supabase } from '../lib/supabase.js';
 import { miniatura, cartao, grande } from '../lib/imagemUrl.js';
 import { prepararImagem, ehHeic } from '../lib/imagem.js';
@@ -166,6 +167,7 @@ const ConsultaPlacaModal = ({ onClose, onAdicionar }) => {
 
 const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
     const { addToast } = useAppContext();
+    const { simbolo } = useDinheiro();
     const [form, setForm] = useState(car ? {
         ...car,
         price: car.price != null ? Number(car.price).toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : '',
@@ -503,7 +505,7 @@ const CarFormModal = ({ car, isEdit, inicial, onClose, onSave }) => {
                             <input type="text" value={form.year} onChange={e => handleChange('year', e.target.value)} placeholder="Ex: 2024" />
                         </div>
                         <div className={`form-group ${errors.price ? 'has-error' : ''}`}>
-                            <label>Valor (R$) *</label>
+                            <label>Valor ({simbolo}) *</label>
                             <input type="text" inputMode="numeric" value={form.price} onChange={e => handleChange('price', e.target.value)} placeholder="Ex: 198000 ou 198.000" />
                         </div>
                     </div>
@@ -621,6 +623,7 @@ const consultarPlacaApi = async (placa) => {
 
 const SellModal = ({ car, onClose, onConfirm }) => {
     const { addToast } = useAppContext();
+    const { simbolo } = useDinheiro();
     const [salePrice, setSalePrice] = useState(car ? car.price : 0);
     const [saleDate, setSaleDate] = useState(getTodayStr());
     const [sellerName, setSellerName] = useState('');
@@ -754,7 +757,7 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                         </div>
                     </div>
                     <div className="form-group">
-                        <label>Valor Fechado (R$)</label>
+                        <label>Valor Fechado ({simbolo})</label>
                         <input type="number" value={salePrice} onChange={e => setSalePrice(Number(e.target.value))} />
                     </div>
                     <div className="form-group">
@@ -1062,6 +1065,7 @@ const ContratoModal = ({ carro, venda, onClose }) => {
 };
 
 const DetailDrawer = ({ car, onClose }) => {
+    const { dinheiro, numero } = useDinheiro();
     const images = car.images?.length > 0 ? car.images : [];
     const [activeImg, setActiveImg] = useState(0);
 
@@ -1103,8 +1107,8 @@ const DetailDrawer = ({ car, onClose }) => {
                     <p className="text-muted" style={{ marginBottom: '1.5rem' }}>{car.version} • {car.year}</p>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                         {[
-                            ['Preço', `R$ ${Number(car.price).toLocaleString('pt-BR')}`],
-                            ['Quilometragem', `${Number(car.km).toLocaleString('pt-BR')} km`],
+                            ['Preço', dinheiro(car.price)],
+                            ['Quilometragem', `${numero(car.km)} km`],
                             ['Câmbio', car.transmission],
                             ['Combustível', car.fuel],
                             ['Cor', car.color],
@@ -1202,6 +1206,7 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
 
 const Inventory = () => {
     const { inventory, addInventoryCar, updateInventoryCar, removeInventoryCar, sellCar, waitingListTemplateReady, notifyWaitingListMatch, companySettings, addToast } = useAppContext();
+    const { dinheiro, numero } = useDinheiro();
     const [search, setSearch] = useState('');
     const [filterStatus, setFilterStatus] = useState('todos');
     const [showAddModal, setShowAddModal] = useState(false);
@@ -1281,7 +1286,11 @@ const Inventory = () => {
                             ? `Copia os ${filtered.length} veículos listados, em texto, pra colar no WhatsApp`
                             : 'Nenhum veículo na lista'}
                         onClick={async () => {
-                            const texto = estoqueEmTexto(filtered, { nomeDaLoja: companySettings?.company_name });
+                            const texto = estoqueEmTexto(filtered, {
+                                nomeDaLoja: companySettings?.company_name,
+                                moeda: companySettings?.moeda,
+                                locale: companySettings?.locale,
+                            });
                             const ok = await copiarTexto(texto);
                             addToast(
                                 ok ? `${filtered.length} veículo${filtered.length !== 1 ? 's' : ''} copiado${filtered.length !== 1 ? 's' : ''}. É só colar.`
@@ -1350,10 +1359,10 @@ const Inventory = () => {
                                     Veio na troca — defina o preço pra publicar
                                 </div>
                             ) : (
-                                <div className="inv-card-price">R$ {Number(car.price).toLocaleString('pt-BR')}</div>
+                                <div className="inv-card-price">{dinheiro(car.price)}</div>
                             )}
                             <div className="inv-card-specs">
-                                <span><Gauge size={14} /> {Number(car.km).toLocaleString('pt-BR')} km</span>
+                                <span><Gauge size={14} /> {numero(car.km)} km</span>
                                 <span><Tag size={14} /> {car.transmission}</span>
                                 <span>{car.fuel}</span>
                             </div>

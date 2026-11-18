@@ -7,6 +7,7 @@ import {
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import PrimeirosPassos from './PrimeirosPassos.jsx';
 import { supabase } from '../lib/supabase.js';
+import { useDinheiro } from '../lib/useDinheiro.js';
 
 const STATUS_LABELS = {
     novo:        { label: 'Novo',           color: '#3b82f6', bg: '#eff6ff' },
@@ -28,9 +29,6 @@ const MetricCard = ({ icon, label, value, color, bg }) => (
 );
 
 // ─── Area Chart ───────────────────────────────────────────────────────────────
-
-const fmtBRL = (v) =>
-    v === 0 ? 'R$ 0' : `R$ ${Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
 
 // ─── useCountUp ───────────────────────────────────────────────────────────────
 
@@ -248,6 +246,8 @@ const DAY_NAMES = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 const Dashboard = () => {
     const navigate = useNavigate();
     const { leads, appointments, inventory, soldCars, user } = useAppContext();
+    const { dinheiro } = useDinheiro();
+    const fmtBRL = (v) => dinheiro(v, { max: 0 });
 
     const todayStr = getTodayStr();
 

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { TrendingUp, Info } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
+import { useDinheiro } from '../lib/useDinheiro.js';
 
 // Clientes atendidos pelo assistente que compraram.
 //
@@ -26,12 +27,10 @@ import { supabase } from '../lib/supabase.js';
 // está menor do que ele esperava, e passa a preencher o campo. O próprio
 // indicador dele melhora no mês seguinte.
 
-const real = (v) => Number(v || 0).toLocaleString('pt-BR', {
-  style: 'currency', currency: 'BRL', minimumFractionDigits: 0, maximumFractionDigits: 0,
-});
-
 const VendasDoAssistente = () => {
   const { user, companySettings } = useAppContext();
+  const { dinheiro } = useDinheiro();
+  const real = (v) => dinheiro(v || 0, { max: 0 });
   const [vendas, setVendas] = useState(null);
   const [semFone, setSemFone] = useState(0);
 

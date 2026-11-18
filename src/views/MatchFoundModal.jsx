@@ -2,14 +2,15 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Copy, Bookmark, Rocket, Settings, Loader2 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
-
-const fmtBRL = (n) => `R$ ${Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
-const fmtKm  = (n) => `${Number(n).toLocaleString('pt-BR')} km`;
+import { useDinheiro } from '../lib/useDinheiro.js';
 
 const MatchFoundModal = ({ data, onClose }) => {
     const navigate = useNavigate();
     const { addToast, waitingListTemplateReady, notifyWaitingListMatch } = useAppContext();
+    const { dinheiro, numero } = useDinheiro();
     const [notifying, setNotifying] = useState(false);
+    const fmtBRL = (n) => dinheiro(n, { max: 0 });
+    const fmtKm  = (n) => `${numero(n)} km`;
     if (!data) return null;
 
     const { car, matches = [], matches_count = 0 } = data;

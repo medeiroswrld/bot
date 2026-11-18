@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendImage, sendVideo, resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { enviarSocial, enviarImagemSocial, enviarVideoSocial } from '../_shared/social.ts';
 import { paraEnvio } from '../_shared/imagemUrl.ts';
+import { dinheiro, numero } from '../_shared/dinheiro.ts';
 import { buildCors } from '../_shared/cors.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
@@ -134,7 +135,7 @@ serve(async (req) => {
 
     const { data: cfg } = await adminClient
       .from('company_settings')
-      .select('whatsapp_phone_number_id')
+      .select('whatsapp_phone_number_id, moeda, locale')
       .eq('user_id', conv.user_id)
       .single();
     // Sai pelo mesmo numero que recebeu (ver 083). Cai no da loja quando a
@@ -146,9 +147,9 @@ serve(async (req) => {
     const linhas = [
       `*${carro.brand} ${carro.model}*${carro.version ? ` ${carro.version}` : ''}`,
       carro.year ? `Ano ${carro.year}` : '',
-      carro.mileage != null ? `${Number(carro.mileage).toLocaleString('pt-BR')} km` : '',
+      carro.mileage != null ? `${numero(carro.mileage, cfg?.locale)} km` : '',
       [carro.transmission, carro.fuel].filter(Boolean).join(' · '),
-      carro.price != null ? `\nR$ ${Number(carro.price).toLocaleString('pt-BR')}` : '',
+      carro.price != null ? `\n${dinheiro(carro.price, cfg?.moeda, cfg?.locale)}` : '',
     ].filter(Boolean);
     const ficha = linhas.join('\n');
 

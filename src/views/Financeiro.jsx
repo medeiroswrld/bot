@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Plus, Trash2, Lock, Printer, TrendingUp, TrendingDown, Repeat, Check, Pencil } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
-import { demonstrativo, sugestoes, rotuloMes, brl, CATEGORIAS_OPERACAO } from '../lib/financeiro.js';
+import { demonstrativo, sugestoes, rotuloMes, CATEGORIAS_OPERACAO } from '../lib/financeiro.js';
+import { useDinheiro } from '../lib/useDinheiro.js';
 
 const mesAtual = () => new Date().toISOString().slice(0, 7);
 const mesesAtras = (n) => {
@@ -109,6 +110,8 @@ const NovoLancamento = ({ onFechar }) => {
 // para de olhar. A loja lança o mês quando ele chega e ajusta o que veio
 // diferente.
 const DespesasFixas = ({ mesFoco }) => {
+    const { dinheiro } = useDinheiro();
+    const brl = (v) => dinheiro(v || 0, { min: 2, max: 2 });
     const {
         recurringExpenses, saveRecurringExpense, removeRecurringExpense,
         lancarFixasDoMes, financialEntries,
@@ -249,6 +252,8 @@ const DespesasFixas = ({ mesFoco }) => {
 
 const Financeiro = () => {
     const { financialEntries, removeFinancialEntry } = useAppContext();
+    const { dinheiro } = useDinheiro();
+    const brl = (v) => dinheiro(v || 0, { min: 2, max: 2 });
     const [de, setDe] = useState(mesesAtras(5));
     const [ate, setAte] = useState(mesAtual());
     const [novo, setNovo] = useState(false);

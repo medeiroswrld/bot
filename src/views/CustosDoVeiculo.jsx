@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Plus, Trash2, Lock } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
-import { contaDoVeiculo, sugestoes, brl } from '../lib/financeiro.js';
+import { contaDoVeiculo, sugestoes } from '../lib/financeiro.js';
+import { useDinheiro } from '../lib/useDinheiro.js';
 
 // Custos de um veículo, em estoque ou já vendido.
 //
@@ -11,6 +12,8 @@ import { contaDoVeiculo, sugestoes, brl } from '../lib/financeiro.js';
 // nunca ser usada.
 const CustosDoVeiculo = ({ car }) => {
     const { financialEntries, addFinancialEntry, removeFinancialEntry } = useAppContext();
+    const { dinheiro } = useDinheiro();
+    const brl = (v) => dinheiro(v || 0, { min: 2, max: 2 });
     const [aberto, setAberto] = useState(false);
     const [salvando, setSalvando] = useState(false);
     const [form, setForm] = useState({

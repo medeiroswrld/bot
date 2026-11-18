@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { supabaseTyped } from '../lib/supabase-typed';
 import { estoqueEmTexto } from '../lib/estoqueTexto.js';
+import { useDinheiro } from '../lib/useDinheiro.js';
 // useAppContext is from a .jsx file — cast to known shape below
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import { useAppContext } from '../context/AppContext.jsx';
@@ -404,6 +405,7 @@ const FILTER_OPTIONS: Array<{ label: string; value: FilterValue }> = [
 export default function Conversations() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { user, session } = (useAppContext() as unknown) as AppCtxShape;
+  const { dinheiro, numero, moeda, locale } = useDinheiro();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [lastMessages, setLastMessages]   = useState<Record<string, Message>>({});
@@ -691,7 +693,7 @@ export default function Conversations() {
     });
     if (!visiveis.length) return;
 
-    const texto = estoqueEmTexto(visiveis);
+    const texto = estoqueEmTexto(visiveis, { moeda, locale });
     if (!texto) return;
 
     setEnviandoCarro('lista');
@@ -1675,8 +1677,8 @@ export default function Conversations() {
                           </div>
                           <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
                             {c.year ? `${c.year} · ` : ''}
-                            {c.mileage != null ? `${Number(c.mileage).toLocaleString('pt-BR')} km · ` : ''}
-                            {c.price != null ? `R$ ${Number(c.price).toLocaleString('pt-BR')}` : ''}
+                            {c.mileage != null ? `${numero(c.mileage)} km · ` : ''}
+                            {c.price != null ? dinheiro(c.price) : ''}
                           </div>
                         </button>
                       ))}

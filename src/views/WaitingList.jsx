@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
 import { miniatura } from '../lib/imagemUrl.js';
+import { useDinheiro } from '../lib/useDinheiro.js';
 
 const STATUS_CFG = {
     active:    { label: 'Aguardando',       color: '#64748b', bg: '#f1f5f9' },
@@ -25,11 +26,9 @@ const FILTERS = [
 ];
 
 const lower = (v) => String(v ?? '').toLowerCase();
-const fmtKm  = (n) => `${Number(n).toLocaleString('pt-BR')} km`;
-const fmtBRL = (n) => `R$ ${Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
 
 // Resumo amigável dos critérios: "Honda Civic 2009-2011, até 90 mil km, até R$ 60.000"
-function formatCriteria(it) {
+function formatCriteria(it, fmtKm, fmtBRL) {
     const parts = [];
     const nome = [it.brand, it.model].filter(Boolean).join(' ');
     if (nome) parts.push(nome);
@@ -82,7 +81,11 @@ const StatusBadge = ({ status }) => {
 };
 
 // ─── Modal: carros do estoque que batem ───────────────────────────────────────
-const MatchesModal = ({ interest, cars, onClose }) => (
+const MatchesModal = ({ interest, cars, onClose }) => {
+    const { dinheiro, numero } = useDinheiro();
+    const fmtBRL = (n) => dinheiro(n, { max: 0 });
+    const fmtKm  = (n) => `${numero(n)} km`;
+    return (
     <div className="modal-overlay" onClick={onClose}>
         <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
@@ -114,11 +117,15 @@ const MatchesModal = ({ interest, cars, onClose }) => (
             )}
         </div>
     </div>
-);
+    );
+};
 
 // ─── Modal: mensagem pronta pra avisar o cliente ──────────────────────────────
 const NotifyModal = ({ interest, cars, onClose, onMarkNotified }) => {
     const { addToast } = useAppContext();
+    const { dinheiro, numero } = useDinheiro();
+    const fmtBRL = (n) => dinheiro(n, { max: 0 });
+    const fmtKm  = (n) => `${numero(n)} km`;
     const car = cars[0];
     const nome = (interest.customer_name || '').split(' ')[0] || 'tudo bem';
     const msg = car
@@ -188,6 +195,7 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
 // sem telefone é anotação, não lista de espera.
 const NovoInteresse = ({ onFechar }) => {
     const { addInterest } = useAppContext();
+    const { simbolo } = useDinheiro();
     const [salvando, setSalvando] = useState(false);
     const [form, setForm] = useState({
         customer_name: '', customer_phone: '', brand: '', model: '',
@@ -247,7 +255,7 @@ const NovoInteresse = ({ onFechar }) => {
                                 onChange={(e) => set('km_max', e.target.value)} />
                         </div>
                         <div className="form-group" style={{ flex: '0 1 130px' }}>
-                            <label>Até quanto (R$)</label>
+                            <label>Até quanto ({simbolo})</label>
                             <input type="number" value={form.price_max}
                                 onChange={(e) => set('price_max', e.target.value)} />
                         </div>
@@ -284,6 +292,9 @@ const NovoInteresse = ({ onFechar }) => {
 const WaitingList = () => {
     const { vehicleInterests, inventory, updateInterestStatus, deleteInterest, addToast,
         waitingListTemplateReady, notifyWaitingListMatch } = useAppContext();
+    const { dinheiro, numero } = useDinheiro();
+    const fmtBRL = (n) => dinheiro(n, { max: 0 });
+    const fmtKm  = (n) => `${numero(n)} km`;
     const [filter, setFilter] = useState('todos');
     const [search, setSearch] = useState('');
     const [matchesModal, setMatchesModal] = useState(null);
@@ -409,7 +420,7 @@ const WaitingList = () => {
                                     <tr key={it.id} style={{ borderBottom: '1px solid var(--border)' }}>
                                         <td style={{ padding: '12px 16px', fontWeight: 600 }}>{it.customer_name || '—'}</td>
                                         <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>{it.customer_phone}</td>
-                                        <td style={{ padding: '12px 16px', maxWidth: 320 }}>{formatCriteria(it) || it.model}</td>
+                                        <td style={{ padding: '12px 16px', maxWidth: 320 }}>{formatCriteria(it, fmtKm, fmtBRL) || it.model}</td>
                                         <td style={{ padding: '12px 16px' }}><StatusBadge status={it.status} /></td>
                                         <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{relativeDate(it.created_at)}</td>
                                         <td style={{ padding: '12px 16px' }}>

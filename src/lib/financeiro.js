@@ -6,6 +6,8 @@
 // custo real disso é o lojista abandonar o módulo antes de lançar a primeira
 // despesa.
 
+import { dinheiro } from './dinheiro.js';
+
 /** Despesas que pertencem a UM veículo: entram no custo dele e no caixa do mês. */
 export const CATEGORIAS_VEICULO = [
   'Compra de veículos',
@@ -172,6 +174,8 @@ export const rotuloMes = (mes) => {
   return `${nomes[Number(m) - 1] ?? m}/${a}`;
 };
 
-export const brl = (v) => Number(v || 0).toLocaleString('pt-BR', {
-  style: 'currency', currency: 'BRL', maximumFractionDigits: 2,
-});
+// Custo, faturamento e despesa SEMPRE com centavo: aqui o valor e contabil,
+// nao preco de vitrine. Foi a diferenca que quase passou batida ao unificar os
+// formatadores — o default de `dinheiro()` e `min: 0`, que some com os ",00".
+export const brl = (v, moeda, locale) =>
+  dinheiro(v || 0, moeda, locale, { min: 2, max: 2 });

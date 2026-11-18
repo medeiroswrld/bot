@@ -5,6 +5,7 @@ import { montarContrato, dadosDoContrato, imprimirContrato, formatarCPF } from '
 import { useModelosContrato, SeletorModelo } from '../lib/useModelosContrato.jsx';
 import CustosDoVeiculo from './CustosDoVeiculo.jsx';
 import { grande, miniatura } from '../lib/imagemUrl.js';
+import { useDinheiro } from '../lib/useDinheiro.js';
 
 // Par rotulo/valor. Valor ausente vira travessao em vez de sumir: espaco vazio
 // mostra que o dado FALTA, e e assim que a loja descobre o que nao coletou.
@@ -33,8 +34,6 @@ const Bloco = ({ titulo, icone, children }) => (
         </div>
     </div>
 );
-
-const dinheiro = (v) => (v == null || v === '' ? '' : `R$ ${Number(v).toLocaleString('pt-BR')}`);
 
 // Reimpressao do contrato desta venda. O carro vendido guarda comprador, troca e
 // forma de pagamento, entao da pra remontar o documento igual ao do dia da
@@ -73,6 +72,8 @@ const ContratoDaVenda = ({ car, onClose }) => {
 
 const DetailDrawer = ({ car, onClose }) => {
     const { removeInventoryCar } = useAppContext();
+    const { dinheiro, numero } = useDinheiro();
+    const money = (v) => (v == null || v === '' ? '' : dinheiro(v));
     const images = car.images || (car.image ? [car.image] : []);
     const [activeImg, setActiveImg] = useState(0);
     const [verContrato, setVerContrato] = useState(false);
@@ -138,10 +139,10 @@ const DetailDrawer = ({ car, onClose }) => {
                             <p className="text-muted" style={{ fontSize: '0.7rem', textTransform: 'uppercase',
                                                                letterSpacing: '0.5px', margin: '0 0 2px' }}>Valor de venda</p>
                             <p style={{ fontWeight: 700, color: '#059669', fontSize: '1.05rem', margin: 0 }}>
-                                {dinheiro(car.sold_price) || '\u2014'}
+                                {money(car.sold_price) || '\u2014'}
                             </p>
                         </div>
-                        <Campo rotulo="Valor anunciado" valor={dinheiro(car.price)} />
+                        <Campo rotulo="Valor anunciado" valor={money(car.price)} />
                         <Campo rotulo="Data da venda" valor={formatDateStr((car.sold_at || '').split('T')[0])} />
                         <Campo rotulo="Vendedor" valor={car.sold_by} />
                         <Campo rotulo="Forma de pagamento" valor={car.payment_terms} />
@@ -162,7 +163,7 @@ const DetailDrawer = ({ car, onClose }) => {
                         <Campo rotulo="Chassi" valor={car.chassi} mono />
                         <Campo rotulo="Ano do modelo" valor={car.model_year} />
                         <Campo rotulo="Cor" valor={car.color} />
-                        <Campo rotulo="Quilometragem" valor={car.km != null ? `${Number(car.km).toLocaleString('pt-BR')} km` : ''} />
+                        <Campo rotulo="Quilometragem" valor={car.km != null ? `${numero(car.km)} km` : ''} />
                     </Bloco>
 
                     {car.trade_in_plate && (
@@ -174,8 +175,8 @@ const DetailDrawer = ({ car, onClose }) => {
                             <Campo rotulo="Renavam" valor={car.trade_in_renavam} mono />
                             <Campo rotulo="Chassi" valor={car.trade_in_chassi} mono />
                             <Campo rotulo="Cor" valor={car.trade_in_color} />
-                            <Campo rotulo="Km" valor={car.trade_in_km != null ? `${Number(car.trade_in_km).toLocaleString('pt-BR')} km` : ''} />
-                            <Campo rotulo="Valor avaliado" valor={dinheiro(car.trade_in_value)} />
+                            <Campo rotulo="Km" valor={car.trade_in_km != null ? `${numero(car.trade_in_km)} km` : ''} />
+                            <Campo rotulo="Valor avaliado" valor={money(car.trade_in_value)} />
                         </Bloco>
                     )}
 
@@ -257,6 +258,7 @@ const DetailDrawer = ({ car, onClose }) => {
 
 const SoldCars = () => {
     const { soldCars } = useAppContext();
+    const { dinheiro } = useDinheiro();
     const [search, setSearch] = useState('');
     const [filterMonth, setFilterMonth] = useState('todos');
     const [viewCar, setViewCar] = useState(null);
@@ -277,7 +279,7 @@ const SoldCars = () => {
     // ainda sai, com linha em branco. Sem esses dois, nao sai.
     const comContrato = filtered.filter(c => c.buyer_name && c.buyer_cpf).length;
     const comTroca = filtered.filter(c => c.trade_in_plate).length;
-    const formatCurrency = (val) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(val);
+    const formatCurrency = (val) => dinheiro(val, { max: 0 });
 
     return (
         <div className="view-content">
@@ -363,7 +365,7 @@ const SoldCars = () => {
                         </div>
                         <div className="sold-card-detail">
                             <small className="text-muted">Valor de Venda</small>
-                            <strong style={{ color: '#059669' }}>R$ {car.sold_price?.toLocaleString('pt-BR')}</strong>
+                            <strong style={{ color: '#059669' }}>{dinheiro(car.sold_price)}</strong>
                         </div>
                         <div className="sold-card-detail">
                             <small className="text-muted">Entrada</small>

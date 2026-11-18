@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendMessage, sendMessageComId, sendImage, sendVideo, resolveWhatsAppToken, sendListaInterativa, sendCatalogo } from '../_shared/whatsapp.ts';
 import { enviarSocial, enviarImagemSocial, enviarVideoSocial } from '../_shared/social.ts';
 import { paraEnvio } from '../_shared/imagemUrl.ts';
+import { dinheiro, numero } from '../_shared/dinheiro.ts';
 import { maskName } from '../_shared/maskPII.ts';
 import { withRequest, type Logger } from '../_shared/logger.ts';
 import { botPodeResponder, COLUNAS_GUARDA } from '../_shared/botGuards.ts';
@@ -387,8 +388,8 @@ const TOOLS = [
         year_min:     { type: 'integer', description: 'Ano mínimo aceito' },
         year_max:     { type: 'integer', description: 'Ano máximo aceito' },
         km_max:       { type: 'integer', description: 'KM máximo aceito (ex: 90000 para 90 mil km)' },
-        price_min:    { type: 'number',  description: 'Preço mínimo aceito em R$' },
-        price_max:    { type: 'number',  description: 'Preço máximo aceito em R$' },
+        price_min:    { type: 'number',  description: 'Preço mínimo aceito, na moeda da loja' },
+        price_max:    { type: 'number',  description: 'Preço máximo aceito, na moeda da loja' },
         vehicle_type: { type: 'string',  description: 'Tipo: carro, moto, caminhonete' },
         fuel:         { type: 'string',  description: 'Combustível: flex, gasolina, diesel' },
         transmission: { type: 'string',  description: 'Câmbio: manual ou automatico' },
@@ -646,6 +647,9 @@ async function executeTool(
     // Canal de origem. Nos sociais o envio muda de endpoint e de token, e
     // customerPhone guarda o PSID/IGSID em vez de um telefone.
     canal?: string; contaId?: string; tokenSocial?: string;
+    // Moeda e formato do pais da loja. Sem isto, o preco escrito PARA O
+    // CLIENTE sai em real mesmo num stand que opera em euro.
+    moeda?: string; locale?: string;
   },
   supabase: SupabaseClient,
 ): Promise<unknown> {
@@ -653,6 +657,8 @@ async function executeTool(
   const ctxCanal       = ctx.canal ?? 'whatsapp';
   const ctxContaId     = ctx.contaId ?? '';
   const ctxTokenSocial = ctx.tokenSocial ?? '';
+  const ctxMoeda       = ctx.moeda ?? 'BRL';
+  const ctxLocale      = ctx.locale ?? 'pt-BR';
 
   if (name === 'consultar_estoque') {
     // Teto de veículos por consulta. Existe pra não estourar o contexto numa loja
@@ -818,7 +824,7 @@ async function executeTool(
       // Sem isso a resposta vira interrogatório seco; com eles o bot consegue dar
       // uma amostra concreta ANTES de perguntar, que é como um vendedor fala.
       const rotulo = (l: typeof linhas[number]) =>
-        `${[l.brand, l.model].filter(Boolean).join(' ').trim()}${l.year ? ` ${l.year}` : ''} — R$ ${Number(l.price).toLocaleString('pt-BR')}`;
+        `${[l.brand, l.model].filter(Boolean).join(' ').trim()}${l.year ? ` ${l.year}` : ''} — ${dinheiro(l.price, ctxMoeda, ctxLocale)}`;
       const idxs = linhas.length >= 3
         ? [0, Math.floor(linhas.length / 2), linhas.length - 1]
         : linhas.map((_, i) => i);
@@ -956,8 +962,8 @@ async function executeTool(
       if (!usarCatalogo && !menuRecente && vitrine?.lista_interativa !== false) {
         linhasDoMenu = (data as CarListRow[]).slice(0, 10).map((c) => {
           const nome = [c.brand, c.model].filter(Boolean).join(' ').trim() || 'Veiculo';
-          const preco = c.price ? `R$ ${Number(c.price).toLocaleString('pt-BR')}` : 'consulte';
-          const km = c.mileage != null ? `${Number(c.mileage).toLocaleString('pt-BR')} km` : '';
+          const preco = c.price ? dinheiro(c.price, ctxMoeda, ctxLocale) : 'consulte';
+          const km = c.mileage != null ? `${numero(c.mileage, ctxLocale)} km` : '';
           return {
             id: String(c.id),
             titulo: nome,
@@ -3505,6 +3511,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   const ctx = {
     userId, conversationId, customerPhone, customerName, phoneNumberId,
     token: waToken, log, canal, contaId: contaIdSocial, tokenSocial,
+    moeda: settings?.moeda ?? 'BRL', locale: settings?.locale ?? 'pt-BR',
   };
   let finalText = '';
   const toolsUsadas = new Set<string>();  // o que o modelo REALMENTE chamou neste turno

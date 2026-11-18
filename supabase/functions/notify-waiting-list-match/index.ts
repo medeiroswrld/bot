@@ -5,9 +5,8 @@ import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
 import { buildCors } from '../_shared/cors.ts';
+import { dinheiro, numero } from '../_shared/dinheiro.ts';
 
-const fmtBRL = (n: number) => `R$ ${Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
-const fmtKm  = (n: number) => `${Number(n || 0).toLocaleString('pt-BR')} km`;
 
 serve(async (req) => {
   const corsHeaders = buildCors(req);
@@ -48,14 +47,20 @@ serve(async (req) => {
     }
 
     const carName = [car.brand, car.model, car.version].filter(Boolean).join(' ');
-    const carDescription = `${carName} ${car.year}, ${fmtKm(car.mileage)}, ${fmtBRL(car.price)}`;
 
     // Settings (template + phone + nome empresa) da empresa dona do carro
     const { data: settings } = await supabase
       .from('company_settings')
-      .select('whatsapp_phone_number_id, waiting_list_template_id, company_name')
+      .select('whatsapp_phone_number_id, waiting_list_template_id, company_name, moeda, locale')
       .eq('user_id', car.user_id)
       .single();
+
+    // Montada aqui, e nao junto do `carName`, porque precisa da moeda da loja.
+    // `Math.round` no preco mantem a saida brasileira igual a de antes, quando
+    // o helper local fixava `maximumFractionDigits: 0`.
+    const carDescription = `${carName} ${car.year}, `
+      + `${numero(car.mileage || 0, settings?.locale)} km, `
+      + `${dinheiro(Math.round(Number(car.price) || 0), settings?.moeda, settings?.locale)}`;
 
     if (!settings?.waiting_list_template_id) {
       return new Response(JSON.stringify({ error: 'Template de Lista de Espera não configurado em Configurações' }), {

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Megaphone, CheckCircle2, Clock, AlertCircle, Hourglass, Loader2 } from 'lucide-react';
 import { supabase } from '../lib/supabase.js';
-import { brl } from '../lib/financeiro.js';
+import { useDinheiro } from '../lib/useDinheiro.js';
 
 // Painel de anúncios.
 //
@@ -47,6 +47,8 @@ const Cartao = ({ status, quantidade }) => {
 };
 
 export default function Anuncios() {
+    const { dinheiro } = useDinheiro();
+    const brl = (v) => dinheiro(v || 0, { min: 2, max: 2 });
     const [carregando, setCarregando] = useState(true);
     const [anuncios, setAnuncios]     = useState([]);
     const [fila, setFila]             = useState({});
