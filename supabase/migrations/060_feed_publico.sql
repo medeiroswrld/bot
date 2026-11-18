@@ -13,7 +13,7 @@ alter table public.company_settings
 
 -- Backfill: toda loja que já existe nasce com um token.
 update public.company_settings
-   set feed_token = encode(gen_random_bytes(16), 'hex')
+   set feed_token = encode(extensions.gen_random_bytes(16), 'hex')
  where feed_token is null;
 
 -- Único, e o índice serve também para a busca do webhook, que é sempre por token.
@@ -40,7 +40,10 @@ begin
     raise exception 'Não autenticado';
   end if;
 
-  novo := encode(gen_random_bytes(16), 'hex');
+  -- QUALIFICADO. Com `search_path = ''` o `gen_random_bytes` sem schema NAO
+  -- resolve: no Supabase o pgcrypto vive em "extensions". Sem isto a funcao
+  -- falharia so na hora em que alguem clicasse em "regerar", nunca no deploy.
+  novo := encode(extensions.gen_random_bytes(16), 'hex');
 
   update public.company_settings
      set feed_token = novo
