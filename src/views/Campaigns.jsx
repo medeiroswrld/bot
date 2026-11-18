@@ -31,7 +31,7 @@ const StatusBadge = ({ status }) => {
 // ─── Wizard ───────────────────────────────────────────────────────────────────
 const CampaignWizard = ({ onClose }) => {
     const navigate = useNavigate();
-    const { messageTemplates, leads, vehicleInterests, createCampaign, sendCampaign } = useAppContext();
+    const { messageTemplates, leads, vehicleInterests, appointments, createCampaign, sendCampaign } = useAppContext();
     const approvedTemplates = useMemo(() => (messageTemplates || []).filter(t => t.status === 'approved'), [messageTemplates]);
 
     const [step, setStep] = useState(1);
@@ -50,6 +50,10 @@ const CampaignWizard = ({ onClose }) => {
     const [idade, setIdade] = useState('todos');            // todos | novos | antigos
     const [excluirJaRecebeu, setExcluirJaRecebeu] = useState('nenhum');
     const [excluirDias, setExcluirDias] = useState(7);
+    // Teto por disparo. Existe por causa de número novo: recém-conectado começa
+    // em 250 conversas iniciadas pela empresa por 24h na Meta, e mandar a base
+    // inteira de uma vez é padrão de banimento. 0 = sem teto.
+    const [limite, setLimite] = useState(0);
     const [jaReceberam, setJaReceberam] = useState(new Set());
 
     const template = approvedTemplates.find(t => t.id === templateId) || null;
@@ -79,16 +83,20 @@ const CampaignWizard = ({ onClose }) => {
 
     const audienceFilter = useMemo(() => {
         // Os refinamentos viajam junto com o filtro do público, pra qualquer tipo.
-        const refino = { idade, excluir_ja_recebeu: excluirJaRecebeu, excluir_dias: Number(excluirDias) || 7 };
+        const refino = {
+            idade, excluir_ja_recebeu: excluirJaRecebeu, excluir_dias: Number(excluirDias) || 7,
+            ...(Number(limite) > 0 ? { limite: Number(limite) } : {}),
+        };
         switch (audienceType) {
             case 'leads_by_status': return { ...refino, statuses };
             case 'leads_inactive': return { ...refino, days_inactive: Number(daysInactive) || 30 };
             case 'leads_by_interest_vehicle': return { ...refino, model: interestModel };
             case 'leads_by_source': return { ...refino, sources: ['importacao'] };
+            case 'evento_agendados': return { ...refino, so_futuras: true };
             case 'custom_phones': return { ...refino, phones: customPhones.split('\n').map(p => p.replace(/\D/g, '')).filter(Boolean) };
             default: return refino;
         }
-    }, [audienceType, statuses, daysInactive, interestModel, customPhones, idade, excluirJaRecebeu, excluirDias]);
+    }, [audienceType, statuses, daysInactive, interestModel, customPhones, idade, excluirJaRecebeu, excluirDias, limite]);
 
     // Público base, antes dos refinamentos (client-side, a partir do context).
     const publicoBase = useMemo(() => {
@@ -114,15 +122,50 @@ const CampaignWizard = ({ onClose }) => {
         return true;
     }), [publicoBase, idade, excluirJaRecebeu, jaReceberam]);
 
-    const audienceCount = useMemo(() => {
-        // Estes dois não vêm de `leads`, então não passam pelos refinamentos.
+    // Telefones do público, antes do dedup. Os três casos abaixo não vêm de
+    // `leads`, então não passam pelos refinamentos de idade/já-recebeu.
+    const telefonesDoPublico = useMemo(() => {
         if (audienceType === 'leads_by_interest_vehicle') {
-            return (vehicleInterests || []).filter(v => v.status === 'active' && (v.model || '').toLowerCase().includes(interestModel.toLowerCase())).length;
+            return (vehicleInterests || [])
+                .filter(v => v.status === 'active' && (v.model || '').toLowerCase().includes(interestModel.toLowerCase()))
+                .map(v => v.customer_phone);
         }
-        if (audienceType === 'custom_phones') return audienceFilter.phones.length;
-        return publicoFinal.length;
-    }, [audienceType, vehicleInterests, interestModel, audienceFilter, publicoFinal]);
+        if (audienceType === 'custom_phones') return audienceFilter.phones;
+        if (audienceType === 'evento_agendados') {
+            // Mesma regra do resolveAudience: visita de evento, não cancelada,
+            // e só as que ainda vão acontecer (so_futuras).
+            const hoje = new Date().toISOString().slice(0, 10);
+            return (appointments || [])
+                .filter(a => a.evento_id && ['agendado', 'confirmado'].includes(a.status) && a.date >= hoje)
+                .map(a => a.phone);
+        }
+        return publicoFinal.map(l => l.phone);
+    }, [audienceType, vehicleInterests, interestModel, audienceFilter, appointments, publicoFinal]);
 
+    // Dedup por DÍGITOS — a MESMA regra do refinarPublico no send-campaign.
+    //
+    // Sem isto o contador mente, e mente para baixo do que importa: a base de
+    // uma loja real tinha 1215 leads e 706 pessoas (509 repetidos, um número
+    // aparecendo 304 vezes). O lojista dispararia achando que são 1215 e sairiam
+    // 706 — exatamente o descasamento que esta tela foi feita pra evitar.
+    const unicos = useMemo(() => {
+        const vistos = new Set();
+        return telefonesDoPublico.filter((p) => {
+            const chave = String(p ?? '').replace(/\D/g, '');
+            if (!chave || vistos.has(chave)) return false;
+            vistos.add(chave);
+            return true;
+        });
+    }, [telefonesDoPublico]);
+
+    const duplicadosRemovidos = telefonesDoPublico.length - unicos.length;
+
+    const audienceCount = useMemo(() => {
+        const teto = Number(limite) || 0;
+        return teto > 0 ? Math.min(unicos.length, teto) : unicos.length;
+    }, [unicos, limite]);
+
+    const cortadosPeloTeto = Math.max(0, unicos.length - audienceCount);
     const removidosPeloRefino = publicoBase.length - publicoFinal.length;
 
     const estCost = audienceCount * (COST_PER_CONV[template?.category] ?? 0.15);
@@ -237,6 +280,7 @@ const CampaignWizard = ({ onClose }) => {
                             ['leads_by_status', 'Leads em determinados status'],
                             ['leads_inactive', 'Leads inativos há X dias'],
                             ['leads_by_interest_vehicle', 'Lista de espera por modelo'],
+                            ['evento_agendados', 'Quem agendou visita no feirão'],
                             ['custom_phones', 'Lista de números customizada'],
                         ].map(([val, label]) => (
                             <label key={val} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', cursor: 'pointer' }}>
@@ -267,12 +311,34 @@ const CampaignWizard = ({ onClose }) => {
                                 <input type="text" value={interestModel} onChange={e => setInterestModel(e.target.value)} placeholder="Ex: Civic" />
                             </div>
                         )}
+                        {audienceType === 'evento_agendados' && (
+                            <p className="text-muted" style={{ fontSize: '0.82rem', marginTop: 8, lineHeight: 1.5 }}>
+                                Pega quem tem <strong>visita marcada</strong> num dia do evento e ainda
+                                vai acontecer. O bot marca essas visitas sozinho, pela data. Use com um
+                                template de <strong>lembrete</strong>, não com a peça promocional: quem
+                                já agendou não precisa ser convidado de novo.
+                            </p>
+                        )}
                         {audienceType === 'custom_phones' && (
                             <div className="form-group" style={{ marginTop: 8 }}>
                                 <label>Números (um por linha, com DDD)</label>
                                 <textarea rows={4} value={customPhones} onChange={e => setCustomPhones(e.target.value)} placeholder={'5515999998888\n5511988887777'} style={{ fontFamily: 'monospace' }} />
                             </div>
                         )}
+
+                        {/* Teto por disparo — proteção de número novo */}
+                        <div className="form-group" style={{ marginTop: 16 }}>
+                            <label>Enviar no máximo (0 = sem limite)</label>
+                            <input type="number" value={limite} min={0}
+                                onChange={e => setLimite(e.target.value)} style={{ maxWidth: 140 }} />
+                            <small className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.5, display: 'block' }}>
+                                Número de WhatsApp <strong>recém-conectado</strong> começa em
+                                <strong> 250 conversas por 24h</strong> na Meta. Mandar uma base grande de
+                                uma vez num número novo estoura o teto e é padrão de banimento. Mande em
+                                lotes (ex.: 100 por dia) e marque <em>“já recebeu”</em> abaixo pra não
+                                repetir ninguém.
+                            </small>
+                        </div>
 
                         {/* Refinamentos — combinam com qualquer público acima */}
                         {audienceType !== 'custom_phones' && audienceType !== 'leads_by_interest_vehicle' && (
@@ -325,6 +391,19 @@ const CampaignWizard = ({ onClose }) => {
                                     <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 2 }}>
                                         {removidosPeloRefino} {removidosPeloRefino === 1 ? 'ficou' : 'ficaram'} de fora pelo refino
                                         {' '}(de {publicoBase.length} no total)
+                                    </div>
+                                )}
+                                {/* Dizer POR QUE o número caiu. Sem isto parece que o sistema
+                                    perdeu gente, e o lojista desconfia do contador. */}
+                                {duplicadosRemovidos > 0 && (
+                                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                                        {duplicadosRemovidos} {duplicadosRemovidos === 1 ? 'cadastro repetido' : 'cadastros repetidos'} do mesmo telefone
+                                        {' '}— cada pessoa recebe uma vez só
+                                    </div>
+                                )}
+                                {cortadosPeloTeto > 0 && (
+                                    <div style={{ fontSize: '0.78rem', color: '#d97706', marginTop: 2 }}>
+                                        {cortadosPeloTeto} {cortadosPeloTeto === 1 ? 'fica' : 'ficam'} para o próximo lote (teto de {limite})
                                     </div>
                                 )}
                             </div>
