@@ -4,6 +4,8 @@ import {
     CheckCircle2, Clock, AlertCircle, Loader2
 } from 'lucide-react';
 import { useAppContext } from '../context/AppContext.jsx';
+import { supabase } from '../lib/supabase.js';
+import { prepararImagem, ehHeic } from '../lib/imagem.js';
 
 const STATUS_CFG = {
     draft:    { label: 'Rascunho',             color: '#64748b', bg: '#f1f5f9', icon: Pencil },
@@ -52,12 +54,63 @@ const StatusBadge = ({ status }) => {
 
 // ─── Editor ───────────────────────────────────────────────────────────────────
 const TemplateEditor = ({ template, onClose }) => {
-    const { saveTemplate, submitTemplate, addToast } = useAppContext();
+    const { saveTemplate, submitTemplate, addToast, user } = useAppContext();
     const [form, setForm] = useState(template ? { ...EMPTY_TPL, ...template } : { ...EMPTY_TPL });
     const [nameEdited, setNameEdited] = useState(!!template?.meta_template_name);
     const [saving, setSaving] = useState(false);
+    const [subindoImg, setSubindoImg] = useState(false);
 
     const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+
+    // Imagem do cabeçalho. Vai pro Storage e a URL pública fica em
+    // `header_content`; na submissão o servidor baixa de lá e sobe pra Meta pra
+    // obter o `header_handle` que a aprovação exige.
+    //
+    // A Meta aceita só JPEG e PNG no cabeçalho, então HEIC (padrão do iPhone) é
+    // convertido antes — senão o lojista sobe do celular e a submissão falha
+    // sem ele entender por quê.
+    const enviarImagemCabecalho = async (e) => {
+        const bruto = e.target.files?.[0];
+        e.target.value = '';
+        if (!bruto || !user?.id) return;
+
+        let arquivo = bruto;
+        if (ehHeic(bruto)) {
+            try { arquivo = await prepararImagem(bruto); }
+            catch { addToast('Não consegui converter essa imagem. Envie como JPEG ou PNG.', 'error'); return; }
+        }
+        if (!['image/jpeg', 'image/jpg', 'image/png'].includes(arquivo.type)) {
+            addToast('A Meta aceita só JPEG e PNG no cabeçalho do template.', 'error');
+            return;
+        }
+        // Limite da Meta para imagem de cabeçalho é 5 MB.
+        if (arquivo.size > 5 * 1024 * 1024) {
+            addToast('A imagem precisa ter menos de 5 MB.', 'error');
+            return;
+        }
+
+        setSubindoImg(true);
+        try {
+            const ext = arquivo.type === 'image/png' ? 'png' : 'jpg';
+            const nome = (form.meta_template_name || 'template').replace(/[^a-z0-9_]/gi, '_');
+            // Caminho por loja + template: subir de novo SUBSTITUI, em vez de
+            // acumular arquivo órfão a cada troca de arte.
+            const caminho = `templates/${user.id}/${nome}.${ext}`;
+            const { error } = await supabase.storage
+                .from('whatsapp-profiles')
+                .upload(caminho, arquivo, { upsert: true, contentType: arquivo.type });
+            if (error) throw error;
+            const { data: pub } = supabase.storage.from('whatsapp-profiles').getPublicUrl(caminho);
+            // `?v=` derrota o cache: sem isso, trocar a arte continuaria
+            // mandando a antiga pra Meta e pros clientes.
+            set('header_content', `${pub.publicUrl}?v=${Date.now()}`);
+            addToast('Imagem enviada.', 'success');
+        } catch (err) {
+            addToast(`Não consegui enviar a imagem: ${err.message}`, 'error');
+        } finally {
+            setSubindoImg(false);
+        }
+    };
 
     const onDisplayName = (v) => {
         setForm(prev => ({
@@ -156,12 +209,28 @@ const TemplateEditor = ({ template, onClose }) => {
                                 <select value={form.header_type || ''} onChange={e => set('header_type', e.target.value || null)}>
                                     <option value="">Nenhum</option>
                                     <option value="TEXT">Texto</option>
+                                    <option value="IMAGE">Imagem</option>
                                 </select>
                             </div>
                             {form.header_type === 'TEXT' && (
                                 <div className="form-group">
                                     <label>Texto do cabeçalho</label>
                                     <input type="text" value={form.header_content || ''} onChange={e => set('header_content', e.target.value)} placeholder="Ex: Novidade na loja!" />
+                                </div>
+                            )}
+                            {form.header_type === 'IMAGE' && (
+                                <div className="form-group">
+                                    <label>Imagem do cabeçalho {subindoImg && <Loader2 size={13} className="spinner" />}</label>
+                                    <input type="file" accept="image/jpeg,image/png,image/heic"
+                                        onChange={enviarImagemCabecalho} disabled={subindoImg} />
+                                    {form.header_content && (
+                                        <img src={form.header_content} alt="" style={{ marginTop: 8, maxWidth: 220, borderRadius: 8, border: '1px solid var(--border)' }} />
+                                    )}
+                                    <small className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.5, display: 'block', marginTop: 6 }}>
+                                        JPEG ou PNG, até 5 MB. Esta é a imagem de <strong>exemplo</strong> que vai
+                                        pra aprovação — na hora do disparo você pode usar outra arte,
+                                        <strong> sem precisar aprovar de novo</strong>.
+                                    </small>
                                 </div>
                             )}
                         </div>

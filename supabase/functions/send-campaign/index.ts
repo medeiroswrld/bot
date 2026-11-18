@@ -92,6 +92,38 @@ serve(async (req) => {
 
     const token = await resolveWhatsAppToken(supabase, campaign.user_id);
 
+    // ── Cabeçalho de mídia ────────────────────────────────────────────────
+    //
+    // Template com cabeçalho de IMAGEM/VÍDEO EXIGE o parâmetro do cabeçalho em
+    // TODO envio: omitir faz a Meta recusar a mensagem, não enviar sem a foto.
+    // Por isso o fallback pra imagem de exemplo do próprio template — assim um
+    // template de imagem nunca sai sem imagem.
+    //
+    // A arte vem do DISPARO (`template_variables.header_image`), não da
+    // aprovação. É o que faz um template aprovado servir todo feirão: troca a
+    // imagem, não o template.
+    const tipoCabecalho = String(campaign.template?.header_type ?? '').toUpperCase();
+    const ehMidia = ['IMAGE', 'VIDEO', 'DOCUMENT'].includes(tipoCabecalho);
+    const urlCabecalho = ehMidia
+      ? String(campaign.template_variables?.header_image ?? campaign.template?.header_content ?? '').trim()
+      : '';
+    const headerParameters = ehMidia && urlCabecalho
+      ? [{
+          type: tipoCabecalho.toLowerCase(),
+          [tipoCabecalho.toLowerCase()]: { link: urlCabecalho },
+        } as unknown as { type: string }]
+      : undefined;
+
+    if (ehMidia && !urlCabecalho) {
+      await supabase.from('campaigns')
+        .update({ status: 'failed', completed_at: new Date().toISOString() })
+        .eq('id', campaign_id);
+      return new Response(JSON.stringify({
+        error: 'Este template tem cabeçalho de mídia e nenhuma imagem foi informada. '
+             + 'A Meta recusaria todas as mensagens — nada foi enviado.',
+      }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     const publicoBruto = await resolveAudience(supabase, campaign);
     const {
       lista: recipients, excluidosIdade, excluidosJaReceberam,
@@ -140,6 +172,7 @@ serve(async (req) => {
           templateName: campaign.template.meta_template_name,
           language: campaign.template.language,
           bodyParameters,
+          headerParameters,
           phoneNumberId,
           token,
         });
@@ -478,7 +511,14 @@ function horaCurta(t?: string | null): string {
 function buildTemplateParameters(templateVars: DB, recipient: DB): { type: 'text'; text: string }[] {
   const params: { type: 'text'; text: string }[] = [];
   if (!templateVars) return params;
-  const keys = Object.keys(templateVars).sort((a, b) => parseInt(a) - parseInt(b));
+  // SÓ as chaves numéricas. `template_variables` guarda as variáveis do corpo
+  // por posição ("1", "2", …), e agora também `header_image`, que não é
+  // variável de corpo nenhuma. Sem este filtro ela entraria na lista de
+  // parâmetros (parseInt('header_image') = NaN, que a ordenação não descarta) e
+  // o corpo sairia com um parâmetro a mais — a Meta recusa a mensagem inteira.
+  const keys = Object.keys(templateVars)
+    .filter((k) => /^\d+$/.test(k))
+    .sort((a, b) => parseInt(a) - parseInt(b));
   for (const key of keys) {
     let value = templateVars[key];
     if (typeof value === 'string') {

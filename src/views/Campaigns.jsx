@@ -54,6 +54,10 @@ const CampaignWizard = ({ onClose }) => {
     // em 250 conversas iniciadas pela empresa por 24h na Meta, e mandar a base
     // inteira de uma vez é padrão de banimento. 0 = sem teto.
     const [limite, setLimite] = useState(0);
+    // Arte deste disparo, quando o template tem cabeçalho de imagem. Vazio usa
+    // a imagem de exemplo do próprio template — assim nunca sai sem imagem, que
+    // é o que faria a Meta recusar a mensagem inteira.
+    const [headerImage, setHeaderImage] = useState('');
     const [jaReceberam, setJaReceberam] = useState(new Set());
 
     const template = approvedTemplates.find(t => t.id === templateId) || null;
@@ -193,7 +197,12 @@ const CampaignWizard = ({ onClose }) => {
                 template_id: templateId,
                 audience_type: audienceType,
                 audience_filter: audienceFilter,
-                template_variables: vars,
+                // `header_image` viaja junto com as variáveis numeradas. O
+                // send-campaign filtra chaves não-numéricas antes de montar os
+                // parâmetros do corpo, então ela não vira variável de corpo.
+                template_variables: headerImage.trim()
+                    ? { ...vars, header_image: headerImage.trim() }
+                    : vars,
             });
             onClose();
             sendCampaign(camp.id); // dispara em background; status atualiza via realtime
@@ -244,6 +253,23 @@ const CampaignWizard = ({ onClose }) => {
                 {/* STEP 2: variáveis */}
                 {step === 2 && (
                     <div className="settings-form">
+                        {['IMAGE', 'VIDEO', 'DOCUMENT'].includes(String(template?.header_type || '').toUpperCase()) && (
+                            <div className="form-group" style={{ marginBottom: 16 }}>
+                                <label>Arte deste disparo (opcional)</label>
+                                {template?.header_content && (
+                                    <img src={headerImage.trim() || template.header_content} alt=""
+                                        style={{ display: 'block', maxWidth: 220, borderRadius: 8, border: '1px solid var(--border)', marginBottom: 8 }} />
+                                )}
+                                <input type="text" value={headerImage}
+                                    onChange={e => setHeaderImage(e.target.value)}
+                                    placeholder="Cole a URL de outra imagem, ou deixe vazio" />
+                                <small className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.5, display: 'block' }}>
+                                    Vazio usa a imagem aprovada do template (acima). Trocar a arte aqui
+                                    <strong> não exige nova aprovação</strong> — é por isso que o template
+                                    aprovado serve todo feirão.
+                                </small>
+                            </div>
+                        )}
                         {varCount(template) === 0 ? (
                             <p className="text-muted">Esse template não tem variáveis. Pode seguir.</p>
                         ) : (
