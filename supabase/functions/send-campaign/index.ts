@@ -15,6 +15,11 @@ type DB = any;
 interface Recipient {
   phone: string; name?: string | null; lead_id?: string | null;
   created_at?: string | null; client_type?: string | null;
+  // Dados do agendamento, quando o público é `evento_agendados`. Existem para
+  // o lembrete poder dizer o dia e a hora DAQUELA pessoa: sem isto, o disparo
+  // preenche a mesma variável para todo mundo e quem marcou quinta receberia
+  // "sábado às 14h".
+  appointment_date?: string | null; appointment_time?: string | null;
 }
 
 serve(async (req) => {
@@ -349,7 +354,7 @@ async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]>
     // o nome ao bot, e é esse que o cliente espera ver na mensagem.
     case 'evento_agendados': {
       let aq = supabase.from('appointments')
-        .select('customer_phone, customer_name, appointment_date')
+        .select('customer_phone, customer_name, appointment_date, appointment_time')
         .eq('user_id', uid)
         .not('evento_id', 'is', null)
         .not('customer_phone', 'is', null)
@@ -369,6 +374,7 @@ async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]>
       }
       return (data ?? []).map((a: DB) => ({
         phone: a.customer_phone, name: a.customer_name, lead_id: null,
+        appointment_date: a.appointment_date, appointment_time: a.appointment_time,
       }));
     }
     case 'custom_phones': {
@@ -450,6 +456,25 @@ async function registrarDisparoNaConversa(
   }
 }
 
+// "2026-11-28" -> "sábado, 28/11". O cliente marcou "sábado"; mandar só
+// "28/11" obriga ele a ir no calendário pra saber se é hoje ou amanhã.
+const DIAS_SEM = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+function dataPorExtenso(iso?: string | null): string {
+  const s = String(iso ?? '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return '';
+  const d = new Date(`${s}T12:00:00Z`);     // meio-dia UTC: imune a fuso
+  const [, mes, dia] = s.split('-');
+  return `${DIAS_SEM[d.getUTCDay()]}, ${dia}/${mes}`;
+}
+
+// "14:00:00" -> "14h"; "14:30:00" -> "14h30"
+function horaCurta(t?: string | null): string {
+  const s = String(t ?? '').slice(0, 5);
+  if (!/^\d{2}:\d{2}$/.test(s)) return '';
+  const [h, m] = s.split(':');
+  return m === '00' ? `${Number(h)}h` : `${Number(h)}h${m}`;
+}
+
 function buildTemplateParameters(templateVars: DB, recipient: DB): { type: 'text'; text: string }[] {
   const params: { type: 'text'; text: string }[] = [];
   if (!templateVars) return params;
@@ -460,7 +485,13 @@ function buildTemplateParameters(templateVars: DB, recipient: DB): { type: 'text
       const fullName = recipient?.name ?? 'cliente';
       value = value
         .replace(/\{\{nome_cliente\}\}/g, fullName)
-        .replace(/\{\{primeiro_nome\}\}/g, String(fullName).split(' ')[0]);
+        .replace(/\{\{primeiro_nome\}\}/g, String(fullName).split(' ')[0])
+        // Dia e hora DA PESSOA, do agendamento dela (público evento_agendados).
+        // Sem estes dois, o lembrete sairia com a mesma data para todo mundo:
+        // quem marcou quinta receberia "sábado às 14h" e apareceria no dia
+        // errado. É o tipo de erro que o cliente não perdoa.
+        .replace(/\{\{data_visita\}\}/g, dataPorExtenso(recipient?.appointment_date))
+        .replace(/\{\{hora_visita\}\}/g, horaCurta(recipient?.appointment_time));
     }
     params.push({ type: 'text', text: String(value) });
   }
