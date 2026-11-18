@@ -322,7 +322,9 @@ export async function sendImage(
   if (!tk) { l.error('token ausente', { action: 'sendImage' }); return false; }
   if (provider !== 'cloud') { l.warn('sendImage só no provider cloud', { action: 'sendImage' }); return false; }
 
-  const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
+  // Sem fallback para o número do PROVEDOR — explicação completa no sendCloud.
+  // Loja sem número próprio não manda; vazar pelo número da Amply é pior.
+  const pid = phoneNumberId ?? '';
   if (!pid) { l.error('phone_number_id ausente', { action: 'sendImage' }); return false; }
 
   const res = await fetch(`https://graph.facebook.com/v20.0/${pid}/messages`, {
@@ -363,7 +365,9 @@ export async function sendVideo(
   if (!tk) { l.error('token ausente', { action: 'sendVideo' }); return false; }
   if (provider !== 'cloud') { l.warn('sendVideo só no provider cloud', { action: 'sendVideo' }); return false; }
 
-  const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
+  // Sem fallback para o número do PROVEDOR — explicação completa no sendCloud.
+  // Loja sem número próprio não manda; vazar pelo número da Amply é pior.
+  const pid = phoneNumberId ?? '';
   if (!pid) { l.error('phone_number_id ausente', { action: 'sendVideo' }); return false; }
 
   const res = await fetch(`https://graph.facebook.com/v25.0/${pid}/messages`, {
@@ -438,7 +442,9 @@ export async function sendListaInterativa(
 ): Promise<boolean> {
   const l = log ?? logger;
   const tk = (token ?? Deno.env.get('WHATSAPP_TOKEN') ?? '').trim();
-  const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
+  // Sem fallback para o número do PROVEDOR — explicação completa no sendCloud.
+  // Loja sem número próprio não manda; vazar pelo número da Amply é pior.
+  const pid = phoneNumberId ?? '';
   if (!tk || !pid) { l.error('token ou phone_number_id ausente', { action: 'sendLista' }); return false; }
 
   // Corta em 10 linhas ANTES de montar: a API recusaria, e uma lista recusada
@@ -500,7 +506,9 @@ export async function sendCatalogo(
 ): Promise<boolean> {
   const l = log ?? logger;
   const tk = (token ?? Deno.env.get('WHATSAPP_TOKEN') ?? '').trim();
-  const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
+  // Sem fallback para o número do PROVEDOR — explicação completa no sendCloud.
+  // Loja sem número próprio não manda; vazar pelo número da Amply é pior.
+  const pid = phoneNumberId ?? '';
   if (!tk || !pid) { l.error('token ou phone_number_id ausente', { action: 'sendCatalogo' }); return false; }
 
   const res = await fetch(`https://graph.facebook.com/v20.0/${pid}/messages`, {
@@ -573,8 +581,28 @@ async function sendCloud(
   log?: Logger,
 ): Promise<{ ok: boolean; wamid: string | null }> {
   const l = log ?? logger;
-  const pid = phoneNumberId ?? Deno.env.get('WHATSAPP_PHONE_NUMBER_ID') ?? '';
-  if (!pid) { l.error('phone_number_id ausente', { action: 'sendCloud' }); return { ok: false, wamid: null }; }
+
+  // SEM fallback para `WHATSAPP_PHONE_NUMBER_ID`.
+  //
+  // Esse secret existe e é o número do PROVEDOR. Enquanto ele era fallback,
+  // toda chamada de loja sem número próprio saía pelo número da Amply — e com
+  // o token global, porque o da loja também é nulo. Dois estragos: o cliente
+  // recebia a mensagem de um número estranho assinando como a loja, e a Meta
+  // via o número do provedor falando por uma conta que não tem número.
+  //
+  // Num sistema multi-loja esse fallback nunca está certo: ou a loja tem
+  // número, ou não há mensagem para mandar. Todos os chamadores passam
+  // `pid || undefined`, então quem não tem número agora falha com log explícito
+  // em vez de vazar pelo número errado em silêncio.
+  //
+  // A DSC ficou 54 dias exatamente nesse estado (WhatsApp banido em 24/09).
+  const pid = phoneNumberId ?? '';
+  if (!pid) {
+    l.error('phone_number_id ausente — nada enviado (sem fallback para o número do provedor)', {
+      action: 'sendCloud',
+    });
+    return { ok: false, wamid: null };
+  }
 
   const res = await fetch(`https://graph.facebook.com/v20.0/${pid}/messages`, {
     method: 'POST',
