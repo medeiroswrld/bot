@@ -137,7 +137,20 @@ function getBrazilDateInfo(tz = 'America/Sao_Paulo'): { label: string; iso: stri
  * Aqui a hora entra pelo array de mensagens, DEPOIS dos cache breakpoints do
  * system prompt e das tools, entao o cache continua valendo.
  */
-function notaDeHorario(settings: Record<string, unknown> | null): string {
+function notaDeHorario(
+  settings: Record<string, unknown> | null,
+  // Dia de feirão abre fora do horário semanal da loja. Sem este parâmetro a
+  // nota lê só o business_hours e contradiz a agenda: no domingo de feirão ela
+  // diria "a loja NAO abre hoje, nao ofereca visita" enquanto o
+  // ver_horarios_disponiveis devolve a tarde inteira livre (a exceção de agenda
+  // sobrepõe o horário semanal). O bot recusaria visita no dia mais movimentado
+  // do evento, sem erro nenhum aparecendo.
+  //
+  // Nota: exceção criada À MÃO pela loja (um domingo de feriado em que ela
+  // abre) ainda tem essa divergência. É anterior a este trabalho e exigiria uma
+  // query por mensagem; o feirão sai de graça porque o evento já está carregado.
+  eventoHoje: { nome: string; hora_inicio: string; hora_fim: string } | null = null,
+): string {
   // Fuso DA LOJA: e esta hora que impede o bot de oferecer um dia que ja acabou.
   const tz = String(settings?.timezone ?? 'America/Sao_Paulo');
   const agora = new Date();
@@ -156,6 +169,20 @@ function notaDeHorario(settings: Record<string, unknown> | null): string {
   const hoje = bh?.[dayKey];
 
   const base = `(sistema: agora sao ${hhmm} no horario de Brasilia.`;
+
+  // Hoje é dia de evento: o horário do evento MANDA, e o "não abre hoje" do
+  // horário semanal não vale.
+  if (eventoHoje) {
+    const abreEv  = String(eventoHoje.hora_inicio || '09:00');
+    const fechaEv = String(eventoHoje.hora_fim    || '21:00');
+    if (hhmm >= fechaEv) {
+      return `${base} Hoje e dia de ${eventoHoje.nome} e a loja fechou as ${fechaEv}. NAO ofereca visita para hoje — hoje ja acabou.)`;
+    }
+    if (hhmm < abreEv) {
+      return `${base} Hoje e dia de ${eventoHoje.nome}: a loja abre as ${abreEv} e fecha as ${fechaEv}. Hoje e possivel, mas so a partir das ${abreEv}.)`;
+    }
+    return `${base} Hoje e dia de ${eventoHoje.nome} e a loja esta ABERTA, fecha as ${fechaEv}. Se oferecer hoje, so horario depois de ${hhmm} e antes de ${fechaEv}.)`;
+  }
 
   if (bh && !hoje?.open) {
     return `${base} A loja NAO abre hoje. Nao ofereca visita para hoje; ofereca o proximo dia em que a loja abre. Confirme os horarios com a tool antes de sugerir.)`;
@@ -1130,8 +1157,23 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
 
     const appointmentStatus = settings?.booking_mode === 'confirm' ? 'scheduled' : 'confirmed';
 
+    // ── A visita é de feirão? ─────────────────────────────────────────────
+    //
+    // Decidido AQUI, no servidor, e não por um parâmetro que o modelo passa.
+    // Se dependesse do modelo, bastava ele esquecer uma vez pra uma visita de
+    // feirão cair na lista de visita comum — e o lojista nunca saberia que
+    // perdeu a conta. A data manda: caiu dentro do evento, é do evento,
+    // inclusive quando o cliente nem mencionou o feirão (ele vai aparecer num
+    // dia de feirão de todo jeito).
+    //
+    // É também o para-raios da migration 117: a chave `evento_id` só entra no
+    // insert quando a tabela `eventos` devolveu uma linha — isto é, quando a
+    // migration rodou. Banco sem a 117 → nenhum evento → insert sem a coluna,
+    // idêntico ao de antes. Nenhum agendamento quebra por causa disto.
+    const eventoDaData = await buscarEventoDaData(supabase, userId, dateStr, log);
+
     // Colunas: appointment_date = DATE ('YYYY-MM-DD'), appointment_time = TIME ('HH:MM')
-    const insertData = {
+    const insertData: Record<string, unknown> = {
       user_id: userId,
       customer_name: nomeCliente,
       customer_phone: customerPhone,
@@ -1140,6 +1182,12 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
       car_id: carId,
       status: appointmentStatus,
     };
+    if (eventoDaData) {
+      insertData.evento_id = eventoDaData.id;
+      log.info('visita marcada como visita de evento', {
+        action: 'agendar_visita', evento: eventoDaData.nome, data: dateStr,
+      });
+    }
     // ── Já existe visita desta pessoa? ────────────────────────────────────
     //
     // Antes daqui era INSERT puro, e a agenda enchia de visita duplicada da
@@ -1175,9 +1223,18 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
         };
       }
 
+      // Mesmo guarda-chuva do insert: `evento_id` só entra quando a tabela
+      // `eventos` respondeu. Remarcar é dentro do MESMO dia, então o evento é
+      // o mesmo — gravar aqui só conserta a visita que nasceu antes de a loja
+      // cadastrar o feirão.
+      const updateData: Record<string, unknown> = {
+        appointment_time: horario, status: appointmentStatus, car_id: carId ?? jaExiste.car_id,
+      };
+      if (eventoDaData) updateData.evento_id = eventoDaData.id;
+
       const { data: remarcada, error: erroUp } = await supabase
         .from('appointments')
-        .update({ appointment_time: horario, status: appointmentStatus, car_id: carId ?? jaExiste.car_id })
+        .update(updateData)
         .eq('id', jaExiste.id)
         .select()
         .single();
@@ -2083,7 +2140,163 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
 
 interface Faq { question: string; answer: string }
 
-function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger, canal = 'whatsapp', falouDePagamento = true, primeiroContato = false): string {
+// ─── feirão / evento especial da loja ────────────────────────────────────────
+
+export interface EventoLoja {
+  id: string;
+  nome: string;
+  data_inicio: string;   // YYYY-MM-DD
+  data_fim: string;      // YYYY-MM-DD
+  hora_inicio: string;   // HH:MM
+  hora_fim: string;      // HH:MM
+  condicoes: string | null;
+}
+
+// Busca o evento vigente da loja. NUNCA lança e NUNCA propaga erro.
+//
+// Se a migration 117 não tiver sido aplicada, a tabela `eventos` não existe e
+// este select devolve erro. Nesse caso o retorno é null e o bot atende como
+// sempre atendeu, só sem saber de feirão. O silêncio é deliberado: o histórico
+// deste projeto tem feature nova derrubando o atendimento inteiro por uma
+// coluna que faltava no banco. Falar de feirão é um extra; responder o cliente
+// não é.
+async function buscarEventoVigente(
+  supabase: SupabaseClient,
+  userId: string,
+  hojeIso: string,
+  log: Logger,
+): Promise<EventoLoja | null> {
+  try {
+    const { data, error } = await supabase
+      .from('eventos')
+      .select('id, nome, data_inicio, data_fim, hora_inicio, hora_fim, condicoes')
+      .eq('user_id', userId)
+      .eq('ativo', true)
+      .gte('data_fim', hojeIso)          // evento que já acabou não entra no prompt
+      .order('data_inicio', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      log.debug('nenhum evento carregado', { action: 'evento', motivo: error.message });
+      return null;
+    }
+    if (data) {
+      log.info('evento vigente', {
+        action: 'evento', nome: data.nome, de: data.data_inicio, ate: data.data_fim,
+      });
+    }
+    return (data as EventoLoja | null) ?? null;
+  } catch (e) {
+    log.debug('exceção ao buscar evento', { action: 'evento', error: String(e) });
+    return null;
+  }
+}
+
+// Evento que CONTÉM uma data específica — usado ao gravar a visita. Mesmas
+// garantias de silêncio da função acima: erro ou tabela ausente devolve null.
+async function buscarEventoDaData(
+  supabase: SupabaseClient,
+  userId: string,
+  dataIso: string,
+  log: Logger,
+): Promise<EventoLoja | null> {
+  try {
+    const { data, error } = await supabase
+      .from('eventos')
+      .select('id, nome, data_inicio, data_fim, hora_inicio, hora_fim, condicoes')
+      .eq('user_id', userId)
+      .eq('ativo', true)
+      .lte('data_inicio', dataIso)
+      .gte('data_fim', dataIso)
+      .order('data_inicio', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      log.debug('nenhum evento para a data', { action: 'evento', data: dataIso, motivo: error.message });
+      return null;
+    }
+    return (data as EventoLoja | null) ?? null;
+  } catch (e) {
+    log.debug('exceção ao buscar evento da data', { action: 'evento', error: String(e) });
+    return null;
+  }
+}
+
+const DIAS_DA_SEMANA = [
+  'domingo', 'segunda-feira', 'terça-feira', 'quarta-feira',
+  'quinta-feira', 'sexta-feira', 'sábado',
+];
+
+// Lista os dias do evento que AINDA não passaram, cada um com o dia da semana.
+// O cliente escreve "vou no sábado", não "vou no dia 28" — sem o rótulo o
+// modelo tem que adivinhar a que data ele se refere.
+function diasDoEvento(evento: EventoLoja, hojeIso: string): string[] {
+  const dias: string[] = [];
+  const fim = new Date(`${evento.data_fim}T12:00:00Z`);
+  const d   = new Date(`${evento.data_inicio}T12:00:00Z`);
+  // Trava de sanidade: um intervalo absurdo (digitação errada na tela) não
+  // pode gerar um prompt gigante.
+  let guarda = 0;
+  while (d <= fim && guarda < 62) {
+    const iso = d.toISOString().slice(0, 10);
+    if (iso >= hojeIso) {
+      const [, mes, dia] = iso.split('-');
+      dias.push(`${DIAS_DA_SEMANA[d.getUTCDay()]}, ${dia}/${mes}`);
+    }
+    d.setUTCDate(d.getUTCDate() + 1);
+    guarda++;
+  }
+  return dias;
+}
+
+// Bloco que entra no system prompt. Vazio quando não há evento — loja sem
+// feirão tem exatamente o prompt que tinha antes, byte por byte.
+function blocoDoEvento(evento: EventoLoja | null, hojeIso: string): string {
+  if (!evento) return '';
+
+  const dias = diasDoEvento(evento, hojeIso);
+  if (dias.length === 0) return '';
+
+  const nome       = String(evento.nome || 'Feirão').trim();
+  const comecou    = evento.data_inicio < hojeIso;
+  const emAndamento = comecou && evento.data_fim >= hojeIso;
+  const condicoes  = String(evento.condicoes ?? '').trim();
+
+  // Condições em branco é o caso perigoso: a loja avisou que TEM condição
+  // especial mas não escreveu qual. O modelo preenche lacuna com invenção
+  // plausível — "taxa a partir de 0,99%" sai redondo e é mentira. Então o
+  // texto diz explicitamente o que ele pode e não pode afirmar.
+  const blocoCondicoes = condicoes
+    ? `\n\n### Condições especiais do ${nome}\n\n${condicoes}\n\n`
+      + `REGRA RÍGIDA sobre as condições — siga ao pé da letra:\n`
+      + `- Responda SOMENTE com o que está escrito acima. Considere esse texto completo e exato.\n`
+      + `- NUNCA invente taxa, juros, percentual de desconto, valor de entrada, número de parcelas, brinde, sorteio, prazo ou qualquer vantagem que não esteja EXPLICITAMENTE escrita ali.\n`
+      + `- Se o cliente perguntar um detalhe que não está no texto (ex.: "qual a taxa?", "quanto de desconto no Onix?"), diga que a condição exata de cada carro a equipe fecha na hora, no ${nome} — e convide pra visita. NÃO estime, NÃO dê faixa, NÃO diga "em torno de".\n`
+      + `- Nenhuma condição do ${nome} vale fora dos dias listados.`
+    : `\n\n### Condições especiais do ${nome}\n\n`
+      + `A loja confirmou que haverá CONDIÇÕES ESPECIAIS nesses dias, mas NÃO cadastrou quais são.\n\n`
+      + `REGRA RÍGIDA: você pode dizer que haverá condições especiais no ${nome} e que a equipe passa os detalhes na hora. Você NÃO pode dizer QUAIS são — nada de taxa, desconto, entrada, parcela, brinde ou sorteio. Não existe número que você possa dar aqui. Se o cliente insistir, diga com naturalidade que as condições são fechadas no dia, direto com a equipe, e ofereça agendar a visita.`;
+
+  const situacao = emAndamento
+    ? `O ${nome} JÁ ESTÁ ACONTECENDO. Dias que ainda restam:`
+    : `O ${nome} ainda não começou. Dias do evento:`;
+
+  return `\n\n## ${nome} — evento especial da loja\n\n`
+    + `${situacao}\n\n`
+    + dias.map((dia) => `- ${dia}`).join('\n')
+    + `\n\nHorário do ${nome}: das ${evento.hora_inicio} às ${evento.hora_fim} (nesses dias a loja abre nesse horário, mesmo que não seja o horário normal dela).`
+    + blocoCondicoes
+    + `\n\n### Como conduzir\n\n`
+    + `- Se o cliente perguntar do ${nome}, responda com os dias e o horário acima. Eles são a verdade; não invente outro dia nem outro horário.\n`
+    + `- Se o cliente demonstrar interesse em visitar, ou perguntar de preço/desconto/condição, mencione o ${nome} UMA vez, com naturalidade, e convide pra vir num desses dias. Não repita isso em toda mensagem e não transforme a conversa em propaganda.\n`
+    + `- Pra marcar a visita no ${nome}, o caminho é o de sempre: **ver_horarios_disponiveis** na data e depois **agendar_visita**. Os horários do evento já estão na agenda da loja — ofereça SÓ o que a tool devolver. A visita é registrada como visita do ${nome} automaticamente; você não precisa fazer nada a mais nem avisar o cliente disso.\n`
+    + `- O cliente pode visitar normalmente FORA dos dias do ${nome}. Se ele pedir outro dia, agende sem empurrar o evento — só avise que as condições especiais valem nos dias listados.\n`
+    + `- Nunca prometa que um carro específico vai estar disponível no ${nome}, nem reserve veículo.`;
+}
+
+function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger, canal = 'whatsapp', falouDePagamento = true, primeiroContato = false, evento: EventoLoja | null = null): string {
   const company = String(settings.company_name        ?? 'nossa concessionária');
   const address = String(settings.address             ?? 'não informado');
   const phone   = String(settings.phone_number        ?? 'não informado');
@@ -2105,7 +2318,11 @@ function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], custo
     const end   = String(settings.business_hours_end   ?? '18:00');
     horarios = `${days.split(',').join(', ')}, das ${start} às ${end}`;
   }
-  const { label: todayLabel } = getBrazilDateInfo(String(settings.timezone ?? 'America/Sao_Paulo'));
+  const { label: todayLabel, iso: todayIso } = getBrazilDateInfo(String(settings.timezone ?? 'America/Sao_Paulo'));
+
+  // Feirão/evento da loja. Sem evento cadastrado isto é string vazia e o
+  // prompt sai idêntico ao de antes.
+  const eventoBlock = blocoDoEvento(evento, todayIso);
 
   const nomeCliente = customerName ? customerName.split(' ')[0] : null;
   // O nome JA e conhecido: proibir perguntar de novo e o ponto principal.
@@ -2482,7 +2699,7 @@ e destroem a confiança justamente com quem estava mais perto de comprar.
 - Horário de funcionamento: ${horarios}
 - Data de hoje (Brasília): ${todayLabel}${nomeInfo}${toqueNoMenuInfo}${primeiroContatoInfo}
 
-Use a data de hoje como referência sempre que o cliente falar em datas relativas ("hoje", "amanhã", "sexta que vem", "fim de semana"). Nunca ofereça nem confirme horário fora do funcionamento da loja: a agenda real — só com horários válidos e que ainda não passaram hoje — vem sempre do ver_horarios_disponiveis; ofereça apenas os horarios_livres que ela retornar.
+Use a data de hoje como referência sempre que o cliente falar em datas relativas ("hoje", "amanhã", "sexta que vem", "fim de semana"). Nunca ofereça nem confirme horário fora do funcionamento da loja: a agenda real — só com horários válidos e que ainda não passaram hoje — vem sempre do ver_horarios_disponiveis; ofereça apenas os horarios_livres que ela retornar.${eventoBlock}
 
 ## Seu papel
 
@@ -3348,6 +3565,15 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     .eq('enabled', true)
     .order('created_at', { ascending: true });
 
+  // Feirão/evento vigente da loja. Lido no fuso DA LOJA: num stand em Lisboa,
+  // usar Brasília encerraria o evento um dia antes do que ele acaba lá.
+  const eventoVigente = await buscarEventoVigente(
+    supabase,
+    userId,
+    getBrazilDateInfo(String(settings?.timezone ?? 'America/Sao_Paulo')).iso,
+    log,
+  );
+
   // Provedor deste tenant: coluna (migration 032) > env var > anthropic.
   // Declarado aqui (antes do prompt) porque o prefixo de regras depende dele.
   const provider  = String(settings?.llm_provider ?? LLM_PROVIDER_DEFAULT).toLowerCase();
@@ -3443,6 +3669,7 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     // Primeiro contato: quando a abertura ja traz pergunta, a boas-vindas
     // enlatada nao dispara e quem cumprimenta e o modelo.
     isFirstMessage,
+    eventoVigente,
   ) + leadBlock;
 
   // ── 6. Monta histórico para o modelo ──────────────────────────────────────
@@ -3480,7 +3707,15 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   // Hora atual + expediente de hoje. Vai aqui, no fim do array, e nao no system
   // prompt: assim o modelo sabe que ja passou das 18h sem que o cache do prompt
   // seja invalidado a cada minuto.
-  history.push({ role: 'user', content: notaDeHorario((settings ?? {}) as Record<string, unknown>) });
+  // Só passa o evento se HOJE cair dentro dele — eventoVigente pode ser um
+  // feirão que ainda vai acontecer, e aí o horário de hoje é o normal da loja.
+  const hojeNaLoja = getBrazilDateInfo(String(settings?.timezone ?? 'America/Sao_Paulo')).iso;
+  const eventoHoje = eventoVigente
+    && eventoVigente.data_inicio <= hojeNaLoja
+    && eventoVigente.data_fim    >= hojeNaLoja
+    ? eventoVigente
+    : null;
+  history.push({ role: 'user', content: notaDeHorario((settings ?? {}) as Record<string, unknown>, eventoHoje) });
 
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
   // Responde pelo MESMO número que recebeu.

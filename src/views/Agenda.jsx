@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     Plus, X, Clock, User, CarFront, Phone, CheckCircle, AlertCircle,
-    XCircle, CalendarCheck, RotateCcw, Trash2
+    XCircle, CalendarCheck, RotateCcw, Trash2, PartyPopper
 } from 'lucide-react';
+import { supabase } from '../lib/supabase.js';
 
 const ConfirmModal = ({ message, onConfirm, onCancel }) => (
     <div className="modal-overlay" onClick={onCancel}>
@@ -175,13 +176,68 @@ const RescheduleModal = ({ appt, onClose, onSave }) => {
 };
 
 const Agenda = () => {
-    const { appointments, addAppointment, updateAppointmentStatus, updateAppointment, deleteAppointment } = useAppContext();
+    const { appointments, addAppointment, updateAppointmentStatus, updateAppointment, deleteAppointment, user } = useAppContext();
     const [showNewModal, setShowNewModal] = useState(false);
     const [filterStatus, setFilterStatus] = useState('todos');
     const [filterDate, setFilterDate] = useState('');
     const [selectedAppt, setSelectedAppt] = useState(null);
     const [rescheduleAppt, setRescheduleAppt] = useState(null);
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+    // 'todas' | 'feirao' — qual parte da agenda está aberta.
+    const [aba, setAba] = useState('todas');
+
+    // ── Eventos da loja (feirão) ──────────────────────────────────────────
+    //
+    // Leitura própria, aqui, em vez de entrar no AppContext: a Agenda é a
+    // única tela que LÊ evento, e carregar isso no boot do app custaria uma
+    // query pra todo mundo, inclusive pra loja que nunca vai ter feirão.
+    //
+    // Erro é engolido de propósito. Banco sem a migration 117 → lista vazia →
+    // a aba do feirão não aparece e a Agenda funciona como sempre funcionou.
+    const [eventos, setEventos] = useState([]);
+    useEffect(() => {
+        if (!user?.id) return;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 10000);
+        supabase
+            .from('eventos')
+            .select('id, nome, data_inicio, data_fim, hora_inicio, hora_fim')
+            .eq('user_id', user.id)
+            .eq('ativo', true)
+            .order('data_inicio', { ascending: true })
+            .abortSignal(controller.signal)
+            .then(({ data }) => {
+                if (controller.signal.aborted) return;
+                setEventos(data || []);
+            })
+            .catch(() => { /* tabela ausente ou abort: sem feirão */ })
+            .finally(() => clearTimeout(timer));
+        return () => { clearTimeout(timer); controller.abort(); };
+    }, [user?.id]);
+
+    const eventoPorId = React.useMemo(
+        () => Object.fromEntries(eventos.map(e => [e.id, e])),
+        [eventos],
+    );
+    // Evento vigente: o primeiro que ainda não terminou. É o que dá nome à aba
+    // e o que marca uma visita criada à mão na tela.
+    const todayStr = getTodayStr();
+    const eventoVigente = eventos.find(e => e.data_fim >= todayStr) || null;
+    const apptsDoFeirao = appointments.filter(a => a.evento_id);
+    // A aba só existe quando há do que falar — evento cadastrado ou visita já
+    // marcada num evento passado.
+    const temFeirao = Boolean(eventoVigente) || apptsDoFeirao.length > 0;
+
+    // Visita criada à mão na tela também entra no feirão se a data cair dentro
+    // dele. Sem isto, o lojista marca uma visita pro dia 27 e ela não aparece
+    // na aba do feirão — a conta do evento sairia errada por baixo.
+    const eventoDaData = (dateStr) =>
+        eventos.find(e => dateStr >= e.data_inicio && dateStr <= e.data_fim) || null;
+
+    const criarAgendamento = (form) => {
+        const ev = eventoDaData(form.date);
+        addAppointment(ev ? { ...form, evento_id: ev.id } : form);
+    };
 
     const confirmDelete = () => {
         deleteAppointment(confirmDeleteId);
@@ -189,12 +245,13 @@ const Agenda = () => {
         setConfirmDeleteId(null);
     };
 
-    const todayStr = getTodayStr();
-
     const filtered = appointments.filter(a => {
+        // A aba "Todas" mostra tudo, inclusive as do feirão — assim nenhuma
+        // visita desaparece da visão padrão de quem não sabe da aba nova.
+        const matchAba = aba === 'todas' || Boolean(a.evento_id);
         const matchStatus = filterStatus === 'todos' || a.status === filterStatus;
         const matchDate = !filterDate || a.date === filterDate;
-        return matchStatus && matchDate;
+        return matchAba && matchStatus && matchDate;
     });
 
     // Group by day
@@ -222,6 +279,11 @@ const Agenda = () => {
         { label: 'Confirmados', value: todayAppts.filter(a => a.status === 'confirmado').length },
         { label: 'Pendentes', value: appointments.filter(a => a.status === 'agendado').length },
         { label: 'Realizados', value: appointments.filter(a => a.status === 'realizado').length },
+        // O resumo conta TUDO, independente da aba aberta.
+        ...(temFeirao ? [{
+            label: eventoVigente ? eventoVigente.nome : 'Feirão',
+            value: apptsDoFeirao.length,
+        }] : []),
     ];
 
     const handleQuickStatus = (e, id, newStatus) => {
@@ -240,6 +302,36 @@ const Agenda = () => {
                     <Plus size={20} /> Novo Agendamento
                 </button>
             </header>
+
+            {temFeirao && (
+                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+                    <button
+                        className={`inv-filter-btn ${aba === 'todas' ? 'active' : ''}`}
+                        onClick={() => setAba('todas')}>
+                        Todas as visitas ({appointments.length})
+                    </button>
+                    <button
+                        className={`inv-filter-btn ${aba === 'feirao' ? 'active' : ''}`}
+                        onClick={() => setAba('feirao')}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <PartyPopper size={15} />
+                        Agendamentos {eventoVigente?.nome || 'do Feirão'} ({apptsDoFeirao.length})
+                    </button>
+                </div>
+            )}
+
+            {aba === 'feirao' && eventoVigente && (
+                <div className="card" style={{ padding: '0.9rem 1.1rem', marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <PartyPopper size={18} style={{ color: '#a855f7', flexShrink: 0 }} />
+                    <strong style={{ fontSize: '0.95rem' }}>{eventoVigente.nome}</strong>
+                    <span className="text-muted" style={{ fontSize: '0.85rem' }}>
+                        {eventoVigente.data_inicio === eventoVigente.data_fim
+                            ? formatDateStr(eventoVigente.data_inicio)
+                            : `${formatDateStr(eventoVigente.data_inicio)} a ${formatDateStr(eventoVigente.data_fim)}`}
+                        {' · das '}{eventoVigente.hora_inicio} às {eventoVigente.hora_fim}
+                    </span>
+                </div>
+            )}
 
             <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '2rem', flexWrap: 'wrap', alignItems: 'center' }}>
                 {['todos', 'agendado', 'confirmado', 'realizado', 'cancelado', 'ausente'].map(key => (
@@ -261,9 +353,17 @@ const Agenda = () => {
                 <div className="agenda-main">
                     {sortedDates.length === 0 && (
                         <div style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-                            <CalendarCheck size={48} style={{ color: '#94a3b8', marginBottom: '1rem' }} />
-                            <h3 style={{ fontWeight: 600, marginBottom: '0.5rem' }}>Agenda vazia para este filtro</h3>
-                            <p className="text-muted">Crie um novo agendamento para começar.</p>
+                            {aba === 'feirao'
+                                ? <PartyPopper size={48} style={{ color: '#94a3b8', marginBottom: '1rem' }} />
+                                : <CalendarCheck size={48} style={{ color: '#94a3b8', marginBottom: '1rem' }} />}
+                            <h3 style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
+                                {aba === 'feirao' ? 'Nenhuma visita marcada no feirão ainda' : 'Agenda vazia para este filtro'}
+                            </h3>
+                            <p className="text-muted">
+                                {aba === 'feirao'
+                                    ? 'O bot marca aqui automaticamente toda visita que cair nos dias do evento.'
+                                    : 'Crie um novo agendamento para começar.'}
+                            </p>
                         </div>
                     )}
                     {sortedDates.map(date => (
@@ -283,6 +383,13 @@ const Agenda = () => {
                                                 {appt.phone && <p className="app-phone"><Phone size={12} /> {appt.phone}</p>}
                                             </div>
                                             <div className="app-actions">
+                                                {/* Só na aba "Todas": na aba do feirão seria o mesmo selo em todo card. */}
+                                                {aba === 'todas' && appt.evento_id && (
+                                                    <span className="appointment-status"
+                                                        style={{ background: 'rgba(168, 85, 247, 0.12)', color: '#a855f7' }}>
+                                                        <PartyPopper size={12} /> {eventoPorId[appt.evento_id]?.nome || 'Feirão'}
+                                                    </span>
+                                                )}
                                                 <span className={`appointment-status ${s.className}`}>{s.icon} {s.label}</span>
                                                 <div className="agenda-quick-actions">
                                                     <button className="agenda-action-btn confirm" title="Confirmar" onClick={e => handleQuickStatus(e, appt.id, 'confirmado')}><CheckCircle size={16} /></button>
@@ -315,7 +422,7 @@ const Agenda = () => {
                 </div>
             </div>
 
-            {showNewModal && <NewAppointmentModal onClose={() => setShowNewModal(false)} onSave={addAppointment} />}
+            {showNewModal && <NewAppointmentModal onClose={() => setShowNewModal(false)} onSave={criarAgendamento} />}
             {selectedAppt && <AppointmentDetailModal appt={selectedAppt} onClose={() => setSelectedAppt(null)} onStatusChange={(id, status) => { updateAppointmentStatus(id, status); setSelectedAppt(prev => prev ? { ...prev, status } : null); }} />}
             {rescheduleAppt && <RescheduleModal appt={rescheduleAppt} onClose={() => setRescheduleAppt(null)} onSave={updateAppointment} />}
             {confirmDeleteId && (

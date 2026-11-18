@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     Building2, Calendar, MapPin, Phone, MessageSquare, Save, CheckCircle,
     User, Mail, ToggleLeft, ToggleRight, Plus, Trash2, CalendarOff,
-    Image as ImageIcon, Upload, RefreshCw, Gift, Bell, CreditCard, Bot, Landmark, X
+    Image as ImageIcon, Upload, RefreshCw, Gift, Bell, CreditCard, Bot, Landmark, X,
+    PartyPopper, AlertTriangle
 } from 'lucide-react';
-import { useAppContext } from '../context/AppContext.jsx';
+import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
 import { MODELO_PADRAO, CAMPOS, formatarCNPJ } from '../lib/contrato.js';
 import { prepararImagem, ehHeic } from '../lib/imagem.js';
@@ -977,6 +978,165 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
         return d.toLocaleDateString('pt-BR', {
             weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric',
         });
+    };
+
+    // ── Feirão / evento especial da loja ──────────────────────────────────────
+    //
+    // Um evento com data de início e fim, horário próprio e um texto de
+    // condições especiais que o BOT vai repetir pro cliente. Salvar também
+    // ABRE a loja nesses dias (grava exceção de agenda), senão o bot recusa o
+    // domingo de feirão porque a agenda semanal diz que a loja não abre.
+    const EVENTO_VAZIO = {
+        id: null, nome: 'Feirão', data_inicio: '', data_fim: '',
+        hora_inicio: '09:00', hora_fim: '21:00', condicoes: '',
+    };
+    const [evento, setEvento]           = useState(EVENTO_VAZIO);
+    const [temEvento, setTemEvento]     = useState(false);
+    const [loadingEv, setLoadingEv]     = useState(true);
+    const [savingEv, setSavingEv]       = useState(false);
+    const [savedEv, setSavedEv]         = useState(false);
+    const [erroEv, setErroEv]           = useState('');
+    const [confirmDelEv, setConfirmDelEv] = useState(false);
+
+    useEffect(() => {
+        if (!user?.id) return;
+        const controller = new AbortController();
+        const timer = setTimeout(() => { controller.abort(); setLoadingEv(false); }, 10000);
+        supabase
+            .from('eventos')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('ativo', true)
+            .gte('data_fim', getTodayStr())
+            .order('data_inicio', { ascending: true })
+            .limit(1)
+            .abortSignal(controller.signal)
+            .then(({ data }) => {
+                if (controller.signal.aborted) return;
+                const row = (data || [])[0];
+                if (row) {
+                    setEvento({ ...row, condicoes: row.condicoes || '' });
+                    setTemEvento(true);
+                }
+            })
+            .catch(() => { /* tabela ausente ou abort: form em branco */ })
+            .finally(() => {
+                clearTimeout(timer);
+                if (!controller.signal.aborted) setLoadingEv(false);
+            });
+        return () => { clearTimeout(timer); controller.abort(); };
+    }, [user?.id]);
+
+    // Os dias que o intervalo cobre, com dia da semana — serve pra conferir na
+    // tela que "26 a 29" é mesmo quinta a domingo antes de salvar.
+    const diasDoEvento = (inicio, fim) => {
+        if (!inicio || !fim || fim < inicio) return [];
+        const dias = [];
+        const dFim = new Date(`${fim}T12:00:00Z`);
+        const d = new Date(`${inicio}T12:00:00Z`);
+        let guarda = 0;
+        while (d <= dFim && guarda < 62) {
+            dias.push(d.toISOString().slice(0, 10));
+            d.setUTCDate(d.getUTCDate() + 1);
+            guarda++;
+        }
+        return dias;
+    };
+
+    // Grava uma exceção de agenda por dia do evento, com closed = false. É o
+    // que faz a loja abrir das 9 às 21 inclusive no domingo.
+    //
+    // Apaga antes as exceções DESTE evento, pra encurtar o intervalo não
+    // deixar dia aberto sobrando. Um feriado marcado à mão fica onde está —
+    // exceto se cair num dia do feirão, aí o feirão ganha (a loja está
+    // declarando que abre; o aviso está na tela).
+    const sincronizarExcecoes = async (row) => {
+        await supabase.from('schedule_exceptions').delete().eq('evento_id', row.id);
+        const dias = diasDoEvento(row.data_inicio, row.data_fim);
+        if (dias.length) {
+            await supabase.from('schedule_exceptions').upsert(
+                dias.map(date => ({
+                    user_id: user.id, date, closed: false,
+                    start_time: row.hora_inicio, end_time: row.hora_fim,
+                    note: row.nome, evento_id: row.id,
+                })),
+                { onConflict: 'user_id,date' },
+            );
+        }
+        const { data } = await supabase
+            .from('schedule_exceptions').select('*')
+            .eq('user_id', user.id).order('date', { ascending: true });
+        if (data) setExceptions(data);
+    };
+
+    const salvarEvento = async () => {
+        if (!user?.id) return;
+        if (!evento.data_inicio || !evento.data_fim) {
+            setErroEv('Informe a data de início e a data de fim.'); return;
+        }
+        if (evento.data_fim < evento.data_inicio) {
+            setErroEv('A data de fim não pode ser antes da data de início.'); return;
+        }
+        if (!evento.hora_inicio || !evento.hora_fim || evento.hora_fim <= evento.hora_inicio) {
+            setErroEv('O horário de fechamento tem que ser depois do de abertura.'); return;
+        }
+        setErroEv('');
+        setSavingEv(true);
+        try {
+            const payload = {
+                user_id:     user.id,
+                nome:        (evento.nome || 'Feirão').trim(),
+                data_inicio: evento.data_inicio,
+                data_fim:    evento.data_fim,
+                hora_inicio: evento.hora_inicio,
+                hora_fim:    evento.hora_fim,
+                condicoes:   (evento.condicoes || '').trim() || null,
+                ativo:       true,
+            };
+            const q = evento.id
+                ? supabase.from('eventos').update(payload).eq('id', evento.id)
+                : supabase.from('eventos').insert(payload);
+            const { data: row, error } = await q.select().single();
+            if (error) throw error;
+
+            await sincronizarExcecoes(row);
+
+            // Visita que JÁ estava marcada nesses dias passa a contar no
+            // feirão. Sem isto, quem agendou antes de a loja cadastrar o
+            // evento ficaria fora da conta — e a aba do feirão mostraria
+            // menos gente do que vai aparecer na loja.
+            await supabase.from('appointments')
+                .update({ evento_id: row.id })
+                .eq('user_id', user.id)
+                .gte('appointment_date', row.data_inicio)
+                .lte('appointment_date', row.data_fim)
+                .is('evento_id', null);
+
+            setEvento({ ...row, condicoes: row.condicoes || '' });
+            setTemEvento(true);
+            setSavedEv(true);
+            setTimeout(() => setSavedEv(false), 2500);
+        } catch (e) {
+            const faltaTabela = e?.code === '42P01' || /relation .*eventos.* does not exist/i.test(e?.message || '');
+            setErroEv(faltaTabela
+                ? 'A tabela de eventos ainda não existe no banco. A migration 117 precisa ser aplicada antes de usar esta tela.'
+                : (e?.message || 'Não deu pra salvar o evento.'));
+        } finally {
+            setSavingEv(false);
+        }
+    };
+
+    const apagarEvento = async () => {
+        setConfirmDelEv(false);
+        const id = evento.id;
+        setEvento(EVENTO_VAZIO);
+        setTemEvento(false);
+        if (!id) return;
+        // schedule_exceptions.evento_id é ON DELETE CASCADE: os dias abertos
+        // pelo feirão saem junto. appointments.evento_id é ON DELETE SET NULL,
+        // então a visita continua na agenda, só deixa de ser "do feirão".
+        await supabase.from('eventos').delete().eq('id', id);
+        setExceptions(prev => prev.filter(e => e.evento_id !== id));
     };
 
     // ── Render ────────────────────────────────────────────────────────────────
@@ -2634,6 +2794,146 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                                     </button>
                                 </div>
                             ))}
+                        </div>
+                    )}
+                </section>
+
+                {/* ── Feirão / Evento Especial ─────────────────────────── */}
+                <section className="settings-section card" style={{ marginTop: '2rem' }}>
+                    <div className="section-title">
+                        <PartyPopper size={20} />
+                        <h2>Feirão / Evento Especial</h2>
+                    </div>
+
+                    <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '1.25rem', lineHeight: 1.5 }}>
+                        Cadastre aqui um feirão, mutirão ou semana de ofertas. O bot passa a
+                        conhecer as datas, o horário e as condições, e toda visita marcada
+                        nesses dias entra numa parte separada da Agenda.
+                    </p>
+
+                    {loadingEv ? (
+                        <p className="text-muted" style={{ fontSize: '0.85rem' }}>Carregando…</p>
+                    ) : (
+                        <div className="settings-form">
+                            <div className="form-group">
+                                <label>Nome do evento</label>
+                                <input
+                                    type="text"
+                                    value={evento.nome}
+                                    onChange={e => setEvento({ ...evento, nome: e.target.value })}
+                                    placeholder="Feirão"
+                                />
+                                <small className="text-muted" style={{ fontSize: '0.78rem' }}>
+                                    É assim que o bot vai chamar o evento na conversa.
+                                </small>
+                            </div>
+
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Começa em *</label>
+                                    <input
+                                        type="date"
+                                        value={evento.data_inicio}
+                                        onChange={e => setEvento({ ...evento, data_inicio: e.target.value })}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label>Termina em *</label>
+                                    <input
+                                        type="date"
+                                        value={evento.data_fim}
+                                        onChange={e => setEvento({ ...evento, data_fim: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="form-row">
+                                <div className="form-group">
+                                    <label>Abre às</label>
+                                    <input
+                                        type="time"
+                                        value={evento.hora_inicio}
+                                        onChange={e => setEvento({ ...evento, hora_inicio: e.target.value })}
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label>Fecha às</label>
+                                    <input
+                                        type="time"
+                                        value={evento.hora_fim}
+                                        onChange={e => setEvento({ ...evento, hora_fim: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Confere na tela que o intervalo digitado é o que a pessoa
+                                quis dizer, antes de salvar e abrir a loja nesses dias. */}
+                            {diasDoEvento(evento.data_inicio, evento.data_fim).length > 0 && (
+                                <div style={{
+                                    marginBottom: '1.25rem', padding: '0.85rem 1rem', borderRadius: 10,
+                                    background: 'var(--input-bg)', border: '1px solid var(--border)',
+                                }}>
+                                    <p style={{ fontSize: '0.8rem', fontWeight: 700, marginBottom: '0.4rem' }}>
+                                        {diasDoEvento(evento.data_inicio, evento.data_fim).length} dia(s) de evento
+                                    </p>
+                                    {diasDoEvento(evento.data_inicio, evento.data_fim).map(d => (
+                                        <p key={d} style={{ fontSize: '0.82rem', marginBottom: 2 }}>
+                                            {formatExDate(d)} · <strong>{evento.hora_inicio} – {evento.hora_fim}</strong>
+                                        </p>
+                                    ))}
+                                    <p className="text-muted" style={{ fontSize: '0.78rem', marginTop: '0.5rem', display: 'flex', gap: '0.4rem', alignItems: 'flex-start' }}>
+                                        <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                                        <span>
+                                            Salvar <strong>abre a loja</strong> nesses dias e nesse horário, mesmo
+                                            num dia da semana em que ela normalmente não abre. Se já existir
+                                            uma exceção ou feriado numa dessas datas, o evento substitui.
+                                        </span>
+                                    </p>
+                                </div>
+                            )}
+
+                            <div className="form-group">
+                                <label>Condições especiais do evento</label>
+                                <textarea
+                                    rows={5}
+                                    value={evento.condicoes}
+                                    onChange={e => setEvento({ ...evento, condicoes: e.target.value })}
+                                    placeholder={'Ex.: Entrada a partir de R$ 5.000\nTaxa promocional para financiamento aprovado no dia\nAvaliação do usado na hora\nBrinde para quem fechar durante o feirão'}
+                                />
+                                <small className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.5, display: 'block' }}>
+                                    <strong>O bot repete exatamente o que estiver escrito aqui.</strong> Ele tem
+                                    ordem de não inventar taxa, desconto, parcela ou brinde que não esteja neste
+                                    texto. Se você deixar em branco, ele só diz que haverá condições especiais e
+                                    que a equipe passa os detalhes na hora — sem citar nenhum número.
+                                </small>
+                            </div>
+
+                            {erroEv && (
+                                <p style={{ color: '#ef4444', fontSize: '0.85rem', marginBottom: '1rem' }}>{erroEv}</p>
+                            )}
+
+                            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                <button className="btn-primary" onClick={salvarEvento} disabled={savingEv}
+                                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    {savedEv ? <CheckCircle size={18} /> : <Save size={18} />}
+                                    {savingEv ? 'Salvando…' : savedEv ? 'Salvo' : temEvento ? 'Salvar alterações' : 'Criar evento'}
+                                </button>
+                                {temEvento && !confirmDelEv && (
+                                    <button className="btn-outline" onClick={() => setConfirmDelEv(true)}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#ef4444', fontSize: '0.85rem' }}>
+                                        <Trash2 size={16} /> Cancelar o evento
+                                    </button>
+                                )}
+                                {confirmDelEv && (
+                                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <span style={{ fontSize: '0.85rem' }}>
+                                            Apagar o evento? As visitas já marcadas continuam na agenda.
+                                        </span>
+                                        <button className="btn-primary" style={{ background: '#ef4444', fontSize: '0.85rem', padding: '0.5rem 0.85rem' }} onClick={apagarEvento}>Apagar</button>
+                                        <button className="btn-secondary" style={{ fontSize: '0.85rem', padding: '0.5rem 0.85rem' }} onClick={() => setConfirmDelEv(false)}>Manter</button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
                 </section>

@@ -337,7 +337,11 @@ export const AppProvider = ({ children }) => {
         time: a.appointment_time,
         notes: a.notes || '',
         status: STATUS_DB_TO_UI[a.status] || 'agendado',
-        car_id: a.car_id
+        car_id: a.car_id,
+        // Visita de feirão. `?? null` porque num banco sem a migration 117 a
+        // coluna não existe e vem undefined — a Agenda trata ausência como
+        // "nenhuma visita de evento" e simplesmente não mostra a aba.
+        evento_id: a.evento_id ?? null
       }));
 
       setAppointments(mapped);
@@ -1796,6 +1800,10 @@ export const AppProvider = ({ children }) => {
         notes: appt.notes || '',
         status: 'scheduled'
       };
+      // Só entra quando quem chamou ACHOU um evento — ou seja, quando a tabela
+      // `eventos` existe. Banco sem a migration 117 nunca chega aqui com
+      // evento_id, então o insert continua o de antes.
+      if (appt.evento_id) insertData.evento_id = appt.evento_id;
 
       const { data: newAppt, error } = await supabase
         .from('appointments')
@@ -1815,7 +1823,8 @@ export const AppProvider = ({ children }) => {
         time: newAppt.appointment_time,
         notes: newAppt.notes || '',
         status: 'agendado',
-        car_id: newAppt.car_id
+        car_id: newAppt.car_id,
+        evento_id: newAppt.evento_id ?? null
       };
 
       setAppointments(prev => [...prev, mapped]);
@@ -2014,7 +2023,8 @@ export const AppProvider = ({ children }) => {
       time: raw.appointment_time,
       notes: raw.notes || '',
       status: STATUS_DB_TO_UI[raw.status] || 'agendado',
-      car_id: raw.car_id
+      car_id: raw.car_id,
+      evento_id: raw.evento_id ?? null
     });
 
     const channel = supabase
