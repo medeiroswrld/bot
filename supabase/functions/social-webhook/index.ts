@@ -235,6 +235,55 @@ serve(async (req) => {
     convId = nova.id;
   }
 
+  // ── Lead ───────────────────────────────────────────────────────────────────
+  //
+  // Esta função NUNCA criava lead, e o `whatsapp-webhook` cria desde sempre
+  // (linha ~531 de lá). Resultado medido na DSC em 19/11: o Instagram virou o
+  // canal principal dela (654 mensagens de cliente em 60 dias, contra o
+  // WhatsApp parado de 24/09 a 18/11) e, em 10 dias, SEIS conversas com 7+
+  // mensagens do cliente não deixaram lead nenhum. O lojista conversava,
+  // qualificava, e o contato não ficava em lugar nenhum — sem erro, sem aviso.
+  // Quebrado desde 21/08, quando o Instagram entrou.
+  //
+  // Só cria quando já houve conversa de verdade? NÃO: cria no primeiro contato,
+  // igual ao WhatsApp. Coerência vale mais que economia de linha aqui — duas
+  // regras diferentes por canal é o que produziu este defeito.
+  //
+  // `phone` recebe o PSID/IGSID porque é por esse campo que TODO o resto do
+  // sistema casa lead com conversa (`registrar_interesse`, `avaliar_troca`,
+  // `save_trade_in_evaluation` todos usam `customer_phone`). Mudar isso seria
+  // refatoração grande. O que distingue é o `source`, e quem protege o disparo
+  // de tentar ligar pra um IGSID é a guarda de formato no `send-campaign`.
+  try {
+    const { data: leadExistente } = await supabase
+      .from('leads')
+      .select('id, name')
+      .eq('user_id', userId)
+      .eq('phone', msg.de)
+      .maybeSingle();
+
+    if (!leadExistente) {
+      const canalLegivel = msg.canal === 'instagram' ? 'Instagram' : 'Messenger';
+      await supabase.from('leads').insert({
+        user_id: userId,
+        name: nome || conv?.customer_name || `Cliente ${canalLegivel}`,
+        phone: msg.de,
+        source: msg.canal,            // 'instagram' | 'messenger'
+        status: 'novo',
+        notes: `Lead criado automaticamente via ${canalLegivel}. `
+             + `Não tem telefone — responda pela conversa do ${canalLegivel} no CRM.`,
+      });
+      console.log(`[SW] lead criado para ${msg.canal}`);
+    } else if (nome && !leadExistente.name) {
+      // Nome chegou depois (a primeira tentativa pode falhar): completa.
+      await supabase.from('leads').update({ name: nome }).eq('id', leadExistente.id);
+    }
+  } catch (e) {
+    // Nunca derruba o atendimento por causa do lead. Mensagem do cliente
+    // sendo respondida vale mais que o registro no CRM.
+    console.error('[SW] falha ao garantir lead:', (e as Error)?.message);
+  }
+
   // ── Eco: a loja respondeu pelo app do celular ──────────────────────────────
   // Grava como atendente e passa a conversa para 'human'. Sem isso o vendedor
   // responde pelo Instagram, o CRM não fica sabendo, e o bot continua

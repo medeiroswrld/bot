@@ -127,7 +127,7 @@ serve(async (req) => {
     const publicoBruto = await resolveAudience(supabase, campaign);
     const {
       lista: recipients, excluidosIdade, excluidosJaReceberam,
-      excluidosDuplicados, excluidosPeloLimite,
+      excluidosDuplicados, excluidosPeloLimite, excluidosSemTelefone,
     } = await refinarPublico(supabase, campaign, publicoBruto);
 
     console.log('[send-campaign] público', {
@@ -136,6 +136,8 @@ serve(async (req) => {
       // Estes dois são o que protege o número: repetido nunca sai duas vezes, e
       // o teto impede o disparo de uma base inteira num número recém-conectado.
       excluidosDuplicados, excluidosPeloLimite,
+      // Quem nao tinha telefone de verdade (IGSID, lixo de importacao).
+      excluidosSemTelefone,
     });
 
     if (recipients.length === 0) {
@@ -241,6 +243,7 @@ async function refinarPublico(
   excluidosJaReceberam: number;
   excluidosDuplicados: number;
   excluidosPeloLimite: number;
+  excluidosSemTelefone: number;
 }> {
   const filter = campaign.audience_filter ?? {};
   let lista = recipients;
@@ -258,6 +261,32 @@ async function refinarPublico(
   // A comparação é por DÍGITOS. "(15) 99999-9999" e "5515999999999" são a mesma
   // pessoa, e comparar a string crua deixaria as duas passarem.
   const soDigitos = (p: unknown) => String(p ?? '').replace(/\D/g, '');
+
+  // ── 0a. ISSO É UM TELEFONE? ───────────────────────────────────────────────
+  //
+  // Vem antes do dedup porque lixo não merece nem ser deduplicado.
+  //
+  // Lead de Instagram/Messenger guarda o PSID/IGSID no campo `phone` — é assim
+  // que o sistema casa lead com conversa nesses canais. Mas IGSID tem 16-17
+  // dígitos e NÃO é telefone: mandar WhatsApp pra ele é falha garantida, e
+  // falha de envio machuca a qualidade do número. Num número recém-conectado
+  // isso é o que não pode acontecer.
+  //
+  // Medido na base da DSC em 19/11: 17 leads com 16 dígitos (IGSIDs que
+  // entraram pelo `registrar_interesse`) contra 1.201 com 12-13. Sem esta
+  // guarda, um disparo de "todos os leads" levaria 17 falhas certas.
+  //
+  // 10 a 13 dígitos: fixo sem DDI (10), celular sem DDI (11), fixo com 55 (12),
+  // celular com 55 (13).
+  const PHONE_MIN = 10;
+  const PHONE_MAX = 13;
+  const antesFormato = lista.length;
+  lista = lista.filter((r) => {
+    const d = soDigitos(r.phone);
+    return d.length >= PHONE_MIN && d.length <= PHONE_MAX;
+  });
+  const excluidosSemTelefone = antesFormato - lista.length;
+
   const vistos = new Set<string>();
   const antesDedup = lista.length;
   lista = lista.filter((r) => {
@@ -341,7 +370,7 @@ async function refinarPublico(
 
   return {
     lista, excluidosIdade, excluidosJaReceberam,
-    excluidosDuplicados, excluidosPeloLimite,
+    excluidosDuplicados, excluidosPeloLimite, excluidosSemTelefone,
   };
 }
 

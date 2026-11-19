@@ -152,17 +152,30 @@ const CampaignWizard = ({ onClose }) => {
     // uma loja real tinha 1215 leads e 706 pessoas (509 repetidos, um número
     // aparecendo 304 vezes). O lojista dispararia achando que são 1215 e sairiam
     // 706 — exatamente o descasamento que esta tela foi feita pra evitar.
+    // Isso é um telefone? MESMA regra do refinarPublico (10 a 13 dígitos).
+    //
+    // Lead de Instagram/Messenger guarda o IGSID no campo telefone, e IGSID tem
+    // 16-17 dígitos. Mandar WhatsApp pra ele é falha garantida, e falha machuca
+    // a qualidade do número. A tela tem que contar igual ao servidor, senão
+    // volta a mentir.
+    const comTelefoneReal = useMemo(() => telefonesDoPublico.filter((p) => {
+        const d = String(p ?? '').replace(/\D/g, '');
+        return d.length >= 10 && d.length <= 13;
+    }), [telefonesDoPublico]);
+
+    const semTelefoneReal = telefonesDoPublico.length - comTelefoneReal.length;
+
     const unicos = useMemo(() => {
         const vistos = new Set();
-        return telefonesDoPublico.filter((p) => {
+        return comTelefoneReal.filter((p) => {
             const chave = String(p ?? '').replace(/\D/g, '');
             if (!chave || vistos.has(chave)) return false;
             vistos.add(chave);
             return true;
         });
-    }, [telefonesDoPublico]);
+    }, [comTelefoneReal]);
 
-    const duplicadosRemovidos = telefonesDoPublico.length - unicos.length;
+    const duplicadosRemovidos = comTelefoneReal.length - unicos.length;
 
     const audienceCount = useMemo(() => {
         const teto = Number(limite) || 0;
@@ -421,6 +434,12 @@ const CampaignWizard = ({ onClose }) => {
                                 )}
                                 {/* Dizer POR QUE o número caiu. Sem isto parece que o sistema
                                     perdeu gente, e o lojista desconfia do contador. */}
+                                {semTelefoneReal > 0 && (
+                                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                                        {semTelefoneReal} sem telefone válido (contato de Instagram/Messenger
+                                        ou cadastro errado) — WhatsApp não alcança
+                                    </div>
+                                )}
                                 {duplicadosRemovidos > 0 && (
                                     <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 2 }}>
                                         {duplicadosRemovidos} {duplicadosRemovidos === 1 ? 'cadastro repetido' : 'cadastros repetidos'} do mesmo telefone
