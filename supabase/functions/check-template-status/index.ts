@@ -3,6 +3,26 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { buildCors } from '../_shared/cors.ts';
 import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
 
+// Traduz o código de rejeição da Meta para algo que o lojista entenda.
+// Mantém o código cru quando não conhecemos o valor: perder informação de
+// diagnóstico é pior que mostrar uma sigla em inglês.
+const MOTIVOS: Record<string, string> = {
+  SCAM: 'A Meta classificou como golpe. Costuma ser confiança da conta, não o texto. Peça revisão.',
+  ABUSIVE_CONTENT: 'Conteúdo considerado abusivo pela Meta. Revise o texto antes de reenviar.',
+  INCORRECT_CATEGORY: 'Categoria errada: o texto parece ser de outra categoria (marketing x utilidade).',
+  INVALID_FORMAT: 'Formato inválido: variáveis, exemplos ou botões fora do padrão da Meta.',
+  TAG_CONTENT_MISMATCH: 'O conteúdo não corresponde à categoria declarada no envio.',
+  PROMOTIONAL: 'Texto promocional numa categoria que não aceita promoção.',
+};
+
+function motivoEmPortugues(code: unknown): string {
+  const raw = String(code ?? '').trim().toUpperCase();
+  // 'NONE' é o que a Meta manda quando não há motivo registrado — não é o
+  // mesmo que a gente ter deixado de perguntar.
+  if (!raw || raw === 'NONE') return 'A Meta não informou o motivo.';
+  return MOTIVOS[raw] ?? `Motivo da Meta: ${raw}`;
+}
+
 serve(async (req) => {
   const corsHeaders = buildCors(req);
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -21,14 +41,18 @@ serve(async (req) => {
       { auth: { autoRefreshToken: false, persistSession: false } },
     );
 
-    const { data: pendingTemplates } = await supabase
+    // Inclui 'rejected' e 'paused' de propósito, não só 'pending': uma
+    // apelação aceita pela Meta devolve o template para APPROVED, e se a gente
+    // só olhasse os pendentes esse voltar nunca chegaria no banco — o template
+    // ficaria rejeitado pra sempre aqui e fora do disparo, mesmo aprovado lá.
+    const { data: tracked } = await supabase
       .from('message_templates')
       .select('*')
       .eq('user_id', user_id)
-      .eq('status', 'pending');
+      .in('status', ['pending', 'rejected', 'paused']);
 
-    if (!pendingTemplates || pendingTemplates.length === 0) {
-      return new Response(JSON.stringify({ updated: 0, message: 'Nenhum template pendente' }), {
+    if (!tracked || tracked.length === 0) {
+      return new Response(JSON.stringify({ updated: 0, message: 'Nenhum template em acompanhamento' }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -57,7 +81,12 @@ serve(async (req) => {
 
     const tenantToken = await resolveWhatsAppToken(supabase, user_id);
 
-    const url = `https://graph.facebook.com/v25.0/${wabaId}/message_templates?limit=200`;
+    // `fields` é OBRIGATÓRIO para vir `rejected_reason`: sem ele a Meta devolve
+    // só o conjunto padrão (name/status/id/...) e o motivo chega `undefined`,
+    // fazendo todo template rejeitado virar "Não informado" no banco.
+    // Queimou em 20/11/2026 — 6 templates da DSC rejeitados e nós cegos ao SCAM.
+    const FIELDS = 'name,status,id,category,language,rejected_reason';
+    const url = `https://graph.facebook.com/v25.0/${wabaId}/message_templates?fields=${FIELDS}&limit=200`;
     const response = await fetch(url, { headers: { Authorization: `Bearer ${tenantToken}` } });
     const data = await response.json();
 
@@ -72,7 +101,7 @@ serve(async (req) => {
     const remoteList = Array.isArray(data.data) ? data.data : [];
     let updated = 0;
 
-    for (const local of pendingTemplates) {
+    for (const local of tracked) {
       const remote = remoteList.find((t: { name?: string }) => t.name === local.meta_template_name);
       if (!remote) {
         await supabase.from('message_templates')
@@ -94,19 +123,25 @@ serve(async (req) => {
             status: newStatus,
             meta_template_id: remote.id ?? local.meta_template_id,
             ...(newStatus === 'approved' ? { approved_at: new Date().toISOString() } : {}),
-            ...(newStatus === 'rejected' ? { rejection_reason: remote.rejected_reason ?? 'Não informado' } : {}),
+            ...(newStatus === 'rejected' ? { rejection_reason: motivoEmPortugues(remote.rejected_reason) } : {}),
             last_status_check: new Date().toISOString(),
           })
           .eq('id', local.id);
         updated++;
       } else {
+        // Status igual, mas o motivo pode estar errado no banco (foi o caso das
+        // linhas gravadas antes de pedirmos `rejected_reason`). Regrava sempre
+        // que estiver rejeitado, assim as linhas velhas se curam sozinhas.
+        const motivoAtual = newStatus === 'rejected'
+          ? { rejection_reason: motivoEmPortugues(remote.rejected_reason) }
+          : {};
         await supabase.from('message_templates')
-          .update({ last_status_check: new Date().toISOString() })
+          .update({ ...motivoAtual, last_status_check: new Date().toISOString() })
           .eq('id', local.id);
       }
     }
 
-    return new Response(JSON.stringify({ updated, total_pending: pendingTemplates.length }), {
+    return new Response(JSON.stringify({ updated, total_pending: tracked.length }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
