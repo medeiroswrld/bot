@@ -9,6 +9,7 @@ import './App.css';
 
 import { AppProvider, useAppContext } from './context/AppContext.jsx';
 import { precisaDesafio } from './lib/doisFatores.js';
+import { estadoDaConta, rotaLiberadaNoBloqueio } from './lib/bloqueio.js';
 
 const Dashboard    = lazy(() => import('./views/Dashboard.jsx'));
 const AdminPanel   = lazy(() => import('./views/AdminPanel.jsx'));
@@ -485,11 +486,79 @@ const AvisoSuspensao = () => {
   );
 };
 
+// ─── Conta bloqueada ──────────────────────────────────────────────────────────
+//
+// Tranca o PRODUTO e devolve o DADO: o lojista não mexe em estoque, disparo,
+// agenda nem configuração, mas continua lendo as Conversas. Quem está
+// escrevendo pra ele agora não vira prejuízo de cobrança — e o sistema não
+// contradiz o que ele mesmo promete no aviso ("nada se perde").
+const TelaBloqueio = ({ motivo, diasVencido }) => {
+  const navigate = useNavigate();
+  const porFatura = motivo === 'fatura';
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      textAlign: 'center', padding: '3rem 1.5rem', minHeight: '60vh', gap: '1rem',
+    }}>
+      <div style={{
+        width: 64, height: 64, borderRadius: '50%', background: '#fef2f2',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <CreditCard size={30} style={{ color: '#b91c1c' }} />
+      </div>
+
+      <h1 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0 }}>
+        {porFatura ? 'Fatura em aberto' : 'Conta bloqueada'}
+      </h1>
+
+      <p style={{ maxWidth: 460, color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+        {porFatura ? (
+          <>
+            O pagamento está em aberto
+            {typeof diasVencido === 'number' ? ` há ${diasVencido} dias` : ''}.
+            {' '}Regularize a fatura para voltar a usar o sistema.
+          </>
+        ) : (
+          // Suspensão manual cobre mais de um caso (pendência de pagamento,
+          // uso indevido). O texto cita a pendência sem afirmar valor nem
+          // prazo — inventar número aqui seria mentir pro lojista.
+          <>
+            O acesso ao sistema está bloqueado por uma pendência na conta.
+            Regularize com o suporte para reativar.
+          </>
+        )}
+      </p>
+
+      <p style={{ maxWidth: 460, color: 'var(--text-secondary)', fontSize: '0.88rem', lineHeight: 1.6, margin: 0 }}>
+        <strong>Seus dados estão seguros.</strong> As mensagens dos seus clientes continuam
+        chegando e você segue respondendo normalmente em Conversas — nada se perde.
+      </p>
+
+      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center', marginTop: '0.5rem' }}>
+        {porFatura && (
+          <button className="btn-primary" onClick={() => navigate('/plano')}>
+            Regularizar agora
+          </button>
+        )}
+        <button className="btn-secondary" onClick={() => navigate('/conversas')}>
+          Ir para Conversas
+        </button>
+      </div>
+    </div>
+  );
+};
+
 const AuthenticatedApp = () => {
   const location = useLocation();
   const [menuAberto, setMenuAberto] = useState(false);
   const { user, companySettings, refreshCompanySettings } = useAppContext();
   const navigate = useNavigate();
+
+  // Conta bloqueada por cobrança. `isento` nunca cai aqui — a regra está em
+  // bloqueio.js e a proteção do parceiro é a PRIMEIRA condição dela.
+  const bloqueio = estadoDaConta(companySettings);
+  const trancado = bloqueio.bloqueada && !rotaLiberadaNoBloqueio(location.pathname);
 
   // Tour de boas-vindas, uma vez por loja.
   //
@@ -553,6 +622,9 @@ const AuthenticatedApp = () => {
         <PageTabs />
         <Suspense fallback={<PageLoader />}>
           <div key={location.pathname} className="page-transition">
+            {trancado ? (
+              <TelaBloqueio motivo={bloqueio.motivo} diasVencido={bloqueio.diasVencido} />
+            ) : (
             <Routes location={location}>
               <Route path="/"              element={<Dashboard />} />
               <Route path="/estoque"       element={<Inventory />} />
@@ -576,6 +648,7 @@ const AuthenticatedApp = () => {
               <Route path="/configuracoes/conta"      element={<AbaConta />} />
               <Route path="/conectar/instagram" element={<RetornoInstagram />} />
             </Routes>
+            )}
           </div>
         </Suspense>
       </main>

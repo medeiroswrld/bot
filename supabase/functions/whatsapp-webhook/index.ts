@@ -394,7 +394,32 @@ serve(async (req) => {
     const sigBytes = new TextEncoder().encode(sig);
     const expBytes = new TextEncoder().encode(expected);
     if (sigBytes.length !== expBytes.length || !timingSafeEqual(sigBytes, expBytes)) {
-      console.warn('[WH] Assinatura inválida');
+      // DIAGNÓSTICO — 19/11. Um 401 aqui é cego: a rejeição acontece ANTES do
+      // parse, então não dá pra saber de QUAL número era a mensagem perdida.
+      // Em 19/11 apareceram rajadas de 4-5 rejeições em segundos (cara de
+      // retry da Meta) enquanto a DSC não recebia nada, e sem isto não há como
+      // ligar uma coisa à outra.
+      //
+      // NADA de conteúdo de cliente: só o id do número, o tipo do evento e
+      // tamanhos. Serve pra responder três perguntas de uma vez — veio
+      // assinado? é da Meta? é de qual loja?
+      let deQuem = '?';
+      let campo = '?';
+      try {
+        const p = JSON.parse(rawBody) as {
+          object?: string;
+          entry?: Array<{ changes?: Array<{ field?: string; value?: { metadata?: { phone_number_id?: string } } }> }>;
+        };
+        const ch = p?.entry?.[0]?.changes?.[0];
+        deQuem = String(ch?.value?.metadata?.phone_number_id ?? `(sem metadata, object=${p?.object ?? '?'})`);
+        campo  = String(ch?.field ?? '?');
+      } catch {
+        deQuem = '(corpo não é JSON)';
+      }
+      console.warn(
+        `[WH] Assinatura inválida — phone_number_id=${deQuem} field=${campo} `
+        + `header_presente=${sig ? 'sim' : 'NAO'} tam_header=${sig.length} tam_corpo=${rawBody.length}`,
+      );
       return err(401, 'Unauthorized');
     }
   }
