@@ -44,3 +44,6 @@ deno.lock
 
 .vercel
 .env*
+
+# Token temporario de leitura de anuncios (lido e apagado na hora)
+.ads-token.txt

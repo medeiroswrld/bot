@@ -69,17 +69,20 @@ Deno.serve(async (req) => {
   }
   if (!refs?.length) return json({ lojas: 0, motivo: 'nenhum clique de anuncio registrado' });
 
-  // Agrupa por loja, guardando o anúncio mais recente (serve pra descobrir a
-  // conta) e o clique mais antigo (serve pra decidir o backfill).
-  const porLoja = new Map<string, { ultimoAd: string; primeiroClique: string }>();
+  // Agrupa por loja: o anúncio mais recente (pra descobrir a conta), o clique
+  // mais antigo (pra decidir o backfill) e TODOS os ad_ids da loja — estes
+  // servem pra reconhecer qual conta é a dela quando a descoberta direta
+  // falhar (ver o terceiro degrau abaixo).
+  const porLoja = new Map<string, { ultimoAd: string; primeiroClique: string; ads: Set<string> }>();
   for (const r of refs) {
     const uid = String(r.user_id);
     const criado = String(r.created_at ?? '');
     const atual = porLoja.get(uid);
     if (!atual) {
-      porLoja.set(uid, { ultimoAd: String(r.source_id), primeiroClique: criado });
+      porLoja.set(uid, { ultimoAd: String(r.source_id), primeiroClique: criado, ads: new Set([String(r.source_id)]) });
       continue;
     }
+    atual.ads.add(String(r.source_id));
     if (criado > (atual.primeiroClique || '')) atual.ultimoAd = String(r.source_id);
     if (criado && criado < atual.primeiroClique) atual.primeiroClique = criado;
   }
@@ -98,33 +101,76 @@ Deno.serve(async (req) => {
     if (tk && String(tk).trim()) token = String(tk).trim();
     if (!token) { passo('sem token de anuncios'); continue; }
 
-    // ── Conta de anúncios: a guardada, ou descobre pelo anúncio ───────────
+    const pegar = async (caminho: string) => {
+      const r = await fetch(`${GRAPH}/${caminho}`, { headers: { Authorization: `Bearer ${token}` } });
+      const b = await r.json().catch(() => ({}));
+      return { ok: r.ok, status: r.status, body: b };
+    };
+
+    // Modo diagnóstico: mostra o que o token ALCANÇA, sem gravar nada.
+    //
+    // Existe porque "nenhum gasto no período" tem duas causas opostas — a
+    // conta certa sem veiculação, e a conta errada — e de fora elas são
+    // idênticas. `amount_spent` é o acumulado da vida da conta: conta com
+    // dinheiro gasto e zero no período é veiculação; conta zerada na vida
+    // inteira é a conta errada.
+    if (corpo?.diagnostico) {
+      // Sem o campo `business`: ele exige `business_management`, que este
+      // token não tem, e pedir um campo a mais derruba a resposta INTEIRA
+      // com (#100) em vez de só omitir o campo.
+      const r = await pegar('me/adaccounts?fields=id,name,amount_spent,currency,account_status&limit=50');
+      passo('diagnostico', {
+        contas: r.body?.data ?? null,
+        erro: r.body?.error?.message ?? null,
+        ads_que_procuramos: [...info.ads],
+      });
+      continue;
+    }
+
+    // ── De quais contas puxar, em três degraus ────────────────────────────
+    //
+    // Três e não um porque cada degrau falha num caso real diferente:
+    //
+    //  1. a guardada — depois da primeira vez, não se pergunta mais nada;
+    //  2. pelo próprio anúncio — resolve sem o lojista saber número nenhum;
+    //  3. todas as contas que o token enxerga — o degrau 2 devolveu 400
+    //     ("does not exist, cannot be loaded due to missing permissions")
+    //     em 21/11 mesmo com o token listando duas contas ativas. Ler o
+    //     OBJETO do anúncio exige mais permissão do que ler o insight da
+    //     conta, então dá pra ter acesso ao gasto e não conseguir abrir o
+    //     anúncio. Sem este degrau a importação morria aí.
     const { data: cfg } = await supabase
       .from('company_settings')
       .select('meta_ad_account_id')
       .eq('user_id', userId)
       .maybeSingle();
 
-    let conta = String(cfg?.meta_ad_account_id ?? '').replace(/^act_/, '').trim();
+    const guardada = String(cfg?.meta_ad_account_id ?? '').replace(/^act_/, '').trim();
+    let contas: string[] = [];
+    let origemDaConta = 'guardada';
 
-    if (!conta) {
-      // Descoberta: o anúncio sabe de qual conta ele é. Evita pedir pro
-      // lojista um número que ele não faz ideia de onde tirar.
-      const r = await fetch(`${GRAPH}/${info.ultimoAd}?fields=account_id`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const b = await r.json().catch(() => ({}));
-      if (!r.ok || !b?.account_id) {
-        passo('nao consegui descobrir a conta de anuncios', {
-          status: r.status, erro: b?.error?.message ?? null, ad_id: info.ultimoAd,
-        });
-        continue;
+    if (guardada) {
+      contas = [guardada];
+    } else {
+      const porAnuncio = await pegar(`${info.ultimoAd}?fields=account_id`);
+      if (porAnuncio.ok && porAnuncio.body?.account_id) {
+        contas = [String(porAnuncio.body.account_id).replace(/^act_/, '')];
+        origemDaConta = 'descoberta pelo anuncio';
+      } else {
+        // `/me/adaccounts` só responde pra token de USUÁRIO; pra usuário de
+        // sistema a Graph devolve 400 (edge errado pra essa identidade).
+        const minhas = await pegar('me/adaccounts?fields=id&limit=50');
+        if (minhas.ok && Array.isArray(minhas.body?.data) && minhas.body.data.length) {
+          contas = minhas.body.data.map((c: { id?: string }) => String(c.id ?? '').replace(/^act_/, '')).filter(Boolean);
+          origemDaConta = 'todas as contas do token';
+        } else {
+          passo('nao consegui descobrir a conta de anuncios', {
+            erro_anuncio: porAnuncio.body?.error?.message ?? null,
+            erro_contas:  minhas.body?.error?.message ?? null,
+          });
+          continue;
+        }
       }
-      conta = String(b.account_id).replace(/^act_/, '');
-      await supabase.from('company_settings')
-        .update({ meta_ad_account_id: conta })
-        .eq('user_id', userId);
-      console.log(`[gasto] ${userId}: conta descoberta act_${conta}`);
     }
 
     // ── Janela ────────────────────────────────────────────────────────────
@@ -134,8 +180,8 @@ Deno.serve(async (req) => {
     // a última semana contra leads de três meses daria custo por lead
     // ridiculamente baixo, e errado.
     const hoje = new Date();
-    let desde: string;
     const ate = ateParam || diaIso(hoje);
+    let desde: string;
 
     if (desdeParam) {
       desde = desdeParam;
@@ -154,55 +200,59 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Puxa os insights, página por página ───────────────────────────────
-    const params = new URLSearchParams({
-      level: 'ad',
-      time_increment: '1',
-      time_range: JSON.stringify({ since: desde, until: ate }),
-      fields: 'ad_id,ad_name,campaign_name,spend,impressions,clicks',
-      limit: '500',
-    });
+    // ── Puxa os insights de cada conta candidata ──────────────────────────
+    const registros: Record<string, unknown>[] = [];
+    const contasQueBateram = new Set<string>();
+    const errosPorConta: Record<string, string> = {};
 
-    let url: string | null = `${GRAPH}/act_${conta}/insights?${params.toString()}`;
-    const linhas: LinhaInsight[] = [];
-    let paginas = 0;
+    for (const conta of contas) {
+      const params = new URLSearchParams({
+        level: 'ad',
+        time_increment: '1',
+        time_range: JSON.stringify({ since: desde, until: ate }),
+        fields: 'ad_id,ad_name,campaign_name,spend,impressions,clicks',
+        limit: '500',
+      });
 
-    while (url && paginas < 20) {   // teto de páginas: rede não pode virar loop infinito
-      const r: Response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      const b = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        passo('a Meta recusou a leitura de insights', {
-          status: r.status, erro: b?.error?.message ?? null, conta: `act_${conta}`,
-        });
-        url = null;
-        break;
+      let url: string | null = `${GRAPH}/act_${conta}/insights?${params.toString()}`;
+      let paginas = 0;
+
+      while (url && paginas < 20) {   // teto de páginas: rede não pode virar loop infinito
+        const r: Response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        const b = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          errosPorConta[`act_${conta}`] = String(b?.error?.message ?? r.status);
+          break;
+        }
+        for (const l of (Array.isArray(b?.data) ? b.data : []) as LinhaInsight[]) {
+          if (!l.ad_id || !l.date_start) continue;
+          // Marca a conta que contém anúncio NOSSO: é o que permite gravar a
+          // conta certa quando viemos do degrau 3 (várias candidatas).
+          if (info.ads.has(String(l.ad_id))) contasQueBateram.add(conta);
+          registros.push({
+            user_id:       userId,
+            ad_id:         String(l.ad_id),
+            dia:           String(l.date_start),
+            ad_name:       l.ad_name ?? null,
+            campaign_name: l.campaign_name ?? null,
+            spend:         Number(l.spend ?? 0) || 0,
+            impressions:   Number(l.impressions ?? 0) || 0,
+            clicks:        Number(l.clicks ?? 0) || 0,
+            atualizado_em: new Date().toISOString(),
+          });
+        }
+        url = b?.paging?.next ?? null;
+        paginas++;
       }
-      if (Array.isArray(b?.data)) linhas.push(...b.data);
-      // `paging.next` já vem com o token embutido pela Meta; mandar o nosso
-      // header junto é inofensivo e mantém a chamada idêntica à primeira.
-      url = b?.paging?.next ?? null;
-      paginas++;
     }
 
-    if (!linhas.length) {
-      // Nem sempre é erro: loja sem veiculação no período cai aqui.
-      if (!resumo.some((x) => x.user_id === userId)) passo('nenhum gasto no periodo', { desde, ate });
+    if (!registros.length) {
+      passo('nenhum gasto no periodo', {
+        desde, ate, contas: contas.map((c) => `act_${c}`), origem: origemDaConta,
+        erros: Object.keys(errosPorConta).length ? errosPorConta : undefined,
+      });
       continue;
     }
-
-    const registros = linhas
-      .filter((l) => l.ad_id && l.date_start)
-      .map((l) => ({
-        user_id:       userId,
-        ad_id:         String(l.ad_id),
-        dia:           String(l.date_start),
-        ad_name:       l.ad_name ?? null,
-        campaign_name: l.campaign_name ?? null,
-        spend:         Number(l.spend ?? 0) || 0,
-        impressions:   Number(l.impressions ?? 0) || 0,
-        clicks:        Number(l.clicks ?? 0) || 0,
-        atualizado_em: new Date().toISOString(),
-      }));
 
     // onConflict na chave (loja, anúncio, dia): é o que faz a revisão
     // retroativa da Meta corrigir a linha em vez de criar uma segunda.
@@ -215,12 +265,27 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    const total = registros.reduce((s, r) => s + r.spend, 0);
+    // Só grava a conta quando UMA bateu. Duas contendo anúncio da mesma loja
+    // é possível (ela migrou de conta), e fixar uma no chute faria a
+    // importação de amanhã perder a outra em silêncio — melhor seguir
+    // perguntando todo dia do que guardar a resposta errada.
+    if (!guardada && contasQueBateram.size === 1) {
+      const escolhida = [...contasQueBateram][0];
+      await supabase.from('company_settings')
+        .update({ meta_ad_account_id: escolhida })
+        .eq('user_id', userId);
+      console.log(`[gasto] ${userId}: conta gravada act_${escolhida}`);
+    }
+
+    const total = registros.reduce((s, r) => s + Number(r.spend ?? 0), 0);
     passo('ok', {
-      desde, ate, conta: `act_${conta}`,
+      desde, ate, origem: origemDaConta,
+      contas_consultadas: contas.map((c) => `act_${c}`),
+      conta_com_anuncio_nosso: [...contasQueBateram].map((c) => `act_${c}`),
       linhas: registros.length,
       anuncios: new Set(registros.map((r) => r.ad_id)).size,
       gasto_total: Math.round(total * 100) / 100,
+      erros: Object.keys(errosPorConta).length ? errosPorConta : undefined,
     });
   }
 
