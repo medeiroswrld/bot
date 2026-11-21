@@ -2353,6 +2353,10 @@ function blocoDoEvento(evento: EventoLoja | null, hojeIso: string): string {
     + `${situacao}\n\n`
     + dias.map((dia) => `- ${dia}`).join('\n')
     + `\n\nHorário do ${nome}: das ${evento.hora_inicio} às ${evento.hora_fim} (nesses dias a loja abre nesse horário, mesmo que não seja o horário normal dela).`
+    // O cliente não decorou o nome da campanha. Ele viu um anúncio e vai
+    // escrever "o feirão" ou "aquilo do anúncio" — se o bot só reconhece o
+    // nome oficial, ele responde como se não soubesse do que se trata.
+    + `\n\nComo o cliente vai chamar isso: "${nome}" é o nome oficial, mas ele vai dizer "feirão", "o evento", "a promoção", "a black", "o mutirão" ou só "aquilo do anúncio". Tudo isso é o ${nome} — entenda como tal, responda normalmente e não corrija o jeito dele falar.`
     + blocoCondicoes
     + `\n\n### Como conduzir\n\n`
     + `- Se o cliente perguntar do ${nome}, responda com os dias e o horário acima. Eles são a verdade; não invente outro dia nem outro horário.\n`
@@ -2360,6 +2364,124 @@ function blocoDoEvento(evento: EventoLoja | null, hojeIso: string): string {
     + `- Pra marcar a visita no ${nome}, o caminho é o de sempre: **ver_horarios_disponiveis** na data e depois **agendar_visita**. Os horários do evento já estão na agenda da loja — ofereça SÓ o que a tool devolver. A visita é registrada como visita do ${nome} automaticamente; você não precisa fazer nada a mais nem avisar o cliente disso.\n`
     + `- O cliente pode visitar normalmente FORA dos dias do ${nome}. Se ele pedir outro dia, agende sem empurrar o evento — só avise que as condições especiais valem nos dias listados.\n`
     + `- Nunca prometa que um carro específico vai estar disponível no ${nome}, nem reserve veículo.`;
+}
+
+// ─── origem: o cliente clicou num anúncio ────────────────────────────────────
+//
+// A Meta manda o anúncio clicado junto da PRIMEIRA mensagem, e o webhook grava
+// isso em `ad_referrals` desde agosto. O bot nunca leu essa tabela — então quem
+// clicava em "Vem aí a MEGA BLACK, 4 dias de feirão" chegava aqui como se
+// tivesse passado na calçada. Em 21/11 foram 8 pessoas assim num dia só: 143
+// mensagens trocadas, ZERO menções ao evento, e o bot perguntando "quer vir
+// hoje mesmo ou prefere amanhã?" pra quem veio de um anúncio de um evento que
+// começa dia 26.
+
+export interface OrigemAnuncio {
+  headline: string;
+  body: string;
+}
+
+// Mesmas garantias de silêncio de buscarEventoVigente: erro, tabela ausente ou
+// conversa sem anúncio devolvem null e o atendimento segue idêntico. Saber de
+// onde o cliente veio é um extra; responder ele não é.
+async function buscarOrigemAnuncio(
+  supabase: SupabaseClient,
+  conversationId: string,
+  log: Logger,
+): Promise<OrigemAnuncio | null> {
+  try {
+    const { data, error } = await supabase
+      .from('ad_referrals')
+      .select('headline, body')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      log.debug('origem de anúncio não lida', { action: 'anuncio', motivo: error.message });
+      return null;
+    }
+
+    const headline = String(data?.headline ?? '').trim();
+    const body     = String(data?.body ?? '').trim();
+    if (!headline && !body) return null;
+
+    log.info('cliente veio de anúncio', { action: 'anuncio', titulo: headline || '(sem título)' });
+    return { headline, body };
+  } catch (e) {
+    log.debug('exceção ao buscar origem de anúncio', { action: 'anuncio', error: String(e) });
+    return null;
+  }
+}
+
+// O bot já falou do evento nesta conversa?
+//
+// Comparado por PEDAÇO do nome, nunca pela string inteira: o evento se chama
+// "MEGA BLACK DSC SEMINOVOS" e o bot escreve "a MEGA BLACK". Casar o nome
+// completo nunca daria positivo, e a instrução de abertura continuaria entrando
+// na mensagem 20 — virando panfleto.
+//
+// As palavras que também aparecem no nome da LOJA são descartadas. Sem esse
+// filtro, "seminovos" casaria com o "aqui é da Dsc Seminovos" de toda abertura
+// e a instrução morreria já na segunda mensagem. É o defeito oposto, e sai sem
+// erro nenhum: o bot simplesmente volta a ser o de antes.
+function botJaCitouOEvento(
+  mensagens: { role: string; content: unknown }[],
+  evento: EventoLoja | null,
+  nomeDaLoja: string,
+): boolean {
+  if (!evento) return false;
+
+  const daLoja = new Set(String(nomeDaLoja).toLowerCase().split(/\s+/).filter(Boolean));
+  const pistas = String(evento.nome).toLowerCase().split(/\s+/)
+    .filter((p) => p.length > 3 && !daLoja.has(p));
+  pistas.push('feirão', 'feirao');
+
+  return mensagens.some((m) =>
+    m.role === 'bot' && pistas.some((p) => String(m.content).toLowerCase().includes(p)));
+}
+
+// Nota de chegada por anúncio. Vai no FIM do array de mensagens, colada na nota
+// de horário — e NÃO no system prompt.
+//
+// A posição não é estética: foi exatamente ali que o feirão se perdeu. O bloco
+// do evento mora no topo do prompt e abre com "ainda não começou", enquanto a
+// nota de horário ("a loja abre às 08:30") é a última coisa que o modelo lê.
+// Entre uma coisa de agora e uma de semana que vem, ele escolheu a de agora nas
+// 8 conversas. A recência ganhou a disputa, então a correção tem que morar na
+// mesma posição em que ela foi perdida.
+//
+// Fora isso, o system prompt é cacheado e esta nota muda a cada conversa:
+// colocá-la lá em cima queimaria o cache de todo atendimento.
+function notaDeAnuncio(
+  anuncio: OrigemAnuncio | null,
+  evento: EventoLoja | null,
+  aberturaJaPassou: boolean,
+): string {
+  if (!anuncio) return '';
+
+  const titulo = anuncio.headline || '(sem título)';
+  // O criativo inteiro é longo; a promessa mora nas primeiras linhas.
+  const corpo = anuncio.body ? anuncio.body.slice(0, 400) : '';
+
+  const ficha = `(sistema: este cliente NÃO chegou por conta própria —`
+    + ` ele clicou num anúncio da loja e caiu nesta conversa.`
+    + ` Título do anúncio: "${titulo}".`
+    + (corpo ? ` Texto do anúncio: "${corpo}".` : '');
+
+  // Abertura já passou: a instrução vira contexto. Quem veio do anúncio merece
+  // ouvir a oferta uma vez, não em toda mensagem.
+  if (aberturaJaPassou || !evento) {
+    return `${ficha}\n\nResponda ao que ESSE anúncio prometeu — é o que ele veio buscar.`
+      + ` Se você já apresentou a oferta, não repita.)`;
+  }
+
+  return `${ficha}\n\nCOMO ABRIR ESTA CONVERSA:`
+    + `\n- Se o anúncio acima fala do ${evento.nome}, é por ele que você abre: diga as condições especiais do ${evento.nome} — SOMENTE as que estão escritas no seu prompt, sem inventar nenhuma — e pergunte qual dos dias do evento ele quer vir.`
+    + `\n- NÃO pergunte "hoje ou amanhã" e NÃO deixe a data em aberto: ofereça os DIAS DO EVENTO.`
+    + `\n- Se o anúncio fala de outra coisa (um carro específico, por exemplo), responda sobre ESSA coisa e não force o ${evento.nome}.`
+    + `\n- Isto vale pra abertura. Depois de apresentar a oferta, siga a conversa normalmente.)`;
 }
 
 function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger, canal = 'whatsapp', falouDePagamento = true, primeiroContato = false, evento: EventoLoja | null = null): string {
@@ -3663,6 +3785,12 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     log,
   );
 
+  // Anúncio em que o cliente clicou pra chegar aqui. Lido em toda mensagem — é
+  // uma busca indexada por conversation_id — e não só no primeiro turno, porque
+  // a origem vale pra conversa inteira e o primeiro turno pode ter sido
+  // processado por outra invocação.
+  const origemAnuncio = await buscarOrigemAnuncio(supabase, conversationId, log);
+
   // Provedor deste tenant: coluna (migration 032) > env var > anthropic.
   // Declarado aqui (antes do prompt) porque o prefixo de regras depende dele.
   const provider  = String(settings?.llm_provider ?? LLM_PROVIDER_DEFAULT).toLowerCase();
@@ -3804,7 +3932,23 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     && eventoVigente.data_fim    >= hojeNaLoja
     ? eventoVigente
     : null;
-  history.push({ role: 'user', content: notaDeHorario((settings ?? {}) as Record<string, unknown>, eventoHoje) });
+  // Nota de chegada por anúncio, colada DEPOIS da de horário: é a última coisa
+  // que o modelo lê e é ela que decide a abertura. Ver notaDeAnuncio.
+  //
+  // Dois gatilhos desarmam a instrução de abertura, e os dois precisam existir:
+  // o bot já ter citado o evento (caso normal) e o teto de 3 respostas (caso do
+  // anúncio que NÃO é do evento — aí ele nunca vai citar, e sem o teto a
+  // instrução ficaria pra sempre).
+  const qtdRespostasDoBot = orderedMessages.filter((m) => m.role === 'bot').length;
+  const aberturaJaPassou = qtdRespostasDoBot >= 3
+    || botJaCitouOEvento(orderedMessages, eventoVigente, String(settings?.company_name ?? ''));
+  const notaAnuncio = notaDeAnuncio(origemAnuncio, eventoVigente, aberturaJaPassou);
+
+  history.push({
+    role: 'user',
+    content: notaDeHorario((settings ?? {}) as Record<string, unknown>, eventoHoje)
+      + (notaAnuncio ? `\n\n${notaAnuncio}` : ''),
+  });
 
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
   // Responde pelo MESMO número que recebeu.
