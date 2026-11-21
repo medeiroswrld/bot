@@ -163,6 +163,35 @@ serve(async (req) => {
       });
     }
 
+    // Configurações da loja. Lidas ANTES de montar os componentes por dois
+    // motivos: as amostras do corpo precisam dos dados reais dela (ver abaixo),
+    // e o guard de plano tem que barrar a conta antes de subirmos imagem pra
+    // Meta — o upload do cabeçalho acontece na montagem, e deixá-lo rodar pra
+    // recusar logo depois mandava arquivo pra Meta sem motivo nenhum.
+    const { data: wabaSettings } = await supabase
+      .from('company_settings')
+      .select(`whatsapp_business_account_id, company_name, address, ${COLUNAS_DISPARO}`)
+      .eq('user_id', template.user_id)
+      .maybeSingle();
+
+    // Template existe pra ser disparado. Sem disparo no plano, submeter a Meta
+    // so consome fila de revisao deles pra nada.
+    if (!podeDisparar(wabaSettings)) {
+      return new Response(JSON.stringify({ error: 'Envio em massa não faz parte do plano desta conta.' }), {
+        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // WABA ID por tenant: de company_settings, com fallback pro secret.
+    const wabaId = String(
+      wabaSettings?.whatsapp_business_account_id || Deno.env.get('WHATSAPP_BUSINESS_ACCOUNT_ID') || '',
+    ).trim();
+    if (!wabaId) {
+      return new Response(JSON.stringify({
+        error: 'WABA não configurado para esta conta (company_settings.whatsapp_business_account_id ou secret WHATSAPP_BUSINESS_ACCOUNT_ID).',
+      }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+
     // Monta componentes no formato Meta
     const components: Array<Record<string, unknown>> = [];
 
@@ -195,11 +224,34 @@ serve(async (req) => {
       });
     }
 
+    // ─── Amostras do corpo ──────────────────────────────────────────────────
+    //
+    // A Meta MOSTRA estes valores pro revisor humano, então eles têm que
+    // descrever a loja que está submetendo. O seed (031) gravou
+    // "Auto Prime Seminovos" e "Av. Brasil, 1000 - Centro" em TODA conta, e
+    // isso ia inteiro pra revisão: o template da DSC chegava na Meta dizendo
+    // "aqui na Auto Prime Seminovos". Numa análise que cita denúncia de
+    // cliente, amostra com o nome de outra revenda é o pior sinal possível.
+    //
+    // Casa pelo NOME da variável, não pela posição: a ordem dos {{n}} é fixa
+    // dentro de cada template mas diferente entre eles (031 documenta isso), e
+    // indexar por posição quebraria no primeiro template novo.
+    const AMOSTRAS_DA_LOJA: Record<string, string> = {
+      nome_empresa: String(wabaSettings?.company_name ?? '').trim(),
+      endereco: String(wabaSettings?.address ?? '').trim(),
+    };
+
     const bodyComponent: Record<string, unknown> = { type: 'BODY', text: template.body_text };
     const vars = Array.isArray(template.body_variables) ? template.body_variables : [];
     if (vars.length > 0) {
       bodyComponent.example = {
-        body_text: [vars.map((v: { example?: string }) => v.example || 'exemplo')],
+        body_text: [vars.map((v: { name?: string; example?: string }) => {
+          // Só sobrescreve quando a loja realmente preencheu: o endereço do
+          // Leandrinho está vazio no banco, e trocar um exemplo plausível por
+          // string vazia faz a Meta recusar a submissão por formato.
+          const daLoja = AMOSTRAS_DA_LOJA[String(v.name ?? '')];
+          return daLoja || v.example || 'exemplo';
+        })],
       };
     }
     components.push(bodyComponent);
@@ -213,97 +265,80 @@ serve(async (req) => {
       components.push({ type: 'BUTTONS', buttons });
     }
 
-    // WABA ID por tenant: lê de company_settings (pelo dono do template); fallback para o secret.
-    const { data: wabaSettings } = await supabase
-      .from('company_settings')
-      .select(`whatsapp_business_account_id, ${COLUNAS_DISPARO}`)
-      .eq('user_id', template.user_id)
-      .maybeSingle();
-
-    // Template existe pra ser disparado. Sem disparo no plano, submeter a Meta
-    // so consome fila de revisao deles pra nada.
-    if (!podeDisparar(wabaSettings)) {
-      return new Response(JSON.stringify({ error: 'Envio em massa não faz parte do plano desta conta.' }), {
-        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-    const wabaId = String(
-      wabaSettings?.whatsapp_business_account_id || Deno.env.get('WHATSAPP_BUSINESS_ACCOUNT_ID') || '',
-    ).trim();
-    if (!wabaId) {
-      return new Response(JSON.stringify({
-        error: 'WABA não configurado para esta conta (company_settings.whatsapp_business_account_id ou secret WHATSAPP_BUSINESS_ACCOUNT_ID).',
-      }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-    }
-
     const tenantToken = await resolveWhatsAppToken(supabase, template.user_id);
 
-    const metaUrl = `https://graph.facebook.com/v25.0/${wabaId}/message_templates`;
-    const metaPayload = {
-      name: template.meta_template_name,
-      category: template.category,
-      language: template.language,
-      components,
+    // ─── Reenvio de template rejeitado é EDIÇÃO, não criação ────────────────
+    //
+    // A Meta não deixa recriar um nome que já existe: devolve o subcode 2388024
+    // e nada acontece. O código antigo tratava isso como sucesso — procurava o
+    // template existente, marcava `pending` e devolvia `success: true` — sem
+    // ter alterado NADA lá. O lojista clicava em "Enviar pra aprovação", via o
+    // status virar "em análise", e os templates seguiam reprovados na Meta sem
+    // nunca ter voltado pra fila de revisão. Foi o que aconteceu com os 6 da
+    // DSC em 20/11/2026: cinco "reenvios" em nove segundos que não saíram do
+    // nosso próprio banco.
+    //
+    // Editar é POST no ID do template com o conjunto COMPLETO de componentes
+    // (a Meta substitui todos). Nome e idioma não são editáveis, então ficam
+    // fora do payload. Rejeitado tem edição ilimitada; o teto (1 por 24h, 10
+    // por 30 dias) é de template aprovado, e aqui só entra draft ou rejected.
+    const chamarMeta = async (url: string, payload: Record<string, unknown>) => {
+      console.log('[submit-template] POST', url, JSON.stringify(payload));
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${tenantToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const body = await r.json();
+      console.log('[submit-template] meta response:', r.status, JSON.stringify(body));
+      return { ok: r.ok, body };
     };
-    console.log('[submit-template] payload:', JSON.stringify(metaPayload));
 
-    const metaResponse = await fetch(metaUrl, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${tenantToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(metaPayload),
-    });
-    const metaResult = await metaResponse.json();
-    console.log('[submit-template] meta response:', JSON.stringify(metaResult));
+    const urlDeEdicao = (id: string) => `https://graph.facebook.com/v25.0/${id}`;
+    const payloadDeEdicao = { category: template.category, components };
 
-    if (!metaResponse.ok) {
-      // Subcode 2388024 = "Já existe conteúdo nesse idioma" — o template já existe na Meta.
-      // Não é rejeição: buscamos o template existente pelo nome e marcamos como pending
-      // pra consultar o status depois (em vez de marcar como rejeitado).
-      if (metaResult.error?.error_subcode === 2388024) {
-        const listUrl = `https://graph.facebook.com/v25.0/${wabaId}/message_templates`
-          + `?name=${encodeURIComponent(template.meta_template_name)}&limit=1`;
-        const listResponse = await fetch(listUrl, {
-          // tenantToken, nao o global: o WHATSAPP_TOKEN global e de OUTRO
-          // negocio e nao enxerga a WABA do cliente. A submissao acima ja usa
-          // o do tenant; so este fallback tinha ficado para tras, e ele roda
-          // justamente quando o nome ja existe - o caso em que mais importa
-          // achar o template certo.
-          headers: { Authorization: `Bearer ${tenantToken}` },
+    const idConhecido = String(template.meta_template_id ?? '').trim();
+    let idFinal = idConhecido;
+
+    let meta = idConhecido
+      ? await chamarMeta(urlDeEdicao(idConhecido), payloadDeEdicao)
+      : await chamarMeta(`https://graph.facebook.com/v25.0/${wabaId}/message_templates`, {
+          name: template.meta_template_name,
+          category: template.category,
+          language: template.language,
+          components,
         });
-        const listResult = await listResponse.json();
-        console.log('[submit-template] existing template lookup:', JSON.stringify(listResult));
 
-        const existing = Array.isArray(listResult.data)
-          ? listResult.data.find(
-              (t: { language?: string }) => t.language === template.language,
-            ) ?? listResult.data[0]
-          : null;
+    if (!idFinal && meta.ok && meta.body?.id) idFinal = String(meta.body.id);
 
-        if (existing?.id) {
-          await supabase.from('message_templates')
-            .update({
-              meta_template_id: existing.id,
-              status: 'pending',
-              rejection_reason: null,
-              submitted_at: new Date().toISOString(),
-            })
-            .eq('id', template_id);
+    // Nome já existe na Meta mas o ID não estava no nosso banco (submissão
+    // antiga, linha recriada pelo seed). Acha o ID e EDITA — era exatamente
+    // aqui que o código antigo desistia e dava sucesso sem ter feito nada.
+    if (!meta.ok && meta.body?.error?.error_subcode === 2388024) {
+      const listUrl = `https://graph.facebook.com/v25.0/${wabaId}/message_templates`
+        + `?name=${encodeURIComponent(template.meta_template_name)}&limit=5`;
+      // tenantToken, nao o global: o WHATSAPP_TOKEN global e de OUTRO negocio
+      // e nao enxerga a WABA do cliente.
+      const listResponse = await fetch(listUrl, { headers: { Authorization: `Bearer ${tenantToken}` } });
+      const listResult = await listResponse.json();
+      console.log('[submit-template] existing template lookup:', JSON.stringify(listResult));
 
-          return new Response(JSON.stringify({
-            success: true,
-            meta_template_id: existing.id,
-            status: existing.status || 'PENDING',
-            already_existed: true,
-          }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        }
-        // Não achou o existente — cai pro fluxo de erro normal abaixo.
+      const existing = Array.isArray(listResult.data)
+        ? listResult.data.find((t: { language?: string }) => t.language === template.language) ?? listResult.data[0]
+        : null;
+
+      if (existing?.id) {
+        idFinal = String(existing.id);
+        meta = await chamarMeta(urlDeEdicao(idFinal), payloadDeEdicao);
       }
+    }
 
+    if (!meta.ok) {
       // is_transient = instabilidade da Meta, nao reprovacao do texto. A
       // propria resposta dela diz "Please retry your request later". Gravar
       // 'rejected' aqui mente pro lojista, que vai reescrever um template que
       // nunca teve problema. Volta pra 'draft' pra tentar de novo.
-      if (metaResult.error?.is_transient === true) {
+      if (meta.body?.error?.is_transient === true) {
         await supabase.from('message_templates')
           .update({ status: 'draft', rejection_reason: null })
           .eq('id', template_id);
@@ -314,16 +349,20 @@ serve(async (req) => {
       }
 
       await supabase.from('message_templates')
-        .update({ status: 'rejected', rejection_reason: JSON.stringify(metaResult.error || metaResult) })
+        .update({ status: 'rejected', rejection_reason: JSON.stringify(meta.body?.error || meta.body) })
         .eq('id', template_id);
-      return new Response(JSON.stringify({ error: 'Meta rejeitou o template', details: metaResult.error || metaResult }), {
+      return new Response(JSON.stringify({ error: 'Meta rejeitou o template', details: meta.body?.error || meta.body }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     await supabase.from('message_templates')
       .update({
-        meta_template_id: metaResult.id,
+        // `idFinal`, e não `meta.body.id`: a resposta de EDIÇÃO não traz o id
+        // (vem só `{"success": true}`). Gravar o campo cru apagaria o ponteiro
+        // que acabamos de usar, e o próximo reenvio voltaria a tentar criar —
+        // caindo de novo no 2388024.
+        meta_template_id: idFinal || template.meta_template_id,
         status: 'pending',
         rejection_reason: null,
         submitted_at: new Date().toISOString(),
@@ -332,8 +371,9 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({
       success: true,
-      meta_template_id: metaResult.id,
-      status: metaResult.status || 'PENDING',
+      meta_template_id: idFinal,
+      status: 'PENDING',
+      editado: Boolean(idConhecido),
     }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
   } catch (e) {
