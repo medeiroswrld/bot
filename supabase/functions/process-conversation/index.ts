@@ -304,6 +304,19 @@ const TOOLS = [
     },
   },
   {
+    name: 'convidar_para_comunidade',
+    description:
+      'Convida o cliente pro grupo/canal de ofertas da loja e devolve o link. Chame em TRÊS situações: (1) logo depois de confirmar um agendamento, (2) quando o cliente estiver se despedindo, (3) quando o carro que ele procura não existir no estoque. '
+      + 'O sistema garante que cada pessoa recebe o convite UMA vez só: se a resposta vier com ja_convidado, NÃO mencione grupo nenhum e siga a conversa normal. Se vier nao_configurado, a loja não tem grupo — NÃO invente link nem prometa um.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        motivo: { type: 'string', description: 'O que motivou o convite: "agendou", "despedida" ou "sem_estoque"' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'registrar_interesse',
     description:
       'Registra ou atualiza o lead do cliente quando ele demonstra intenção de compra ou pede contato.',
@@ -1107,6 +1120,59 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
     }
     log.info('horários livres', { action: 'ver_horarios_disponiveis', data: dateStr, livres: freeSlots.length });
     return { data: dateStr, dia_semana: dayLabel, horarios_livres: freeSlots, total_disponivel: freeSlots.length };
+  }
+
+  if (name === 'convidar_para_comunidade') {
+    const { data: cfg } = await supabase
+      .from('company_settings')
+      .select('link_comunidade, link_comunidade_nome')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    const link = String(cfg?.link_comunidade ?? '').trim();
+    if (!link) {
+      return {
+        nao_configurado: true,
+        mensagem: 'Esta loja não tem grupo nem canal cadastrado. NÃO mencione grupo nenhum, não prometa link, e siga a conversa normalmente.',
+      };
+    }
+
+    // A trava do "uma vez por pessoa" é o índice único do banco (user_id +
+    // dígitos do telefone), NÃO uma consulta feita antes: duas mensagens do
+    // mesmo cliente chegando juntas passariam por qualquer checagem prévia e
+    // mandariam o convite duas vezes. Aqui a gente só lê o veredito do insert.
+    //
+    // Em Instagram/Messenger o `customerPhone` guarda o PSID/IGSID em vez de
+    // telefone. Funciona igual como chave — só significa que a mesma pessoa
+    // pode ser convidada uma vez por canal, o que é aceitável.
+    const { error } = await supabase
+      .from('comunidade_convites')
+      .insert({ user_id: userId, telefone: customerPhone });
+
+    if (error) {
+      // 23505 = violação de unicidade, ou seja, já foi convidado. Qualquer
+      // outro erro cai aqui também e o bot fica calado de propósito: repetir
+      // convite é exatamente o incômodo que esta tool existe pra evitar, então
+      // na dúvida o lado seguro é não convidar.
+      log.info('convite não enviado', {
+        action: 'convidar_comunidade',
+        motivo: error.code === '23505' ? 'ja_convidado' : error.message,
+      });
+      return {
+        ja_convidado: true,
+        mensagem: 'Este cliente já recebeu o convite antes. NÃO mencione o grupo de novo — siga a conversa normalmente.',
+      };
+    }
+
+    const nomeComunidade = String(cfg?.link_comunidade_nome ?? '').trim() || 'nosso grupo de ofertas';
+    log.info('convite enviado', { action: 'convidar_comunidade', motivo: String(input.motivo ?? '') });
+    return {
+      convidar: true,
+      nome_comunidade: nomeComunidade,
+      link,
+      mensagem: `Convide o cliente pra entrar em ${nomeComunidade}, numa frase curta e natural, e mande o link exatamente como está aqui: ${link}. `
+        + 'Diga em UMA frase o que ele ganha com isso (as ofertas chegam primeiro por lá). Se ele não responder sobre o grupo, não insista nem repita.',
+    };
   }
 
   if (name === 'agendar_visita') {
@@ -2475,6 +2541,29 @@ Quem chega por aqui costuma vir de um story ou anúncio e faz uma pergunta curta
 - **NÃO fale de financiamento, entrada, parcela nem troca na primeira resposta.** Isso vem depois, e só se ele demonstrar interesse real no carro. Puxar pagamento logo de cara faz o cliente sumir.
 - Mensagens mais curtas que no WhatsApp: duas ou três linhas bastam.`);
 
+  // Grupo/canal de ofertas. O bloco só existe quando a loja cadastrou o link —
+  // sem isso o modelo nem fica sabendo que a ideia existe, e não tem como
+  // prometer um grupo que não há. O link em si NÃO entra aqui de propósito:
+  // quem entrega é a tool, que é onde mora a trava de "uma vez por pessoa".
+  const temComunidade = String(settings.link_comunidade ?? '').trim().length > 0;
+  const comunidadeBlock = temComunidade
+    ? `
+
+## Grupo de ofertas
+
+A loja tem um grupo/canal onde as ofertas saem primeiro. Chame **convidar_para_comunidade** em três momentos, e só neles:
+
+1. **Logo depois de confirmar um agendamento** — a pessoa já se comprometeu, é a hora natural.
+2. **Quando o cliente estiver se despedindo** ("valeu", "obrigado", "depois eu vejo"), mesmo que não tenha marcado nada.
+3. **Quando o carro que ele procura não estiver no estoque** — em vez de encerrar sem nada, ofereça ser avisado quando entrar.
+
+Regras:
+- O link vem da tool. **Nunca escreva um link de grupo de cabeça** nem prometa mandar depois.
+- Se a tool responder \`ja_convidado\`, essa pessoa já recebeu: **não comente nada sobre grupo** e siga normal.
+- Convite é oferta, não insistência: menciona uma vez e pronto. Se ele ignorar, deixa quieto.
+- Nunca troque o atendimento pelo grupo. Responda o que ele perguntou primeiro; o convite vem depois.`
+    : '';
+
   const equipeBlock = (equipe.length || contatosSetor.length)
     ? `\n\n## Equipe da loja e outros setores`
       + (equipe.length
@@ -2813,7 +2902,7 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
     faqs.length > 0
       ? `\n\n## Perguntas frequentes — use estas respostas quando o cliente perguntar algo relacionado\n\n${faqs.map((f) => `P: ${f.question}\nR: ${f.answer}`).join('\n\n')}`
       : ''
-  }${canalBlock}${paymentBlock}${fordBlock}${tradeInBlock}${equipeBlock}${visitReminderBlock}`;
+  }${canalBlock}${paymentBlock}${fordBlock}${tradeInBlock}${equipeBlock}${comunidadeBlock}${visitReminderBlock}`;
 }
 
 // ─── chamada à API do Claude ──────────────────────────────────────────────────

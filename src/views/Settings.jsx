@@ -3,7 +3,7 @@ import {
     Building2, Calendar, MapPin, Phone, MessageSquare, Save, CheckCircle,
     User, Mail, ToggleLeft, ToggleRight, Plus, Trash2, CalendarOff,
     Image as ImageIcon, Upload, RefreshCw, Gift, Bell, CreditCard, Bot, Landmark, X,
-    PartyPopper, AlertTriangle
+    PartyPopper, AlertTriangle, Users
 } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import { supabase } from '../lib/supabase.js';
@@ -234,9 +234,27 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
 
     // ── Horário por dia ───────────────────────────────────────────────────────
     const [bh, setBh]                         = useState(DEFAULT_BH);
-    const [apptDuration,    setApptDuration]    = useState('60');
-    const [apptInterval,    setApptInterval]    = useState('15');
+    // Passo da agenda: de quanto em quanto tempo abre um horário.
+    //
+    // No banco continuam duas colunas (`appointment_duration` e
+    // `appointment_interval`) e o bot SOMA as duas pra achar o passo. Isso era
+    // impossível de explicar na tela e, pior, impedia passo menor que 30 min —
+    // o menor par oferecido era 30+0. Aqui a loja escolhe o passo direto;
+    // gravamos ele na duração e zeramos o intervalo, o que dá a mesma soma sem
+    // nenhuma mudança no `computeFreeSlots`.
+    const [apptPasso,       setApptPasso]       = useState('60');
     const [apptMaxPerSlot,  setApptMaxPerSlot]  = useState('1');
+
+    // 60 fecha a lista: acima disso a loja abre pouquíssimo horário por dia, e
+    // quem pede esta tela normalmente quer o contrário.
+    const PASSOS_AGENDA = [10, 15, 20, 30, 60];
+    const rotulaPasso = (m) => (m === 60 ? '1 hora' : `${m} minutos`);
+    // Mantém na lista o passo atual da loja mesmo quando não é um dos padrões:
+    // quem está em 75 (duração 60 + intervalo 15) veria o campo em branco e
+    // salvaria outro valor sem perceber que mudou a própria agenda.
+    const passosDisponiveis = PASSOS_AGENDA.includes(Number(apptPasso))
+        ? PASSOS_AGENDA
+        : [...PASSOS_AGENDA, Number(apptPasso)].sort((a, b) => a - b);
     const [savingSchedule, setSavingSchedule]   = useState(false);
     const [savedSchedule,  setSavedSchedule]    = useState(false);
 
@@ -248,8 +266,10 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
         setSavingSchedule(true);
         await supabase.from('company_settings').update({
             business_hours:            bh,
-            appointment_duration:      Number(apptDuration),
-            appointment_interval:      Number(apptInterval),
+            // Passo inteiro na duração e intervalo zerado: duração+intervalo é
+            // o que o bot soma, então isto preserva exatamente o passo escolhido.
+            appointment_duration:      Number(apptPasso),
+            appointment_interval:      0,
             max_appointments_per_slot: Math.min(10, Math.max(1, Number(apptMaxPerSlot) || 1)),
             updated_at: new Date().toISOString(),
         }).eq('user_id', user.id);
@@ -765,12 +785,18 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
         });
         // Horário / agenda
         if (s.business_hours) setBh({ ...DEFAULT_BH, ...s.business_hours });
-        if (s.appointment_duration) setApptDuration(String(s.appointment_duration));
-        // != null, nao truthy: 0 = "sem intervalo" e uma escolha valida da loja,
-        // e o if antigo a rejeitava. O valor era gravado certo no banco e a tela
-        // voltava pra 15 min no reload, parecendo que o salvamento nao pegou.
-        if (s.appointment_interval != null) setApptInterval(String(s.appointment_interval));
+        // O passo que a loja já tem é a SOMA das duas colunas antigas — é assim
+        // que o bot calcula. Mostrar a soma, e não só a duração, é o que impede
+        // a agenda de quem estava em 60+15 encolher pra 60 sozinha no primeiro
+        // salvamento depois desta mudança.
+        if (s.appointment_duration != null || s.appointment_interval != null) {
+            const passo = Number(s.appointment_duration ?? 60) + Number(s.appointment_interval ?? 0);
+            if (passo > 0) setApptPasso(String(passo));
+        }
         if (s.max_appointments_per_slot) setApptMaxPerSlot(String(s.max_appointments_per_slot));
+        // Comunidade
+        setComunidadeLink(s.link_comunidade ?? '');
+        setComunidadeNome(s.link_comunidade_nome ?? '');
         // WhatsApp
         if (s.whatsapp_about) setWpAbout(s.whatsapp_about);
         if (s.whatsapp_phone_number_id) setWpPhoneId(s.whatsapp_phone_number_id);
@@ -994,6 +1020,39 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
     const [temEvento, setTemEvento]     = useState(false);
     const [loadingEv, setLoadingEv]     = useState(true);
     const [savingEv, setSavingEv]       = useState(false);
+
+    // ── Comunidade (grupo/canal de ofertas) ───────────────────────────────────
+    // Link qualquer de propósito: o número da loja está na Cloud API e não entra
+    // em grupo comum, então isso vive fora do sistema e a loja escolhe se é
+    // grupo, canal ou outra coisa. Vazio = o bot nunca menciona.
+    const [comunidadeLink, setComunidadeLink]   = useState('');
+    const [comunidadeNome, setComunidadeNome]   = useState('');
+    const [savingCom,      setSavingCom]        = useState(false);
+    const [savedCom,       setSavedCom]         = useState(false);
+    const [comErro,        setComErro]          = useState('');
+
+    const salvarComunidade = async () => {
+        if (!user?.id) return;
+        const link = comunidadeLink.trim();
+        // Barra aqui o que a Meta barraria depois: link sem http não vira link
+        // clicável na mensagem, e o cliente recebe um texto morto sem ninguém
+        // perceber que o convite nunca funcionou.
+        if (link && !/^https?:\/\/\S+$/i.test(link)) {
+            setComErro('O link precisa começar com https:// — copie direto do WhatsApp.');
+            return;
+        }
+        setComErro('');
+        setSavingCom(true);
+        await supabase.from('company_settings').update({
+            link_comunidade:      link || null,
+            link_comunidade_nome: comunidadeNome.trim() || null,
+            updated_at: new Date().toISOString(),
+        }).eq('user_id', user.id);
+        await refreshCompanySettings();
+        setSavingCom(false);
+        setSavedCom(true);
+        setTimeout(() => setSavedCom(false), 2000);
+    };
     const [savedEv, setSavedEv]         = useState(false);
     const [erroEv, setErroEv]           = useState('');
     const [confirmDelEv, setConfirmDelEv] = useState(false);
@@ -1309,24 +1368,17 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                             })}
                         </div>
 
-                        {/* Duração, intervalo e visitas simultâneas */}
-                        <div className="form-row">
-                            <div className="form-group">
-                                <label>Duração da Visita</label>
-                                <select value={apptDuration} onChange={e => setApptDuration(e.target.value)}>
-                                    <option value="30">30 minutos</option>
-                                    <option value="60">1 hora</option>
-                                    <option value="90">1 hora e 30 min</option>
-                                </select>
-                            </div>
-                            <div className="form-group">
-                                <label>Intervalo entre Visitas</label>
-                                <select value={apptInterval} onChange={e => setApptInterval(e.target.value)}>
-                                    <option value="0">Sem intervalo</option>
-                                    <option value="15">15 minutos</option>
-                                    <option value="30">30 minutos</option>
-                                </select>
-                            </div>
+                        {/* Passo da agenda e visitas simultâneas */}
+                        <div className="form-group">
+                            <label>De quanto em quanto tempo abre um horário</label>
+                            <select value={apptPasso} onChange={e => setApptPasso(e.target.value)}>
+                                {passosDisponiveis.map(m => (
+                                    <option key={m} value={String(m)}>{rotulaPasso(m)}</option>
+                                ))}
+                            </select>
+                            <p style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', marginTop: '-0.25rem', lineHeight: 1.5 }}>
+                                Com 10 minutos, quem marcou 17:00 não bloqueia quem quer 17:10.
+                            </p>
                         </div>
                         <div className="form-group">
                             <label>Visitas simultâneas por horário</label>
@@ -1341,6 +1393,29 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                                 Útil para concessionárias com mais de um vendedor disponível ao mesmo tempo. Padrão: 1.
                             </p>
                         </div>
+
+                        {/* O número que a loja realmente quer saber antes de salvar: quantos
+                            clientes cabem por dia. Sem isto, escolher "10 minutos" com 4
+                            vendedores é um salto no escuro. */}
+                        {(() => {
+                            const passo = Number(apptPasso) || 60;
+                            const porSlot = Math.min(10, Math.max(1, Number(apptMaxPerSlot) || 1));
+                            const abertos = Object.values(bh || {}).filter(d => d?.open);
+                            const minutosNoDia = abertos.reduce((soma, d) => {
+                                const [hi, mi] = String(d.start ?? '09:00').split(':').map(Number);
+                                const [hf, mf] = String(d.end   ?? '18:00').split(':').map(Number);
+                                return soma + Math.max(0, (hf * 60 + mf) - (hi * 60 + mi));
+                            }, 0);
+                            if (!abertos.length || minutosNoDia <= 0) return null;
+                            const mediaDia = minutosNoDia / abertos.length;
+                            const vagas = Math.floor(mediaDia / passo) * porSlot;
+                            return (
+                                <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', lineHeight: 1.5 }}>
+                                    Isso dá cerca de <strong>{vagas} visitas por dia</strong> em média,
+                                    contando os dias em que a loja abre.
+                                </p>
+                            );
+                        })()}
 
                         <button
                             className="btn-primary"
@@ -2936,6 +3011,69 @@ const Settings = ({ grupos = null, cabecalho = undefined, extras = null }) => {
                             </div>
                         </div>
                     )}
+                </section>
+            </div>
+            )}
+
+            {/* ── Grupo / Canal de Ofertas ────────────────────────────── */}
+            {ver('bot-comportamento') && (
+            <div style={{ marginTop: '2rem' }}>
+                <section className="settings-section card">
+                    <div className="section-title">
+                        <Users size={20} />
+                        <h2>Grupo / Canal de Ofertas</h2>
+                    </div>
+
+                    <p className="text-muted" style={{ fontSize: '0.85rem', marginBottom: '1.25rem', lineHeight: 1.5 }}>
+                        Cole aqui o convite do seu grupo ou canal do WhatsApp. O bot oferece
+                        pro cliente depois de marcar uma visita, na despedida, e quando o carro
+                        que ele procura não está no estoque — <strong>uma vez só por pessoa</strong>,
+                        nunca duas. Deixe em branco para o bot nunca mencionar.
+                    </p>
+
+                    <div className="settings-form">
+                        <div className="form-group">
+                            <label>Link do convite</label>
+                            <input
+                                type="url"
+                                value={comunidadeLink}
+                                onChange={e => { setComunidadeLink(e.target.value); setComErro(''); }}
+                                placeholder="https://chat.whatsapp.com/..."
+                            />
+                            <small className="text-muted" style={{ fontSize: '0.78rem' }}>
+                                No WhatsApp: abra o grupo ou canal → Convidar via link → Copiar.
+                                O grupo tem que ser criado <strong>no celular de alguém da loja</strong>,
+                                não no número que o bot usa.
+                            </small>
+                        </div>
+
+                        <div className="form-group">
+                            <label>Como o bot chama isso</label>
+                            <input
+                                type="text"
+                                value={comunidadeNome}
+                                onChange={e => setComunidadeNome(e.target.value)}
+                                placeholder="nosso canal de ofertas"
+                            />
+                            <small className="text-muted" style={{ fontSize: '0.78rem' }}>
+                                Entra no meio da frase, em minúsculas: “quer entrar no <em>nosso canal
+                                de ofertas</em>?”. Em branco, o bot diz “nosso grupo de ofertas”.
+                            </small>
+                        </div>
+
+                        {comErro && (
+                            <p style={{ color: '#ef4444', fontSize: '0.82rem', lineHeight: 1.5 }}>{comErro}</p>
+                        )}
+
+                        <button
+                            className="btn-primary"
+                            onClick={salvarComunidade}
+                            disabled={savingCom}
+                            style={{ marginTop: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                        >
+                            {savingCom ? 'Salvando…' : savedCom ? 'Salvo!' : 'Salvar'}
+                        </button>
+                    </div>
                 </section>
             </div>
             )}
