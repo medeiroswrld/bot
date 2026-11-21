@@ -175,7 +175,7 @@ export default function Anuncios() {
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                             <thead>
                                 <tr style={{ background: 'var(--input-bg)' }}>
-                                    {['Anúncio', 'Leads', 'Qualificados', 'Vendas', 'Faturamento'].map((h, i) => (
+                                    {['Anúncio', 'Gasto', 'Leads', 'Custo/lead', 'Qualificados', 'Vendas', 'Faturamento', 'ROAS'].map((h, i) => (
                                         <th key={h} style={{
                                             padding: '0.75rem 1rem', textAlign: i === 0 ? 'left' : 'right',
                                             fontWeight: 600, color: '#64748b', fontSize: '0.75rem',
@@ -212,17 +212,41 @@ export default function Anuncios() {
                                                 </p>
                                             )}
                                         </td>
+                                        {/* Gasto e os derivados mostram "—" quando o custo ainda
+                                            não foi importado. Zero diria "não custou nada", que é
+                                            o oposto de "não sei o custo" — e publicação orgânica
+                                            realmente não tem gasto. */}
+                                        <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
+                                            {a.gasto > 0 ? brl(a.gasto) : '—'}
+                                        </td>
                                         <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 600 }}>{a.leads}</td>
+                                        <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>
+                                            {a.custo_por_lead ? brl(a.custo_por_lead) : '—'}
+                                        </td>
                                         <td style={{ padding: '0.75rem 1rem', textAlign: 'right' }}>{a.qualificados}</td>
                                         <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 700, color: a.vendas > 0 ? '#059669' : 'inherit' }}>{a.vendas}</td>
                                         <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 600 }}>
                                             {a.faturamento > 0 ? brl(a.faturamento) : '—'}
+                                        </td>
+                                        <td style={{ padding: '0.75rem 1rem', textAlign: 'right', fontWeight: 700,
+                                                     color: a.roas >= 1 ? '#059669' : (a.roas > 0 ? '#dc2626' : 'inherit') }}>
+                                            {a.roas ? `${a.roas}x` : '—'}
                                         </td>
                                     </tr>
                                     );
                                 })}
                             </tbody>
                         </table>
+                        {/* Sem esta linha, uma coluna inteira de "—" parece defeito.
+                            Dizer que falta importar é a diferença entre "está quebrado"
+                            e "falta um passo de configuração". */}
+                        {anuncios.every((a) => !a.gasto) && (
+                            <p className="text-muted" style={{ fontSize: '0.75rem', marginTop: '0.75rem', lineHeight: 1.5 }}>
+                                O custo ainda não foi importado da Meta — por isso gasto, custo por lead e ROAS
+                                aparecem como “—”. Assim que o token de leitura de anúncios estiver configurado,
+                                a importação passa a rodar sozinha toda madrugada.
+                            </p>
+                        )}
                     </div>
                 )}
             </div>
