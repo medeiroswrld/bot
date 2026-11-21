@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import CustosDoVeiculo from './CustosDoVeiculo.jsx';
 import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
@@ -622,12 +622,24 @@ const consultarPlacaApi = async (placa) => {
 };
 
 const SellModal = ({ car, onClose, onConfirm }) => {
-    const { addToast } = useAppContext();
+    const { addToast, leads } = useAppContext();
     const { simbolo } = useDinheiro();
     const [salePrice, setSalePrice] = useState(car ? car.price : 0);
     const [saleDate, setSaleDate] = useState(getTodayStr());
     const [sellerName, setSellerName] = useState('');
     const [error, setError] = useState(false);
+
+    // Quem comprou. É o elo que liga a venda ao anúncio (ou à conversa) que
+    // trouxe o cliente — sem ele a atribuição inteira mostra faturamento zero.
+    //
+    // RESPONDER é obrigatório; LIGAR não é: "não era cliente cadastrado" é uma
+    // resposta válida, de um clique. Esse detalhe é o ponto do campo. O bloco
+    // "dados do comprador" logo abaixo já pedia telefone de forma opcional e
+    // foi pulado em 33 das 34 vendas da DSC — opcional aqui significa vazio.
+    const [leadId, setLeadId] = useState(null);
+    const [semCadastro, setSemCadastro] = useState(false);
+    const [buscaLead, setBuscaLead] = useState('');
+    const [erroComprador, setErroComprador] = useState(false);
     // Dados do comprador: entram aqui porque e o unico momento em que a loja
     // realmente os tem em maos. Pedir depois significa nao pedir.
     const [comprador, setComprador] = useState({
@@ -656,6 +668,39 @@ const SellModal = ({ car, onClose, onConfirm }) => {
         km:         car?.km ?? car?.mileage ?? '',
     });
     const setV = (campo, valor) => setVeiculo((v) => ({ ...v, [campo]: valor }));
+
+    // Lista curta dos candidatos a comprador. Sem busca, os mais recentes —
+    // venda quase sempre é de quem falou com a loja nos últimos dias. Com
+    // busca, casa nome ou telefone (só dígitos, porque ninguém digita a
+    // máscara igual à do cadastro). Seis é o que cabe sem virar rolagem.
+    const leadsFiltrados = useMemo(() => {
+        const termo = buscaLead.trim().toLowerCase();
+        const digitos = termo.replace(/\D/g, '');
+        const ordenados = [...(leads ?? [])].sort((a, b) => String(b.date ?? '').localeCompare(String(a.date ?? '')));
+        const achados = termo
+            ? ordenados.filter((l) =>
+                String(l.name ?? '').toLowerCase().includes(termo)
+                || (digitos.length >= 3 && String(l.phone ?? '').replace(/\D/g, '').includes(digitos)))
+            : ordenados;
+        return achados.slice(0, 6);
+    }, [leads, buscaLead]);
+
+    const leadEscolhido = leadId ? (leads ?? []).find((l) => l.id === leadId) : null;
+
+    // Escolher o cliente também adianta o contrato: nome, telefone e e-mail
+    // saem do cadastro. Não sobrescreve o que o vendedor já digitou — corrigir
+    // à mão e ver o sistema desfazer é pior do que não preencher.
+    const escolherLead = (l) => {
+        setLeadId(l.id);
+        setSemCadastro(false);
+        setErroComprador(false);
+        setComprador((c) => ({
+            ...c,
+            buyer_name:  c.buyer_name  || l.name  || '',
+            buyer_phone: c.buyer_phone || l.phone || '',
+            buyer_email: c.buyer_email || l.email || '',
+        }));
+    };
     const faltando = Object.entries(veiculo).filter(([, v]) => !String(v ?? '').trim()).length;
     const [erroCpf, setErroCpf] = useState('');
     const [buscandoCep, setBuscandoCep] = useState(false);
@@ -731,6 +776,14 @@ const SellModal = ({ car, onClose, onConfirm }) => {
             addToast('O nome do vendedor é obrigatório.', 'error');
             return;
         }
+        // Pergunta obrigatória, resposta de um clique dos dois lados. Trava a
+        // venda de propósito: é o único momento em que alguém sabe quem
+        // comprou, e "pergunto depois" sempre virou "não perguntei".
+        if (!leadId && !semCadastro) {
+            setErroComprador(true);
+            addToast('Diga quem comprou — ou marque que não era cliente cadastrado.', 'error');
+            return;
+        }
         // CPF so e validado se preenchido: venda pode ser registrada sem contrato,
         // e travar isso impediria de fechar a venda no sistema.
         if (comprador.buyer_cpf && !cpfValido(comprador.buyer_cpf)) {
@@ -738,7 +791,7 @@ const SellModal = ({ car, onClose, onConfirm }) => {
             addToast('CPF do comprador inválido.', 'error');
             return;
         }
-        onConfirm(car.id, salePrice, saleDate, sellerName, comprador, veiculo);
+        onConfirm(car.id, salePrice, saleDate, sellerName, comprador, veiculo, leadId);
     };
 
     return (
@@ -773,6 +826,62 @@ const SellModal = ({ car, onClose, onConfirm }) => {
                             onChange={e => { setSellerName(e.target.value); if (error) setError(false); }} 
                         />
                         {error && <p className="error-message">Campo obrigatório</p>}
+                    </div>
+
+                    <div className={`form-group ${erroComprador ? 'has-error' : ''}`}
+                         style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 12 }}>
+                        <label>Quem comprou? *</label>
+                        <p style={{ margin: '0 0 8px', fontSize: '0.76rem', color: 'var(--color-text-muted)' }}>
+                            É o que liga esta venda ao anúncio ou à conversa que trouxe o cliente.
+                        </p>
+
+                        {leadEscolhido ? (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--input-bg)' }}>
+                                <div style={{ minWidth: 0 }}>
+                                    <strong style={{ display: 'block', fontSize: '0.88rem' }}>{leadEscolhido.name}</strong>
+                                    <span style={{ fontSize: '0.76rem', color: 'var(--color-text-muted)' }}>
+                                        {leadEscolhido.phone || 'sem telefone'}
+                                        {leadEscolhido.car && leadEscolhido.car !== 'Busca genérica' ? ` • ${leadEscolhido.car}` : ''}
+                                    </span>
+                                </div>
+                                <button type="button" className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem', flexShrink: 0 }}
+                                        onClick={() => { setLeadId(null); setBuscaLead(''); }}>Trocar</button>
+                            </div>
+                        ) : semCadastro ? (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 10px', border: '1px solid var(--border)', borderRadius: 8, background: 'var(--input-bg)' }}>
+                                <span style={{ fontSize: '0.84rem' }}>Não era cliente cadastrado.</span>
+                                <button type="button" className="btn-secondary" style={{ padding: '4px 10px', fontSize: '0.78rem', flexShrink: 0 }}
+                                        onClick={() => setSemCadastro(false)}>Escolher cliente</button>
+                            </div>
+                        ) : (
+                            <>
+                                <input type="text" placeholder="Buscar por nome ou telefone"
+                                       value={buscaLead}
+                                       onChange={(e) => { setBuscaLead(e.target.value); if (erroComprador) setErroComprador(false); }} />
+                                <div style={{ marginTop: 6, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                                    {leadsFiltrados.length === 0 ? (
+                                        <p style={{ margin: 0, padding: 10, fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+                                            Nenhum cliente encontrado.
+                                        </p>
+                                    ) : leadsFiltrados.map((l, i) => (
+                                        <button key={l.id} type="button" onClick={() => escolherLead(l)}
+                                                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', border: 'none', borderTop: i === 0 ? 'none' : '1px solid var(--border)', background: 'transparent', cursor: 'pointer' }}>
+                                            <strong style={{ display: 'block', fontSize: '0.85rem' }}>{l.name}</strong>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                                                {l.phone || 'sem telefone'}
+                                                {l.car && l.car !== 'Busca genérica' ? ` • ${l.car}` : ''}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                                <button type="button" className="btn-secondary"
+                                        style={{ marginTop: 8, padding: '6px 10px', fontSize: '0.8rem' }}
+                                        onClick={() => { setSemCadastro(true); setErroComprador(false); }}>
+                                    Não era cliente cadastrado
+                                </button>
+                            </>
+                        )}
+                        {erroComprador && <p className="error-message">Escolha o cliente ou marque “não era cliente cadastrado”.</p>}
                     </div>
 
                     <div style={{ borderTop: '1px solid var(--border)', margin: '4px 0 12px', paddingTop: 12 }}>
@@ -1251,12 +1360,12 @@ const Inventory = () => {
 
     const handleAddCar = async (carData) => { const car = await addInventoryCar(carData); await checkMatches(car); };
     const handleEditCar = async (carData) => { const car = await updateInventoryCar(editCar.id, carData); await checkMatches(car); };
-    const handleSell = async (carId, price, date, seller, comprador, veiculo) => {
+    const handleSell = async (carId, price, date, seller, comprador, veiculo, leadIdComprador) => {
         // O que foi corrigido na tela de venda vale para o contrato desta venda,
         // e nao so para o cadastro: sem o merge, o contrato sairia com o dado
         // velho mesmo depois de a pessoa ter completado ali.
         const carro = { ...sellCarObj, ...(veiculo ?? {}) };
-        await sellCar(carId, price, date, seller, comprador, veiculo);
+        await sellCar(carId, price, date, seller, comprador, veiculo, leadIdComprador);
         setSellCarObj(null);
         // Contrato so faz sentido com nome e CPF: sem isso sairia um documento
         // cheio de linha em branco, pior que nao oferecer.

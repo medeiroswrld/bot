@@ -1173,7 +1173,7 @@ export const AppProvider = ({ children }) => {
     return x.length >= 10 && x === y;
   };
 
-  const sellCar = async (inventoryId, salePrice, saleDate, sellerName, comprador = null, veiculo = null) => {
+  const sellCar = async (inventoryId, salePrice, saleDate, sellerName, comprador = null, veiculo = null, leadIdComprador = null) => {
     if (!user?.id) return;
     try {
       const { data: updatedCar, error } = await supabase
@@ -1273,8 +1273,46 @@ export const AppProvider = ({ children }) => {
       // numero e caso real (casal, pai e filho, o mesmo cliente cadastrado
       // duas vezes), e escolher um no chute marcaria a pessoa errada como
       // compradora. Nesse caso nao mexe em nada.
-      const tel = comprador?.buyer_name ? comprador?.buyer_phone : null;
       const nascimento = comprador?.buyer_birth_date || null;
+
+      // Comprador ESCOLHIDO na tela. Vem antes do casamento por telefone, e o
+      // desliga, porque e o unico elo confiavel: o telefone acerta a maioria e
+      // erra justo o que importa — marido compra no nome da esposa, filho usa o
+      // numero do pai (foi o que aconteceu na primeira venda pelo bot).
+      //
+      // Media em 21/11 na DSC: 34 carros vendidos, 1 lead ligado a uma venda.
+      // O bloco "dados do comprador" e opcional e longo (CPF, RG, endereco —
+      // existe pro contrato), entao era pulado em 33 de 34 vendas, e com ele
+      // ia embora o unico elo entre a venda e o anuncio que trouxe o cliente.
+      // A view anuncio_desempenho mostrava faturamento ZERO em todo anuncio.
+      if (leadIdComprador) {
+        const { error: erroEscolhido } = await supabase
+          .from('leads')
+          .update({
+            status: 'vendido',
+            sold_car_id: inventoryId,
+            sold_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString(),
+            ...(nascimento ? { birth_date: nascimento } : {}),
+          })
+          .eq('id', leadIdComprador)
+          .eq('user_id', user.id);
+
+        if (erroEscolhido) {
+          // Nao derruba a venda: o carro ja foi vendido e isso e o que importa.
+          // Mas avisa, porque aqui o silencio custa a atribuicao da venda.
+          console.warn('[VENDA] nao consegui marcar o lead escolhido:', erroEscolhido.message);
+          addToast('Venda registrada, mas não consegui marcar o cliente como comprador.', 'error');
+        } else {
+          setLeads(prev => prev.map(l => l.id === leadIdComprador
+            ? { ...l, status: 'vendido', sold_car_id: inventoryId, sold_at: saleDate ? new Date(saleDate).toISOString() : new Date().toISOString() }
+            : l));
+        }
+      }
+
+      // Sem comprador escolhido, cai no palpite por telefone — que depende do
+      // bloco do contrato estar preenchido. `!leadIdComprador` evita o pior
+      // caso: escolher um lead E casar outro por telefone, criando duplicata.
+      const tel = (!leadIdComprador && comprador?.buyer_name) ? comprador?.buyer_phone : null;
       if (tel) {
         const candidatos = leads.filter(l => mesmoTelefone(l.phone, tel) && l.status !== 'vendido');
 
