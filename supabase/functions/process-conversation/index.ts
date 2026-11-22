@@ -2676,6 +2676,52 @@ function notaDeDisparo(disparo: DisparoRecente | null, jaTratado: boolean): stri
     + `NÃO pergunte "sobre o quê exatamente?" e NÃO ofereça uma lista de opções: responda DIRETO sobre o que o disparo prometeu. Perguntar faz o cliente achar que a loja não sabe o que mandou — e aí ele para de responder.)`;
 }
 
+// ─── o bot acabou de falar ───────────────────────────────────────────────────
+//
+// O debounce junta as mensagens do cliente separadas por até 9s de silêncio.
+// Só que gente digita com pausa de 12 a 25 segundos — então cada frase vira um
+// TURNO novo, e cada turno acha que precisa fechar com uma pergunta.
+//
+// 22/11, conversa do Walisson, sem um único erro no log:
+//   12:48:23 bot  "Você tem carro pra dar na troca?"
+//   12:48:41 bot  "Boa pergunta! Você tem algum carro pra dar na troca?"
+//   12:51:21 bot  "Qual dia da MEGA BLACK fica melhor: 26, 27, 28 ou 29?"
+//   12:51:35 bot  "Qual dia da MEGA BLACK fica melhor: 26, 27, 28 ou 29?"
+// e três despedidas seguidas no fim.
+//
+// Essas mensagens JÁ estão no histórico — o modelo só não repara que acabou de
+// mandá-las. Então vão de novo aqui no fim, com a idade explícita. Mesma
+// posição que resolveu o anúncio e o disparo.
+function notaDeEco(
+  mensagens: { role: string; content: unknown; created_at?: unknown }[],
+): string {
+  const agora = Date.now();
+  const recentes = mensagens
+    .filter((m) => m.role === 'bot')
+    .filter((m) => {
+      const t = Date.parse(String(m.created_at ?? ''));
+      return Number.isFinite(t) && agora - t < 120000;   // últimos 2 minutos
+    })
+    .map((m) => String(m.content ?? '').trim())
+    // Foto, vídeo e menu não são fala: listá-los não ajuda o modelo a perceber
+    // que já respondeu, e ocupa a nota inteira.
+    .filter((t) => t && !/^\[(foto|v[ií]deo|[áa]udio)\]/i.test(t) && !/^Menu de veiculos/i.test(t));
+
+  if (!recentes.length) return '';
+
+  const lista = recentes
+    .slice(-6)
+    .map((t) => `- "${t.length > 180 ? `${t.slice(0, 180)}…` : t}"`)
+    .join('\n');
+
+  return `(sistema: VOCÊ ACABOU DE FALAR. Estas mensagens suas saíram nos últimos 2 minutos, e o cliente pode nem ter terminado de ler:\n\n${lista}\n\n`
+    + `REGRAS, nesta ordem:\n`
+    + `1. NÃO repita nenhuma pergunta que já está aí em cima. Se você já perguntou e ele ainda não respondeu aquilo, ESPERE — não reformule, não pergunte de outro jeito.\n`
+    + `2. NÃO repita informação que já está aí (preço, parcela, dias do evento, link, despedida). Dizer a mesma coisa duas vezes em um minuto parece robô travado, e é isso que faz o cliente parar de responder.\n`
+    + `3. Se a mensagem dele não acrescenta nada ("certo", "ok", "obrigado", "ate", "pode deixar"), responda com UMA frase curta — ou só reconheça. Não puxe assunto novo e não feche de novo o que já foi fechado.\n`
+    + `4. Se ele já se despediu e você já se despediu, NÃO se despeça outra vez.)`;
+}
+
 function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger, canal = 'whatsapp', falouDePagamento = true, primeiroContato = false, evento: EventoLoja | null = null): string {
   const company = String(settings.company_name        ?? 'nossa concessionária');
   const address = String(settings.address             ?? 'não informado');
@@ -2854,6 +2900,23 @@ Quem chega por aqui costuma vir de um story ou anúncio e faz uma pergunta curta
 - Depois de responder, faça **no máximo UMA** pergunta, e leve. Ex.: "tá procurando pra uso na cidade ou pra estrada?"
 - **NÃO fale de financiamento, entrada, parcela nem troca na primeira resposta.** Isso vem depois, e só se ele demonstrar interesse real no carro. Puxar pagamento logo de cara faz o cliente sumir.
 - Mensagens mais curtas que no WhatsApp: duas ou três linhas bastam.`);
+
+  // Site da loja. Mesma regra dos outros blocos opcionais: sem endereço
+  // cadastrado o bloco não existe, e o modelo não tem como inventar um domínio
+  // plausível — que é o que ele faria se a pergunta chegasse e ele não tivesse
+  // resposta.
+  const siteDaLoja = String(settings.site_url ?? '').trim();
+  const siteBlock = siteDaLoja
+    ? `
+
+## Site da loja
+
+O site da ${company} é **${siteDaLoja}** — e o estoque dele é o MESMO que você consulta aqui, atualizado ao vivo.
+
+- Quando o cliente pedir o site, o link, "onde vejo tudo", "tem site?" ou quiser ver o estoque por conta dele, mande o endereço exatamente como está acima.
+- Mandar o site NÃO substitui o seu trabalho: ofereça o link e continue a conversa (pergunte o que ele procura, ofereça agendar). Quem some pro site sem combinar nada raramente volta.
+- Nunca invente outro endereço, página de carro específico, nem caminho dentro do site. Você sabe o endereço principal e só ele.`
+    : '';
 
   // Grupo/canal de ofertas. O bloco só existe quando a loja cadastrou o link —
   // sem isso o modelo nem fica sabendo que a ideia existe, e não tem como
@@ -3216,7 +3279,7 @@ Você representa a ${company}. Cada conversa é uma oportunidade de ajudar algu�
     faqs.length > 0
       ? `\n\n## Perguntas frequentes — use estas respostas quando o cliente perguntar algo relacionado\n\n${faqs.map((f) => `P: ${f.question}\nR: ${f.answer}`).join('\n\n')}`
       : ''
-  }${canalBlock}${paymentBlock}${fordBlock}${tradeInBlock}${equipeBlock}${comunidadeBlock}${visitReminderBlock}`;
+  }${canalBlock}${paymentBlock}${fordBlock}${tradeInBlock}${equipeBlock}${siteBlock}${comunidadeBlock}${visitReminderBlock}`;
 }
 
 // ─── chamada à API do Claude ──────────────────────────────────────────────────
@@ -3647,8 +3710,13 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   //    teto de 30s, pra juntar tudo num lote só. O lock atômico abaixo garante
   //    que só UMA invocação processe o lote. Pulado para boas-vindas.
   if (!isFirstMessage) {
-    const QUIET_MS = 9000;     // silêncio necessário pra considerar que terminou de digitar
-    const MAX_TOTAL_MS = 30000; // teto de segurança
+    // 9s era curto demais. Medindo a conversa do Walisson (22/11), as pausas
+    // REAIS entre as frases dele foram de 12, 16, 16 e 25 segundos — cada uma
+    // virou um turno separado, e cada turno fechou com a mesma pergunta.
+    // 14s pega a maioria dos bursts sem deixar o bot lento; o que escapar é
+    // tratado pela notaDeEco, que proíbe repetir o que acabou de sair.
+    const QUIET_MS = 14000;     // silêncio necessário pra considerar que terminou de digitar
+    const MAX_TOTAL_MS = 45000; // teto de segurança
     const POLL_MS = 2000;
     const startedAt = Date.now();
 
@@ -3945,9 +4013,14 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   //    20 = ~10 trocas. Trade-off: menos tokens por chamada, porém conversas
   //    longas perdem o começo (nome, FORD, carro discutido no início).
   const HISTORY_LIMIT = 20;
+  // `created_at` NÃO é enfeite: duas notas do fim do array decidem pela IDADE
+  // da mensagem (a do disparo, pra se calar depois de tratado; a do eco, pra
+  // saber o que o bot acabou de dizer). Sem a coluna aqui, `Date.parse` devolve
+  // NaN, toda comparação vira falsa e as duas notas se comportam errado sem
+  // acusar nada.
   const { data: rawMessages } = await supabase
     .from('messages')
-    .select('role, content')
+    .select('role, content, created_at')
     .eq('conversation_id', conversationId)
     .order('created_at', { ascending: false })
     .limit(HISTORY_LIMIT);
@@ -4150,11 +4223,17 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     : 0;
   const notaDisparo = notaDeDisparo(ultimoDisparo, respostasAposDisparo >= 2);
 
+  // O eco vai por ÚLTIMO, depois de todas as outras: as de cima mandam dizer
+  // coisas (o evento, o disparo, o anúncio) e esta manda NÃO repetir. Quem
+  // decide o empate é a última lida.
+  const notaEco = notaDeEco(orderedMessages);
+
   history.push({
     role: 'user',
     content: notaDeHorario((settings ?? {}) as Record<string, unknown>, eventoHoje)
       + (notaAnuncio ? `\n\n${notaAnuncio}` : '')
-      + (notaDisparo ? `\n\n${notaDisparo}` : ''),
+      + (notaDisparo ? `\n\n${notaDisparo}` : '')
+      + (notaEco ? `\n\n${notaEco}` : ''),
   });
 
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
