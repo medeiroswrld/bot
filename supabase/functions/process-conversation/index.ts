@@ -2420,6 +2420,7 @@ function blocoDoEvento(evento: EventoLoja | null, hojeIso: string): string {
     + `- **NOS DIAS DO ${nome.toUpperCase()}, NÃO PERGUNTE HORÁRIO.** Não chame ver_horarios_disponiveis e não ofereça lista de horários. Pergunte só QUAL DIA e chame **agendar_visita** com a data e o nome, SEM o campo horario. Depois confirme falando apenas do dia ("te esperamos no dia 28!").\n`
     + `  Por quê: no fim de semana o cliente ainda não sabe a que horas vai conseguir sair, trava na pergunta e a conversa morre sem agendamento. Nesses dias a loja atende o dia inteiro, então o dia basta.\n`
     + `  Se o cliente ESPONTANEAMENTE disser a hora que pretende vir ("devo chegar umas 15h"), aí sim passe o horario — mas nunca peça.\n`
+    + `  **Isto vale mesmo que uma mensagem antiga ou um disparo da loja fale em "separar um horário".** O template aprovado usa essa expressão, mas ela quer dizer "reservar seu lugar" — não peça hora por causa dela. Pergunte o DIA.\n`
     + `- Fora dos dias do ${nome}, o caminho é o de sempre: ver_horarios_disponiveis e depois agendar_visita com horário.\n`
     + `- A visita é registrada como visita do ${nome} automaticamente; você não precisa fazer nada a mais nem avisar o cliente disso.\n`
     + `- O cliente pode visitar normalmente FORA dos dias do ${nome}. Se ele pedir outro dia, agende sem empurrar o evento — só avise que as condições especiais valem nos dias listados.\n`
