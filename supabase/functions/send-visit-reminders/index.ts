@@ -83,13 +83,23 @@ serve(async (req) => {
     // Candidatos: hoje/amanhã, agendados, sem lembrete ainda
     const { data: appts } = await supabase
       .from('appointments')
-      .select('id, customer_name, customer_phone, appointment_date, appointment_time')
+      .select('id, customer_name, customer_phone, appointment_date, appointment_time, sem_horario')
       .eq('user_id', t.user_id)
       .in('status', ['scheduled', 'confirmed'])
       .is('reminder_sent_at', null)
       .in('appointment_date', [today, tomorrow]);
 
     for (const a of (appts ?? [])) {
+      // Visita sem hora marcada (feirão) NÃO recebe este lembrete.
+      //
+      // O template tem um parâmetro de horário obrigatório, e o que está em
+      // `appointment_time` nessa visita é só a abertura do evento — ninguém
+      // combinou aquilo. Mandar "sua visita é às 09:00" pra quem marcou só o
+      // dia é pior do que não mandar: o cliente acha que errou o horário.
+      //
+      // O lembrete desses dias é disparo manual da loja, de propósito.
+      if (a.sem_horario) continue;
+
       const quando = new Date(`${a.appointment_date}T12:00:00Z`);
       const epoch = Date.parse(
         `${a.appointment_date}T${String(a.appointment_time).substring(0, 5)}:00${offsetDoFuso(tz, quando)}`,

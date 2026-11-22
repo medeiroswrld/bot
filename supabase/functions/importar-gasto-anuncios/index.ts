@@ -118,10 +118,41 @@ Deno.serve(async (req) => {
       // Sem o campo `business`: ele exige `business_management`, que este
       // token não tem, e pedir um campo a mais derruba a resposta INTEIRA
       // com (#100) em vez de só omitir o campo.
-      const r = await pegar('me/adaccounts?fields=id,name,amount_spent,currency,account_status&limit=50');
+      const listadas = await pegar('me/adaccounts?fields=id,name,amount_spent,currency,account_status&limit=50');
+
+      // Escopos REAIS do token. A tela de consentimento mostrar o botão em
+      // "SIM" não prova que a permissão foi concedida — e perseguir uma
+      // permissão que já está lá é perder o dia no lugar errado.
+      const escopos = await pegar('me/permissions');
+
+      // Sonda a conta configurada por DOIS caminhos, porque eles falham por
+      // motivos diferentes: ler o OBJETO da conta é acesso de cadastro, ler
+      // o INSIGHT é acesso a desempenho. Saber qual dos dois cai separa
+      // "não enxergo a conta" de "enxergo mas não posso ver o gasto".
+      const { data: cfgDiag } = await supabase
+        .from('company_settings')
+        .select('meta_ad_account_id')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      const alvo = String(cfgDiag?.meta_ad_account_id ?? '').replace(/^act_/, '').trim();
+      let objeto: unknown = null;
+      let insight: unknown = null;
+      if (alvo) {
+        const o = await pegar(`act_${alvo}?fields=id,name,account_status,amount_spent,currency`);
+        objeto = o.ok ? o.body : { erro: o.body?.error?.message ?? o.status };
+        const i = await pegar(`act_${alvo}/insights?fields=spend&date_preset=maximum`);
+        insight = i.ok ? (i.body?.data ?? []) : { erro: i.body?.error?.message ?? i.status };
+      }
+
       passo('diagnostico', {
-        contas: r.body?.data ?? null,
-        erro: r.body?.error?.message ?? null,
+        escopos_do_token: (escopos.body?.data ?? [])
+          .filter((p: { status?: string }) => p.status === 'granted')
+          .map((p: { permission?: string }) => p.permission),
+        contas_listadas: listadas.body?.data ?? listadas.body?.error?.message ?? null,
+        conta_alvo: alvo ? `act_${alvo}` : null,
+        leitura_do_objeto: objeto,
+        leitura_do_insight: insight,
         ads_que_procuramos: [...info.ads],
       });
       continue;

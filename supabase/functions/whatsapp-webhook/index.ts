@@ -539,12 +539,38 @@ serve(async (req) => {
   // 7. Garante que existe um lead para este contato (cria apenas se não existir)
   const { data: existingLead } = await supabase
     .from('leads')
-    .select('id')
+    .select('id, status')
     .eq('user_id', userId)
     .eq('phone', from)
     .maybeSingle();
 
   let leadId: string | null = existingLead?.id ?? null;
+
+  // ── O funil anda aqui ─────────────────────────────────────────────────────
+  //
+  // O Kanban da Central de Leads nascera morto: 1270 leads da DSC em "novo",
+  // 4 em atendimento. Procurando a causa, não havia nenhuma — NADA no sistema
+  // escrevia `atendimento`. O único lugar que mexia em status escrevia
+  // `proposta`, e só na coleta de dados de financiamento.
+  //
+  // Mora no WEBHOOK e não no bot de propósito: o `process-conversation` fica
+  // mudo quando a conversa está com atendente humano, e atendimento humano é
+  // atendimento igual. Aqui passa TODA mensagem do cliente, com bot ou sem.
+  //
+  // Só sai de `novo`: quem já está em proposta, negociação, vendido ou perdido
+  // não volta pra atendimento porque o cliente mandou "oi" de novo. Sem essa
+  // trava o funil do lojista desanda sozinho e ele não entende por quê.
+  if (existingLead && String(existingLead.status ?? '') === 'novo') {
+    const { error: erroFunil } = await supabase
+      .from('leads')
+      .update({ status: 'atendimento', updated_at: new Date().toISOString() })
+      .eq('id', existingLead.id)
+      .eq('status', 'novo');          // condição no UPDATE: imune a corrida entre dois webhooks
+    if (erroFunil) {
+      // Funil é acessório: não pode derrubar o recebimento da mensagem.
+      console.warn('[WH] nao consegui mover o lead para atendimento:', erroFunil.message);
+    }
+  }
 
   if (!existingLead) {
     // Anúncio entra na nota do lead. É o jeito de a origem aparecer HOJE na

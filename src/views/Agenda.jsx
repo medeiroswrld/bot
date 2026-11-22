@@ -102,7 +102,11 @@ const AppointmentDetailModal = ({ appt, onClose, onStatusChange }) => {
                         </div>
                         <div>
                             <p className="text-muted" style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' }}>Horário</p>
-                            <p style={{ fontWeight: 600 }}>{appt.time}</p>
+                            {/* Visita de feirão é marcada pelo DIA. O que está em
+                                `time` ali é a abertura do evento, não hora combinada —
+                                mostrá-la faria o vendedor cobrar um horário que o
+                                cliente nunca deu. */}
+                            <p style={{ fontWeight: 600 }}>{appt.sem_horario ? 'Dia todo' : appt.time}</p>
                         </div>
                         <div>
                             <p className="text-muted" style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.25rem' }}>Veículo</p>
@@ -375,7 +379,7 @@ const Agenda = () => {
                                     return (
                                         <div key={appt.id} className="appointment-card card" onClick={() => setSelectedAppt(appt)} style={{ cursor: 'pointer' }}>
                                             <div className="app-time">
-                                                <Clock size={16} /> {appt.time}
+                                                <Clock size={16} /> {appt.sem_horario ? 'Dia todo' : appt.time}
                                             </div>
                                             <div className="app-details">
                                                 <p className="app-customer"><User size={14} /> {appt.customer}</p>

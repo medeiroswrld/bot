@@ -341,7 +341,11 @@ export const AppProvider = ({ children }) => {
         // Visita de feirão. `?? null` porque num banco sem a migration 117 a
         // coluna não existe e vem undefined — a Agenda trata ausência como
         // "nenhuma visita de evento" e simplesmente não mostra a aba.
-        evento_id: a.evento_id ?? null
+        evento_id: a.evento_id ?? null,
+        // Marcou o DIA, não a hora. `time` continua trazendo um horário real
+        // (a abertura do evento) de propósito: é ele que alimenta o input de
+        // remarcação e a ordenação. Quem MOSTRA é que troca por "Dia todo".
+        sem_horario: a.sem_horario ?? false
       }));
 
       setAppointments(mapped);
@@ -2062,7 +2066,8 @@ export const AppProvider = ({ children }) => {
       notes: raw.notes || '',
       status: STATUS_DB_TO_UI[raw.status] || 'agendado',
       car_id: raw.car_id,
-      evento_id: raw.evento_id ?? null
+      evento_id: raw.evento_id ?? null,
+      sem_horario: raw.sem_horario ?? false
     });
 
     const channel = supabase

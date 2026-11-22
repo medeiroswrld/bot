@@ -267,16 +267,17 @@ const TOOLS = [
   {
     name: 'agendar_visita',
     description:
-      'Agenda uma visita na concessionária. Chame assim que tiver dia + horário LIVRE (em horarios_livres) + nome do cliente — NÃO peça confirmação extra nem escale pro gerente quando o horário está livre. SEMPRE informe o car_id do veículo que motivou a visita (do consultar_estoque) — é essencial pra contar quantas visitas cada carro tem.',
+      'Agenda uma visita na concessionária. Chame assim que tiver dia + horário LIVRE (em horarios_livres) + nome do cliente — NÃO peça confirmação extra nem escale pro gerente quando o horário está livre. SEMPRE informe o car_id do veículo que motivou a visita (do consultar_estoque) — é essencial pra contar quantas visitas cada carro tem. '
+      + 'EM DIA DE EVENTO (feirão): NÃO pergunte horário e NÃO chame ver_horarios_disponiveis — chame esta ferramenta com data e nome, SEM o campo horario. Nesses dias a loja atende o dia inteiro e perguntar a hora só trava o cliente, que no fim de semana ainda não sabe quando vai conseguir sair.',
     input_schema: {
       type: 'object',
       properties: {
         nome_cliente: { type: 'string', description: 'Nome do cliente' },
         data:         { type: 'string', description: 'Data no formato YYYY-MM-DD' },
-        horario:      { type: 'string', description: 'Horário no formato HH:MM' },
+        horario:      { type: 'string', description: 'Horário no formato HH:MM. OMITA em dia de evento/feirão — ali o cliente marca só o dia.' },
         car_id:       { type: 'string', description: 'ID do veículo de interesse (do consultar_estoque). SEMPRE informe quando a visita for pra ver um carro específico.' },
       },
-      required: ['nome_cliente', 'data', 'horario'],
+      required: ['nome_cliente', 'data'],
     },
   },
   {
@@ -1188,30 +1189,79 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
 
     log.info('params', { action: 'agendar_visita', data: dateStr, horario, nome: maskName(nomeCliente), carId });
 
-    if (!dateStr || !horario) {
-      log.error('data ou horário ausente', { action: 'agendar_visita', data: dateStr, horario });
-      return { sucesso: false, error: 'Data ou horário não informado.' };
+    if (!dateStr) {
+      log.error('data ausente', { action: 'agendar_visita', data: dateStr });
+      return { sucesso: false, error: 'Data não informada.' };
     }
+
+    // ── A visita é de feirão? ─────────────────────────────────────────────
+    //
+    // Subiu pra ANTES da validação de horário por causa da visita sem hora: é
+    // o evento que autoriza agendar sem slot, então ele precisa ser conhecido
+    // antes de validar qualquer coisa.
+    //
+    // Decidido AQUI, no servidor, e não por um parâmetro que o modelo passa.
+    // Se dependesse do modelo, bastava ele esquecer uma vez pra uma visita de
+    // feirão cair na lista de visita comum — e o lojista nunca saberia que
+    // perdeu a conta. A data manda: caiu dentro do evento, é do evento,
+    // inclusive quando o cliente nem mencionou o feirão.
+    //
+    // É também o para-raios da migration 117: a chave `evento_id` só entra no
+    // insert quando a tabela `eventos` devolveu uma linha — isto é, quando a
+    // migration rodou. Banco sem a 117 → nenhum evento → insert sem a coluna.
+    const eventoDaData = await buscarEventoDaData(supabase, userId, dateStr, log);
+
+    // Dia de evento sem horário = visita de DIA INTEIRO.
+    //
+    // No fim de semana a pessoa não sabe a que horas vai conseguir sair;
+    // exigir a hora trava a conversa e o agendamento simplesmente não
+    // acontece. Em dia de feirão a loja atende o dia todo, então o dia basta.
+    //
+    // Consequência assumida: nesses dias não existe limite por horário —
+    // sem hora marcada não há slot pra lotar.
+    const semHorario = Boolean(eventoDaData) && !horario;
+
+    if (!horario && !semHorario) {
+      log.error('horário ausente fora de dia de evento', { action: 'agendar_visita', data: dateStr });
+      return {
+        sucesso: false,
+        error: 'Horário não informado.',
+        mensagem: 'Fora dos dias do evento a visita precisa de horário. Use ver_horarios_disponiveis e ofereça um dos horarios_livres.',
+      };
+    }
+
+    // `appointment_time` é NOT NULL e é lida por lembrete, agenda e relatório.
+    // Na visita sem hora ela guarda a ABERTURA do evento: quem não conhece a
+    // coluna `sem_horario` continua lendo um horário válido e não quebra.
+    // Não é hora combinada e não deve ser dita ao cliente como se fosse.
+    const horaEfetiva = semHorario
+      ? String(eventoDaData?.hora_inicio ?? '09:00').slice(0, 5)
+      : horario;
+    const horarioHm = horaEfetiva.substring(0, 5);
 
     // VALIDAÇÃO de expediente + disponibilidade (mesma fonte do ver_horarios_disponiveis):
     // o horário pedido PRECISA ser um slot válido e livre. Barra fora do funcionamento,
     // dia fechado, exceção e horário já passado hoje — independente do que o modelo mandar.
-    const horarioHm = horario.substring(0, 5);
-    const slotInfo = await computeFreeSlots(supabase, userId, dateStr);
+    //
+    // Pulada na visita sem hora: não há slot a validar, e dia de evento é por
+    // definição um dia em que a loja abre.
+    if (!semHorario) {
+      const slotInfo = await computeFreeSlots(supabase, userId, dateStr);
 
-    if (!slotInfo.open) {
-      log.warn('dia fechado/indisponível', { action: 'agendar_visita', data: dateStr, reason: slotInfo.reason });
-      return { sucesso: false, fora_expediente: true, mensagem: `Não dá pra agendar em ${dateStr}: ${slotInfo.reason}. Ofereça ao cliente outro dia dentro do funcionamento da loja (use ver_horarios_disponiveis).` };
-    }
+      if (!slotInfo.open) {
+        log.warn('dia fechado/indisponível', { action: 'agendar_visita', data: dateStr, reason: slotInfo.reason });
+        return { sucesso: false, fora_expediente: true, mensagem: `Não dá pra agendar em ${dateStr}: ${slotInfo.reason}. Ofereça ao cliente outro dia dentro do funcionamento da loja (use ver_horarios_disponiveis).` };
+      }
 
-    if (!slotInfo.freeSlots.includes(horarioHm)) {
-      log.warn('fora do expediente/indisponível', { action: 'agendar_visita', horario: horarioHm, livres: slotInfo.freeSlots });
-      return {
-        sucesso: false,
-        fora_expediente: true,
-        horarios_livres: slotInfo.freeSlots,
-        mensagem: `O horário ${horarioHm} não está disponível (fora do horário de funcionamento ou já ocupado). NÃO confirme esse horário. Ofereça ao cliente um destes horários válidos: ${slotInfo.freeSlots.join(', ') || '(nenhum nesse dia — sugira outro dia)'}.`,
-      };
+      if (!slotInfo.freeSlots.includes(horarioHm)) {
+        log.warn('fora do expediente/indisponível', { action: 'agendar_visita', horario: horarioHm, livres: slotInfo.freeSlots });
+        return {
+          sucesso: false,
+          fora_expediente: true,
+          horarios_livres: slotInfo.freeSlots,
+          mensagem: `O horário ${horarioHm} não está disponível (fora do horário de funcionamento ou já ocupado). NÃO confirme esse horário. Ofereça ao cliente um destes horários válidos: ${slotInfo.freeSlots.join(', ') || '(nenhum nesse dia — sugira outro dia)'}.`,
+        };
+      }
     }
 
     // booking_mode define o status do agendamento
@@ -1223,28 +1273,14 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
 
     const appointmentStatus = settings?.booking_mode === 'confirm' ? 'scheduled' : 'confirmed';
 
-    // ── A visita é de feirão? ─────────────────────────────────────────────
-    //
-    // Decidido AQUI, no servidor, e não por um parâmetro que o modelo passa.
-    // Se dependesse do modelo, bastava ele esquecer uma vez pra uma visita de
-    // feirão cair na lista de visita comum — e o lojista nunca saberia que
-    // perdeu a conta. A data manda: caiu dentro do evento, é do evento,
-    // inclusive quando o cliente nem mencionou o feirão (ele vai aparecer num
-    // dia de feirão de todo jeito).
-    //
-    // É também o para-raios da migration 117: a chave `evento_id` só entra no
-    // insert quando a tabela `eventos` devolveu uma linha — isto é, quando a
-    // migration rodou. Banco sem a 117 → nenhum evento → insert sem a coluna,
-    // idêntico ao de antes. Nenhum agendamento quebra por causa disto.
-    const eventoDaData = await buscarEventoDaData(supabase, userId, dateStr, log);
-
     // Colunas: appointment_date = DATE ('YYYY-MM-DD'), appointment_time = TIME ('HH:MM')
     const insertData: Record<string, unknown> = {
       user_id: userId,
       customer_name: nomeCliente,
       customer_phone: customerPhone,
       appointment_date: dateStr,
-      appointment_time: horario,
+      appointment_time: horaEfetiva,
+      sem_horario: semHorario,
       car_id: carId,
       status: appointmentStatus,
     };
@@ -1278,14 +1314,21 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
       .maybeSingle();
 
     if (jaExiste) {
-      const mesmoHorario = String(jaExiste.appointment_time ?? '').slice(0, 5) === horarioHm;
+      // Na visita SEM HORA, qualquer visita já marcada naquele dia é a mesma.
+      // Não remarca: se a pessoa tinha escolhido um horário antes, trocar por
+      // "dia todo" apagaria uma informação que ela deu de propósito.
+      const mesmoHorario = semHorario
+        || String(jaExiste.appointment_time ?? '').slice(0, 5) === horarioHm;
 
       if (mesmoHorario) {
-        log.info('visita já existia — devolvendo a mesma', { action: 'agendar_visita', apptId: jaExiste.id });
+        log.info('visita já existia — devolvendo a mesma', { action: 'agendar_visita', apptId: jaExiste.id, semHorario });
         return {
-          sucesso: true, id: jaExiste.id, data: dateStr, horario, status: appointmentStatus,
+          sucesso: true, id: jaExiste.id, data: dateStr, horario: semHorario ? null : horario,
+          sem_horario: semHorario, status: appointmentStatus,
           ja_existia: true,
-          mensagem: `Essa visita já estava agendada para ${dateStr} às ${horario}. NÃO diga que agendou de novo — confirme que está de pé e siga a conversa.`,
+          mensagem: semHorario
+            ? `Esse cliente já está agendado para ${dateStr}. NÃO diga que agendou de novo e NÃO cite horário — confirme que está de pé e siga a conversa.`
+            : `Essa visita já estava agendada para ${dateStr} às ${horario}. NÃO diga que agendou de novo — confirme que está de pé e siga a conversa.`,
         };
       }
 
@@ -1337,15 +1380,22 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
 
     log.info('agendamento criado', { action: 'agendar_visita', apptId: appt.id, data: appt.appointment_date, horario: appt.appointment_time });
 
+    // Na visita sem hora o `horario` volta NULO de propósito: devolver a hora
+    // de abertura faria o modelo confirmar "às 09:00" uma visita em que
+    // ninguém combinou hora nenhuma.
     return {
       sucesso: true,
       id: appt.id,
       data: dateStr,
-      horario,
+      horario: semHorario ? null : horario,
+      sem_horario: semHorario,
       status: appointmentStatus,
-      mensagem: appointmentStatus === 'confirmed'
-        ? `Visita confirmada para ${dateStr} às ${horario}.`
-        : `Visita solicitada para ${dateStr} às ${horario}. Aguardando confirmação da concessionária.`,
+      mensagem: semHorario
+        ? `Visita registrada para ${dateStr}, SEM horário marcado — nesse dia a loja atende o dia inteiro. `
+          + `Confirme com o cliente dizendo só o DIA (ex.: "te esperamos no dia 28"). NÃO cite nenhum horário e NÃO pergunte que horas ele vem.`
+        : (appointmentStatus === 'confirmed'
+          ? `Visita confirmada para ${dateStr} às ${horario}.`
+          : `Visita solicitada para ${dateStr} às ${horario}. Aguardando confirmação da concessionária.`),
     };
   }
 
@@ -1556,6 +1606,8 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
   }
 
   if (name === 'simular_financiamento') {
+    // Pedir simulação é PROPOSTA: saiu de "estou olhando" pra "quanto fica".
+    await avancarFunil(supabase, userId, customerPhone, 'proposta', log);
     const carPrice = Number(input.car_price ?? 0);
     const downPayment = Number(input.down_payment ?? 0);
     const tradeIn = Number(input.trade_in_value ?? 0);
@@ -1664,6 +1716,8 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
   }
 
   if (name === 'avaliar_troca') {
+    // Pedir avaliação do carro de troca é PROPOSTA pela mesma razão.
+    await avancarFunil(supabase, userId, customerPhone, 'proposta', log);
     const fipe = Number(input.valor_fipe ?? 0);
     const nota = Number(input.nota ?? -1);
 
@@ -2137,6 +2191,8 @@ REGRA QUE VALE MAIS QUE A DE CIMA: se o cliente disser que não está vendo, que
   }
 
   if (name === 'save_trade_in_evaluation') {
+    // Dado do carro de troca sendo salvo = troca em cima da mesa = PROPOSTA.
+    await avancarFunil(supabase, userId, customerPhone, 'proposta', log);
     const map: Record<string, string> = {};
     if (String(input.model ?? '').trim())              map.trade_in_model = String(input.model).trim();
     if (String(input.year ?? '').trim())               map.trade_in_year = String(input.year).trim();
@@ -2361,7 +2417,11 @@ function blocoDoEvento(evento: EventoLoja | null, hojeIso: string): string {
     + `\n\n### Como conduzir\n\n`
     + `- Se o cliente perguntar do ${nome}, responda com os dias e o horário acima. Eles são a verdade; não invente outro dia nem outro horário.\n`
     + `- Se o cliente demonstrar interesse em visitar, ou perguntar de preço/desconto/condição, mencione o ${nome} UMA vez, com naturalidade, e convide pra vir num desses dias. Não repita isso em toda mensagem e não transforme a conversa em propaganda.\n`
-    + `- Pra marcar a visita no ${nome}, o caminho é o de sempre: **ver_horarios_disponiveis** na data e depois **agendar_visita**. Os horários do evento já estão na agenda da loja — ofereça SÓ o que a tool devolver. A visita é registrada como visita do ${nome} automaticamente; você não precisa fazer nada a mais nem avisar o cliente disso.\n`
+    + `- **NOS DIAS DO ${nome.toUpperCase()}, NÃO PERGUNTE HORÁRIO.** Não chame ver_horarios_disponiveis e não ofereça lista de horários. Pergunte só QUAL DIA e chame **agendar_visita** com a data e o nome, SEM o campo horario. Depois confirme falando apenas do dia ("te esperamos no dia 28!").\n`
+    + `  Por quê: no fim de semana o cliente ainda não sabe a que horas vai conseguir sair, trava na pergunta e a conversa morre sem agendamento. Nesses dias a loja atende o dia inteiro, então o dia basta.\n`
+    + `  Se o cliente ESPONTANEAMENTE disser a hora que pretende vir ("devo chegar umas 15h"), aí sim passe o horario — mas nunca peça.\n`
+    + `- Fora dos dias do ${nome}, o caminho é o de sempre: ver_horarios_disponiveis e depois agendar_visita com horário.\n`
+    + `- A visita é registrada como visita do ${nome} automaticamente; você não precisa fazer nada a mais nem avisar o cliente disso.\n`
     + `- O cliente pode visitar normalmente FORA dos dias do ${nome}. Se ele pedir outro dia, agende sem empurrar o evento — só avise que as condições especiais valem nos dias listados.\n`
     + `- Nunca prometa que um carro específico vai estar disponível no ${nome}, nem reserve veículo.`;
 }
@@ -2478,10 +2538,141 @@ function notaDeAnuncio(
   }
 
   return `${ficha}\n\nCOMO ABRIR ESTA CONVERSA:`
-    + `\n- Se o anúncio acima fala do ${evento.nome}, é por ele que você abre: diga as condições especiais do ${evento.nome} — SOMENTE as que estão escritas no seu prompt, sem inventar nenhuma — e pergunte qual dos dias do evento ele quer vir.`
+    + `\n- **ELE JÁ FOI RECEBIDO.** Antes de chegar em você, este cliente leu o anúncio e recebeu a saudação automática do WhatsApp da loja — as duas já disseram o nome da loja e já falaram do ${evento.nome}. Repetir isso é a coisa mais fácil de fazer aqui e a que mais afasta: a pessoa vê a mesma mensagem duas vezes e some.`
+    + `\n- NADA de boas-vindas formais ("Olá! Seja bem-vindo à ..."), NADA de "você chegou pelo anúncio da ...". No máximo um "Oi, <nome>!" curto. **Isto SUBSTITUI a instrução de "cumprimente e diga de qual loja você fala" que está no seu prompt**: ela vale pra quem chega do nada, não pra quem veio de anúncio e já foi recebido duas vezes.`
+    + `\n- **NÃO liste as condições especiais agora** (taxa, parcela, prazo, horário). Ele já leu no anúncio. Você diz isso quando ELE perguntar, ou depois que a visita estiver marcada.`
+    + `\n- UMA mensagem só, uma pergunta só. Se ele já disse que quer agendar, a única coisa que falta é o DIA.`
+    + `\n- Exemplo do tamanho certo quando ele chega pedindo pra agendar: "Oi, Jose! Qual dia fica melhor pra você: 26, 27, 28 ou 29?" — é isso, não mais que isso.`
     + `\n- NÃO pergunte "hoje ou amanhã" e NÃO deixe a data em aberto: ofereça os DIAS DO EVENTO.`
     + `\n- Se o anúncio fala de outra coisa (um carro específico, por exemplo), responda sobre ESSA coisa e não force o ${evento.nome}.`
-    + `\n- Isto vale pra abertura. Depois de apresentar a oferta, siga a conversa normalmente.)`;
+    + `\n- Isto vale pra abertura. Depois, siga a conversa normalmente.)`;
+}
+
+// ─── funil do lead (o Kanban da Central de Leads) ────────────────────────────
+//
+// `atendimento` é escrito no WEBHOOK, não aqui — lá passa toda mensagem do
+// cliente, inclusive quando a conversa está com atendente humano e este
+// arquivo nem roda. Aqui mora o degrau seguinte: PROPOSTA.
+//
+// Proposta é o cliente pedindo número — simulação de financiamento, avaliação
+// do carro de troca. É o sinal de que ele saiu de "estou olhando" pra "quero
+// saber quanto fica", e é essa a linha que o lojista quer ver no Kanban.
+const ORDEM_FUNIL: Record<string, number> = {
+  novo: 0, atendimento: 1, proposta: 2, negociacao: 3, vendido: 4,
+};
+
+// Avança o lead no funil — e NUNCA o puxa de volta.
+//
+// Sem a comparação de ordem, um cliente em "negociação" que pedisse outra
+// simulação voltaria pra "proposta", e o funil do lojista desandaria sozinho.
+// `vendido` e `perdido` são finais: quem tira o lead de lá é uma pessoa.
+async function avancarFunil(
+  supabase: SupabaseClient,
+  userId: string,
+  customerPhone: string,
+  novoStatus: 'atendimento' | 'proposta' | 'negociacao',
+  log: Logger,
+): Promise<void> {
+  try {
+    const { data: lead } = await supabase
+      .from('leads')
+      .select('id, status')
+      .eq('user_id', userId)
+      .eq('phone', customerPhone)
+      .maybeSingle();
+
+    if (!lead) return;
+
+    const atual = String(lead.status ?? 'novo');
+    if (atual === 'vendido' || atual === 'perdido') return;
+    if ((ORDEM_FUNIL[novoStatus] ?? 0) <= (ORDEM_FUNIL[atual] ?? 0)) return;
+
+    await supabase
+      .from('leads')
+      .update({ status: novoStatus, updated_at: new Date().toISOString() })
+      .eq('id', lead.id);
+
+    log.info('lead avançou no funil', { action: 'funil', de: atual, para: novoStatus });
+  } catch (e) {
+    // Funil é acessório: nunca pode derrubar o atendimento.
+    log.debug('falha ao avançar funil', { action: 'funil', error: String(e) });
+  }
+}
+
+// ─── o cliente está respondendo a um disparo? ────────────────────────────────
+//
+// `send-campaign` JÁ grava o texto do disparo no histórico como mensagem do
+// bot — então ele chega ao modelo. O problema é COMO chega: como mais uma
+// linha no meio de vinte, muitas vezes horas antes.
+//
+// 22/11, caso real: disparo do feirão às 02:48, cliente responde "Quero saber
+// mais" às 10:01, e o bot pergunta *"Sobre o quê exatamente? Pode ser sobre
+// algum carro específico, as condições do nosso evento..."*. Pra quem acabou
+// de receber um convite de feirão, isso parece que a loja não sabe o que
+// mandou — e várias pessoas acham que é brincadeira e param de responder.
+//
+// Mesmo defeito do anúncio, mesma cura: o dado existia, no lugar errado.
+
+interface DisparoRecente {
+  texto: string;
+  quando: string;   // ISO
+}
+
+async function buscarUltimoDisparo(
+  supabase: SupabaseClient,
+  conversationId: string,
+  log: Logger,
+): Promise<DisparoRecente | null> {
+  try {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('content, created_at')
+      .eq('conversation_id', conversationId)
+      .not('campaign_id', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    const texto = String(data.content ?? '').trim();
+    if (!texto) return null;
+
+    // Disparo velho não explica a mensagem de hoje. Sete dias é folgado de
+    // propósito: muita gente responde campanha dias depois, e continua sendo
+    // resposta àquilo.
+    const idade = Date.now() - Date.parse(String(data.created_at));
+    if (!(idade >= 0) || idade > 7 * 86400000) return null;
+
+    log.info('cliente tem disparo recente', { action: 'disparo', horas: Math.round(idade / 3600000) });
+    return { texto, quando: String(data.created_at) };
+  } catch (e) {
+    log.debug('exceção ao buscar disparo', { action: 'disparo', error: String(e) });
+    return null;
+  }
+}
+
+function notaDeDisparo(disparo: DisparoRecente | null, jaTratado: boolean): string {
+  if (!disparo) return '';
+
+  const horas = Math.round((Date.now() - Date.parse(disparo.quando)) / 3600000);
+  const quando = horas < 1
+    ? 'há menos de uma hora'
+    : (horas < 24 ? `há ${horas} horas` : `há ${Math.round(horas / 24)} dia(s)`);
+
+  // Corta o texto: criativo de campanha é longo e a promessa está no começo.
+  const texto = disparo.texto.length > 600 ? `${disparo.texto.slice(0, 600)}…` : disparo.texto;
+
+  // Já conversaram sobre isso: vira contexto. Sem este degrau o modelo
+  // reapresenta a campanha na mensagem 10, como se o cliente tivesse acabado
+  // de receber.
+  if (jaTratado) {
+    return `(sistema: a loja mandou um disparo pra este cliente ${quando}, e a conversa já tratou do assunto. Não reapresente a campanha do zero.)`;
+  }
+
+  return `(sistema: a ÚLTIMA coisa que a loja ENVIOU pra este cliente foi um DISPARO, ${quando}, com este texto:\n\n"${texto}"\n\n`
+    + `A mensagem do cliente é RESPOSTA A ISSO. Se ela for curta ou vaga — "quero saber mais", "tenho interesse", "oi", "me conta", "como funciona" — ela se refere ao disparo acima, e a nada mais.\n`
+    + `NÃO pergunte "sobre o quê exatamente?" e NÃO ofereça uma lista de opções: responda DIRETO sobre o que o disparo prometeu. Perguntar faz o cliente achar que a loja não sabe o que mandou — e aí ele para de responder.)`;
 }
 
 function buildSystemPrompt(settings: Record<string, unknown>, faqs: Faq[], customerName: string | null, log: Logger, canal = 'whatsapp', falouDePagamento = true, primeiroContato = false, evento: EventoLoja | null = null): string {
@@ -3791,6 +3982,11 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   // processado por outra invocação.
   const origemAnuncio = await buscarOrigemAnuncio(supabase, conversationId, log);
 
+  // Último disparo recebido por este cliente. Lido aqui e não no histórico
+  // porque ele pode ter saído da janela de 20 mensagens — foi o que aconteceu
+  // no teste de 22/11.
+  const ultimoDisparo = await buscarUltimoDisparo(supabase, conversationId, log);
+
   // Provedor deste tenant: coluna (migration 032) > env var > anthropic.
   // Declarado aqui (antes do prompt) porque o prefixo de regras depende dele.
   const provider  = String(settings?.llm_provider ?? LLM_PROVIDER_DEFAULT).toLowerCase();
@@ -3944,10 +4140,20 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
     || botJaCitouOEvento(orderedMessages, eventoVigente, String(settings?.company_name ?? ''));
   const notaAnuncio = notaDeAnuncio(origemAnuncio, eventoVigente, aberturaJaPassou);
 
+  // O disparo já foi tratado nesta conversa? Conta as respostas do bot DEPOIS
+  // dele. Uma é a desta rodada ainda não existir; a partir de duas, o assunto
+  // já rolou e a instrução forte vira contexto.
+  const disparoEm = ultimoDisparo ? Date.parse(ultimoDisparo.quando) : 0;
+  const respostasAposDisparo = ultimoDisparo
+    ? orderedMessages.filter((m) => m.role === 'bot' && Date.parse(String(m.created_at)) > disparoEm).length
+    : 0;
+  const notaDisparo = notaDeDisparo(ultimoDisparo, respostasAposDisparo >= 2);
+
   history.push({
     role: 'user',
     content: notaDeHorario((settings ?? {}) as Record<string, unknown>, eventoHoje)
-      + (notaAnuncio ? `\n\n${notaAnuncio}` : ''),
+      + (notaAnuncio ? `\n\n${notaAnuncio}` : '')
+      + (notaDisparo ? `\n\n${notaDisparo}` : ''),
   });
 
   // ── 7. Loop de chamadas ao Claude ─────────────────────────────────────────
