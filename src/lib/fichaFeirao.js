@@ -47,11 +47,6 @@ const esc = (s) => String(s ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;');
 
-const primeirasImagens = (car, quantas = 2) => {
-  const imgs = Array.isArray(car?.images) ? car.images : [];
-  return imgs.map((i) => (typeof i === 'string' ? i : i?.url)).filter(Boolean).slice(0, quantas);
-};
-
 const soDigitos = (v) => String(v ?? '').replace(/\D/g, '');
 
 // Número pro wa.me: precisa de DDI. Telefone brasileiro guardado sem o 55
@@ -94,7 +89,6 @@ async function qrDoCarro(car, telefone) {
 }
 
 function fichaDeUmCarro(car, loja, qr) {
-  const fotos = primeirasImagens(car, 2);
   const titulo = tituloDoCarro(car).toUpperCase();
   const versao = String(car.version ?? '').trim();
 
@@ -130,11 +124,6 @@ function fichaDeUmCarro(car, loja, qr) {
     </div>
     ${!loja.logo && loja.nome ? `<span class="loja-texto">${esc(loja.nome)}</span>` : ''}
   </header>
-
-  ${fotos.length ? `
-  <div class="fotos ${fotos.length > 1 ? 'duas' : 'uma'}">
-    ${fotos.map((u, i) => `<img src="${esc(u)}" alt="" class="${i === 0 ? 'principal' : 'secundaria'}">`).join('')}
-  </div>` : ''}
 
   <div class="preco">
     <span class="rotulo">Valor</span>
@@ -193,88 +182,95 @@ export const CSS_FICHA = `
      mexer quando a proxima loja tiver outra cor. */
   :root { --marca: #f4661b; --tinta: #08080a; }
 
-  @page { size: A4 portrait; margin: 12mm; }
+  /* SEM ISTO O FUNDO ESCURO NAO IMPRIME.
+     O navegador descarta cor de FUNDO na impressao por padrao (economia de
+     tinta) — cor de TEXTO e de BORDA ele mantem. Foi o que aconteceu na
+     primeira prova impressa: o laranja do preco saiu, mas a faixa preta do
+     topo virou branca, e o logo (que e claro) sumiu dentro dela. Parecia logo
+     "muito claro"; era fundo que nao imprimiu. */
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  /* DUAS FICHAS POR FOLHA, cada uma em pe.
+     A folha vai na janela do carro: meia folha basta e rende o dobro. Cada
+     ficha fica 138x194mm — proporcao de A5 em pe — e duas ficam lado a lado
+     numa A4 DEITADA. */
+  @page { size: A4 landscape; margin: 8mm; }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color: var(--tinta); }
+  body {
+    margin: 0; font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
+    color: var(--tinta);
+    display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 5mm;
+  }
+
+  .ficha {
+    width: 138mm; height: 194mm;
+    display: flex; flex-direction: column;
+    page-break-inside: avoid; break-inside: avoid;
+  }
+  /* Quebra a cada DUAS, nao a cada uma: e isso que poe duas por folha. */
+  .ficha:nth-child(2n) { page-break-after: always; break-after: page; }
+  .ficha:last-child    { page-break-after: auto;   break-after: auto; }
 
   /* Faixa da marca.
      O logo da DSC e texto CLARO com o carro laranja — no papel branco o nome
      sumiria e sobraria so o carro. Entao ele vive numa faixa escura, que e
-     como o site dele aparece.
-     Faixa, e nao pagina inteira escura: 38 folhas de fundo preto gastam uma
-     fortuna de toner e saem borradas na maioria das impressoras. Marca pelo
-     destaque, nao por inundar a folha de tinta. */
+     como o site dele aparece. Faixa, e nao folha inteira escura: fundo preto
+     em pagina cheia gasta uma fortuna de toner e sai borrado. */
   .marca {
-    background: var(--tinta); border-radius: 2mm;
-    padding: 4mm 5mm; margin-bottom: 6mm;
-    display: flex; align-items: center; justify-content: space-between; gap: 6mm;
+    background: var(--tinta); border-radius: 1.5mm;
+    padding: 3mm 4mm; margin-bottom: 4mm;
+    display: flex; align-items: center; justify-content: space-between; gap: 3mm;
   }
-  .marca .logo { height: 11mm; max-width: 62mm; object-fit: contain; }
+  .marca .logo { height: 9mm; max-width: 52mm; object-fit: contain; }
   .marca-evento {
-    color: var(--marca); font-size: 9.5pt; font-weight: 800;
-    letter-spacing: 1.6px; text-transform: uppercase; text-align: right;
+    color: var(--marca); font-size: 7.5pt; font-weight: 800;
+    letter-spacing: 1.2px; text-transform: uppercase; text-align: right; line-height: 1.2;
   }
-  .loja-texto { font-size: 11pt; color: #666; white-space: nowrap; }
+  .loja-texto { font-size: 10pt; color: #666; white-space: nowrap; }
 
-  /* Uma ficha por folha. O "avoid" no conteudo impede que o navegador parta a
-     ficha ao meio quando a foto e alta. */
-  .ficha {
-    page-break-after: always; break-after: page;
-    page-break-inside: avoid; break-inside: avoid;
-    height: 273mm; display: flex; flex-direction: column;
-  }
-  .ficha:last-child { page-break-after: auto; break-after: auto; }
-
-  .topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 10mm; }
-  .identidade h1 { font-size: 27pt; line-height: 1.05; margin: 0; letter-spacing: -0.5px; }
-  .versao { font-size: 12pt; color: #555; margin: 3px 0 0; text-transform: uppercase; letter-spacing: 0.5px; }
-
-  /* A foto encolheu de 108mm pra 72mm. Ela mostra o que a pessoa ja esta
-     vendo — o espaco rende mais nas condicoes e no QR, que sao o que ela NAO
-     consegue descobrir olhando o carro. */
-  .fotos { display: flex; gap: 4mm; margin: 6mm 0 0; }
-  .fotos img { width: 100%; height: 72mm; object-fit: cover; border-radius: 3mm; background: #eee; }
-  .fotos.duas .principal  { flex: 2; }
-  .fotos.duas .secundaria { flex: 1; }
+  .topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 5mm; }
+  .identidade h1 { font-size: 19pt; line-height: 1.08; margin: 0; letter-spacing: -0.4px; }
+  .versao { font-size: 10pt; color: #555; margin: 2px 0 0; text-transform: uppercase; letter-spacing: 0.4px; }
 
   /* O preco e o maior elemento da folha de proposito: e o que a pessoa procura
-     primeiro, e normalmente de dois metros de distancia. */
+     primeiro, e normalmente de dois metros de distancia. Na cor da marca, que
+     e o que carrega a identidade quando o fundo e branco. */
   .preco {
-    margin-top: auto; padding: 5mm 0 3mm; border-top: 3pt solid var(--marca);
+    margin-top: auto; padding: 4mm 0 2.5mm; border-top: 2.5pt solid var(--marca);
     display: flex; align-items: baseline; justify-content: space-between;
   }
-  .preco .rotulo { font-size: 11pt; text-transform: uppercase; letter-spacing: 2px; color: #666; }
-  /* Preco na cor da marca: e o maior elemento da folha e o que a pessoa
-     procura primeiro, entao e ele que carrega a identidade — nao o fundo. */
-  .preco strong { font-size: 42pt; line-height: 1; letter-spacing: -1.5px; color: var(--marca); }
+  .preco .rotulo { font-size: 9pt; text-transform: uppercase; letter-spacing: 1.6px; color: #666; }
+  .preco strong { font-size: 34pt; line-height: 1; letter-spacing: -1.2px; color: var(--marca); }
 
-  .specs { display: flex; gap: 2.5mm; margin-top: 4mm; }
-  .spec { flex: 1; border: 1pt solid #ddd; border-radius: 2mm; padding: 2.5mm 2mm 3mm; text-align: center; }
-  .spec span { display: block; font-size: 8pt; text-transform: uppercase; letter-spacing: 1px; color: #777; }
-  .spec strong { display: block; font-size: 12.5pt; margin-top: 1.5mm; }
+  /* Especificacoes em grade de 3: com 5 itens numa folha de 138mm, uma linha
+     so apertaria cada caixa a ponto de o valor quebrar em duas linhas. */
+  .specs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2mm; margin-top: 3mm; }
+  .spec { border: 0.75pt solid #ddd; border-radius: 1.5mm; padding: 2mm 1.5mm 2.5mm; text-align: center; }
+  .spec span { display: block; font-size: 6.5pt; text-transform: uppercase; letter-spacing: 0.8px; color: #777; }
+  .spec strong { display: block; font-size: 10.5pt; margin-top: 1mm; }
 
   .condicoes {
-    margin-top: 4mm; padding: 3.5mm 4mm; border-radius: 2mm;
+    margin-top: 3mm; padding: 3mm 3.5mm; border-radius: 1.5mm;
     background: var(--tinta); color: #f2f2f4;
   }
   .condicoes .selo {
-    display: inline-block; font-size: 8pt; font-weight: 800; letter-spacing: 1.5px;
-    text-transform: uppercase; color: var(--marca); margin-bottom: 1.5mm;
+    display: inline-block; font-size: 7pt; font-weight: 800; letter-spacing: 1.2px;
+    text-transform: uppercase; color: var(--marca); margin-bottom: 1mm;
   }
-  .condicoes p { margin: 0; font-size: 10.5pt; line-height: 1.45; }
+  .condicoes p { margin: 0; font-size: 8.5pt; line-height: 1.4; }
 
   .chamada {
-    margin-top: 4mm; display: flex; align-items: center; gap: 4mm;
-    border: 1.5pt solid var(--marca); border-radius: 2mm; padding: 3mm 4mm;
+    margin-top: 3mm; display: flex; align-items: center; gap: 3mm;
+    border: 1.2pt solid var(--marca); border-radius: 1.5mm; padding: 2.5mm 3mm;
   }
-  .chamada .qr { width: 26mm; height: 26mm; flex-shrink: 0; }
-  .chamada-texto strong { display: block; font-size: 12pt; color: var(--marca); }
-  .chamada-texto p { margin: 1mm 0 0; font-size: 9.5pt; color: #555; line-height: 1.4; }
-  .chamada-texto .fone { font-size: 13pt; font-weight: 700; color: var(--tinta); margin-top: 1.5mm; letter-spacing: 0.3px; }
+  .chamada .qr { width: 22mm; height: 22mm; flex-shrink: 0; }
+  .chamada-texto strong { display: block; font-size: 10pt; color: var(--marca); }
+  .chamada-texto p { margin: 0.8mm 0 0; font-size: 7.5pt; color: #555; line-height: 1.35; }
+  .chamada-texto .fone { font-size: 11.5pt; font-weight: 700; color: var(--tinta); margin-top: 1mm; letter-spacing: 0.2px; }
 
   .rodape {
-    margin-top: 4mm; padding-top: 2.5mm; border-top: 0.75pt solid #ddd;
-    display: flex; justify-content: space-between; font-size: 9.5pt; color: #666;
+    margin-top: 3mm; padding-top: 2mm; border-top: 0.75pt solid #ddd;
+    display: flex; justify-content: space-between; font-size: 8pt; color: #666;
   }
 `;
 
