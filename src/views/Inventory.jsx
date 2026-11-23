@@ -1359,6 +1359,60 @@ const Inventory = () => {
         }
     };
 
+    // Impressão das fichas, num lugar só.
+    //
+    // Serve o botão do topo (todos os listados) e o de cada carro (só ele). É
+    // a mesma função de propósito: com duas cópias, um ajuste de layout valeria
+    // pra um caminho e não pro outro, e ninguém notaria até sair folha
+    // diferente no mesmo pátio.
+    const imprimirFichasDe = async (lista, { rotulo } = {}) => {
+        if (!lista?.length) return;
+
+        // Evento vigente: a faixa de condições só existe quando a loja tem
+        // feirão no ar. Falhar aqui NÃO cancela a impressão — a ficha sem a
+        // faixa ainda serve, e a loja pode estar imprimindo na véspera.
+        let evento = null;
+        try {
+            const { data } = await supabase
+                .from('eventos')
+                .select('nome, condicoes')
+                .eq('ativo', true)
+                .gte('data_fim', new Date().toISOString().slice(0, 10))
+                .order('data_inicio', { ascending: true })
+                .limit(1)
+                .maybeSingle();
+            evento = data ?? null;
+        } catch { /* segue sem a faixa */ }
+
+        // As condições vêm uma por linha no cadastro. Na faixa viram uma linha
+        // só: quebra de linha ali empurraria a chamada do QR pra fora da folha.
+        const condicoes = String(evento?.condicoes ?? '')
+            .split('\n').map((s) => s.trim()).filter(Boolean).join(' · ');
+
+        const html = await montarFichas(lista, {
+            nome:     companySettings?.company_name,
+            logo:     companySettings?.logo_url,
+            site:     companySettings?.site_url,
+            moeda:    companySettings?.moeda,
+            locale:   companySettings?.locale,
+            telefone: companySettings?.whatsapp_number,
+            evento:   evento?.nome ?? '',
+            condicoes,
+        });
+
+        const ok = imprimirFichas(html, {
+            titulo: rotulo ?? `Fichas — ${companySettings?.company_name ?? 'estoque'}`,
+        });
+        if (ok) {
+            addToast(
+                lista.length === 1
+                    ? 'Ficha aberta pra impressão.'
+                    : `${lista.length} fichas abertas pra impressão.`,
+                'success',
+            );
+        }
+    };
+
     const handleAddCar = async (carData) => { const car = await addInventoryCar(carData); await checkMatches(car); };
     const handleEditCar = async (carData) => { const car = await updateInventoryCar(editCar.id, carData); await checkMatches(car); };
     const handleSell = async (carId, price, date, seller, comprador, veiculo, leadIdComprador) => {
@@ -1419,47 +1473,7 @@ const Inventory = () => {
                         title={filtered.length
                             ? `Imprime uma folha por veículo (${filtered.length}) pra colar no vidro`
                             : 'Nenhum veículo na lista'}
-                        onClick={async () => {
-                            // Evento vigente: a faixa de condições só existe
-                            // quando a loja tem feirão no ar. Falhar aqui NÃO
-                            // cancela a impressão — a ficha sem a faixa ainda
-                            // serve, e a loja pode estar imprimindo na véspera.
-                            let evento = null;
-                            try {
-                                const { data } = await supabase
-                                    .from('eventos')
-                                    .select('nome, condicoes')
-                                    .eq('ativo', true)
-                                    .gte('data_fim', new Date().toISOString().slice(0, 10))
-                                    .order('data_inicio', { ascending: true })
-                                    .limit(1)
-                                    .maybeSingle();
-                                evento = data ?? null;
-                            } catch { /* segue sem a faixa */ }
-
-                            // As condições vêm com uma por linha no cadastro.
-                            // Na faixa viram uma linha só: quebra de linha ali
-                            // empurraria a chamada do QR pra fora da folha.
-                            const condicoes = String(evento?.condicoes ?? '')
-                                .split('\n').map((s) => s.trim()).filter(Boolean).join(' · ');
-
-                            const html = await montarFichas(filtered, {
-                                nome:     companySettings?.company_name,
-                                logo:     companySettings?.logo_url,
-                                site:     companySettings?.site_url,
-                                moeda:    companySettings?.moeda,
-                                locale:   companySettings?.locale,
-                                telefone: companySettings?.whatsapp_number,
-                                evento:   evento?.nome ?? '',
-                                condicoes,
-                            });
-                            const ok = imprimirFichas(html, {
-                                titulo: `Fichas — ${companySettings?.company_name ?? 'estoque'}`,
-                            });
-                            if (ok) {
-                                addToast(`${filtered.length} ficha${filtered.length !== 1 ? 's' : ''} aberta${filtered.length !== 1 ? 's' : ''} pra impressão.`, 'success');
-                            }
-                        }}
+                        onClick={() => imprimirFichasDe(filtered)}
                         style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <Printer size={17} /> Imprimir fichas
                     </button>
@@ -1550,6 +1564,21 @@ const Inventory = () => {
                                     <ShoppingCart size={16} /> Vender
                                 </button>
                                 <button className="inv-action-btn" onClick={() => setViewCar(car)} title="Ver detalhes"><Eye size={16} /></button>
+                                {/* Ficha SÓ deste carro. Existe porque o caso
+                                    comum não é imprimir o pátio inteiro: é o
+                                    carro que acabou de entrar, ou a folha que
+                                    rasgou no sábado. Obrigar a reimprimir 38
+                                    pra repor uma é o tipo de atrito que faz a
+                                    loja desistir e escrever à mão. */}
+                                <button
+                                    className="inv-action-btn"
+                                    onClick={() => imprimirFichasDe([car], {
+                                        rotulo: `Ficha — ${[car.brand, car.model].filter(Boolean).join(' ')}`,
+                                    })}
+                                    title="Imprimir a ficha deste veículo"
+                                >
+                                    <Printer size={16} />
+                                </button>
                                 <button className="inv-action-btn" onClick={() => setEditCar(car)} title="Editar"><Pencil size={16} /></button>
                                 <button
                                     className="inv-action-btn"
