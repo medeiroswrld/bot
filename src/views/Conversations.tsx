@@ -503,6 +503,16 @@ export default function Conversations() {
   // e precisa ver uma de cada vez — misturar as duas na mesma lista é o que
   // torna a caixa confusa quando o segundo número entra.
   const [filtroNumero, setFiltroNumero]   = useState<string>('todos');
+  // Aba "Disparos": separa quem chegou por campanha de quem veio por conta
+  // própria. Mesma ideia das abas da Agenda — "Todas" é SUPERSET e continua
+  // mostrando os disparos, a aba só filtra. Assim ninguém perde conversa por
+  // não saber que a aba existe.
+  //
+  // Serve pra análise: resposta a disparo é um público com comportamento
+  // diferente (chegou porque a loja chamou, não porque procurou), e misturado
+  // com o orgânico não dá pra medir se a campanha converteu.
+  const [soDisparos, setSoDisparos]       = useState(false);
+  const [convsDeDisparo, setConvsDeDisparo] = useState<Set<string>>(new Set());
   const [searchRaw, setSearchRaw]         = useState('');
   const [search, setSearch]               = useState('');
   const [alertConvIds, setAlertConvIds]   = useState<Set<string>>(new Set());
@@ -631,6 +641,33 @@ export default function Conversations() {
     })();
     return () => { cancelado = true; };
   }, [user?.id]);
+
+  // Quais conversas têm mensagem de disparo.
+  //
+  // Busca SEM filtro de loja de propósito: a RLS de `messages` já é
+  // `exists(conversations c where c.id = conversation_id and c.user_id =
+  // auth.uid())`, então o banco devolve só as desta loja. A alternativa era
+  // mandar os ids das conversas no `in(...)` — com mil conversas, uma URL
+  // gigante que o PostgREST recusa.
+  //
+  // Reexecuta quando a lista de conversas MUDA DE TAMANHO: disparo novo cria
+  // conversa, então é esse o sinal barato de "pode ter disparo novo". Sem isso
+  // a aba só atualizaria recarregando a página.
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelado = false;
+    (async () => {
+      const { data, error } = await supabaseTyped
+        .from('messages')
+        .select('conversation_id')
+        .not('campaign_id', 'is', null);
+      if (cancelado) return;
+      if (error) { console.error('[Conversations] disparos por conversa:', error.message); return; }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setConvsDeDisparo(new Set(((data ?? []) as any[]).map((m) => String(m.conversation_id))));
+    })();
+    return () => { cancelado = true; };
+  }, [user?.id, conversations.length]);
 
   const deleteConversation = async () => {
     const id = confirmDeleteId;
@@ -1299,7 +1336,13 @@ export default function Conversations() {
 
   // ── filtered list ─────────────────────────────────────────────────────────
 
+  // Quantas conversas vieram de disparo, dentro do que os OUTROS filtros já
+  // deixaram passar — senão a aba anunciaria 174 e mostraria 3 com o filtro de
+  // canal ligado.
+  const totalDisparos = conversations.filter((c) => convsDeDisparo.has(c.id)).length;
+
   const filtered = conversations.filter((c) => {
+    if (soDisparos && !convsDeDisparo.has(c.id)) return false;
     if (filtroCanal !== 'todos') {
       // Conversa antiga pode nao ter canal gravado; nesses casos e WhatsApp.
       const canalDaConversa = String((c as { channel?: string }).channel ?? 'whatsapp');
@@ -1402,6 +1445,34 @@ export default function Conversations() {
               style={{ width: '100%', boxSizing: 'border-box', paddingLeft: 28, paddingRight: 8, paddingTop: 6, paddingBottom: 6, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-card)', fontSize: '0.8rem', color: 'var(--text-primary)' }}
             />
           </div>
+          {/* Origem: todas x só quem veio de disparo.
+              Vem ANTES do filtro de situação porque é uma pergunta anterior
+              ("de que público eu estou falando?"), e só aparece quando existe
+              disparo — com zero, seria um botão que não muda nada. */}
+          {totalDisparos > 0 && (
+            <div style={{
+              display: 'flex', gap: 2, padding: 2, borderRadius: 8, marginBottom: 7,
+              background: 'var(--input-bg)', border: '1px solid var(--border)',
+            }}>
+              {[
+                { v: false, label: `Todas (${conversations.length})` },
+                { v: true,  label: `Disparos (${totalDisparos})` },
+              ].map((opt) => (
+                <button key={String(opt.v)} type="button" onClick={() => setSoDisparos(opt.v)}
+                  style={{
+                    flex: 1, padding: '5px 2px', fontSize: '0.7rem', borderRadius: 6,
+                    cursor: 'pointer', border: 'none', whiteSpace: 'nowrap',
+                    background: soDisparos === opt.v ? 'var(--bg-card)' : 'transparent',
+                    color: soDisparos === opt.v ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    fontWeight: soDisparos === opt.v ? 700 : 500,
+                    boxShadow: soDisparos === opt.v ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                  }}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* Situação do atendimento. Segmentado, sem borda por item: cinco
               caixinhas contornadas lado a lado viravam ruído visual num
               espaço de 320px. */}
