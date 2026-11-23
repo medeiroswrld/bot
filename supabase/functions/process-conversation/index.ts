@@ -2418,7 +2418,8 @@ function blocoDoEvento(evento: EventoLoja | null, hojeIso: string): string {
     + `- Se o cliente perguntar do ${nome}, responda com os dias e o horário acima. Eles são a verdade; não invente outro dia nem outro horário.\n`
     + `- **O OBJETIVO de toda conversa nestes dias é sair com um DIA marcado.** Enquanto não houver dia marcado, a conversa não acabou — por mais bem atendido que o cliente tenha sido.\n`
     + `- **GATILHOS que obrigam você a oferecer o dia**, assim que acontecer qualquer um: o cliente citar um modelo, dar uma faixa de preço, pedir a lista do estoque, perguntar de parcela, financiamento ou troca. Não espere ele pedir pra visitar — quem pede sozinho é a minoria.\n`
-    + `- Ofereça no FIM da mesma mensagem em que você responde o que ele pediu, em uma frase. Exemplo do tamanho certo, depois de mostrar os carros da faixa dele: "E esses dias são do nosso ${nome}, com primeira parcela em até 90 dias. Qual dia fica melhor pra você?"\n`
+    + `- Ofereça no FIM da mesma mensagem em que você responde o que ele pediu, em uma frase. Exemplo do tamanho certo, depois de mostrar os carros da faixa dele: "E esses dias são do nosso ${nome}, com primeira parcela em até 90 dias. Qual dia fica melhor: ${dias.join(', ')}?"\n`
+    + `- **Ofereça TODOS os dias que ainda restam, sempre.** Nunca corte a lista em dois ("quinta ou sexta?"): o dia que você cortou pode ser exatamente o único que cabia na agenda dele — e fim de semana é quando mais gente consegue vir. Os dias que restam estão listados acima; diga todos.\n`
     + `- Se ele não responder sobre o dia, NÃO repita a cada mensagem. Volte a oferecer quando algo NOVO acontecer: ele escolher um carro, pedir simulação, falar de troca, ou voltar depois de um tempo.\n`
     + `- **Conversa longa sem nenhuma menção ao ${nome} é ERRO.** Caso real de 23/11: o cliente deu faixa de preço, pediu a lista do estoque e citou três modelos em 15 minutos, e o evento não foi citado uma única vez. Ele veio de um convite do ${nome} e saiu sem data marcada.\n`
     + `- **NOS DIAS DO ${nome.toUpperCase()}, NÃO PERGUNTE HORÁRIO.** Não chame ver_horarios_disponiveis e não ofereça lista de horários. Pergunte só QUAL DIA e chame **agendar_visita** com a data e o nome, SEM o campo horario. Depois confirme falando apenas do dia ("te esperamos no dia 28!").\n`
@@ -2752,6 +2753,17 @@ function notaDiasDoEvento(evento: EventoLoja | null, hojeIso: string): string {
   if (!hojeEh && diasAte > 0) {
     linhas.push(`- O primeiro dia do ${nome} é ${rotulo(evento.data_inicio)} — daqui a ${diasAte} dia(s).`);
   }
+
+  // A lista que ele deve OFERECER, pronta.
+  //
+  // 23/11: com os quatro dias listados logo acima no prompt, o bot perguntou
+  // "quinta ou sexta?" e cortou sábado e domingo — o fim de semana inteiro, que
+  // é quando mais gente consegue ir. Ter a lista não bastou; precisa estar dito
+  // que a pergunta usa ELA, inteira.
+  linhas.push(
+    `- Ao perguntar que dia ele vem, ofereça TODOS estes, sem cortar nenhum: ${lista.join(', ')}.`
+    + ` Oferecer só dois tira do cliente justamente o dia que caberia na agenda dele.`,
+  );
   if (!amanhaEh) {
     linhas.push(
       `- Se o cliente falar "amanhã", ele quer dizer ${rotulo(amanhaIso)}, que NÃO é dia do ${nome}:`
