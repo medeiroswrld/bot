@@ -9,6 +9,7 @@ import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import { montarContrato, dadosDoContrato, imprimirContrato, formatarCPF, cpfValido } from '../lib/contrato.js';
 import { useModelosContrato, SeletorModelo } from '../lib/useModelosContrato.jsx';
 import { estoqueEmTexto, copiarTexto } from '../lib/estoqueTexto.js';
+import { montarFichas, imprimirFichas } from '../lib/fichaFeirao.js';
 import { useDinheiro } from '../lib/useDinheiro.js';
 import { supabase } from '../lib/supabase.js';
 import { miniatura, cartao, grande } from '../lib/imagemUrl.js';
@@ -1409,6 +1410,32 @@ const Inventory = () => {
                         }}
                         style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <Copy size={17} /> Copiar estoque
+                    </button>
+                    {/* Imprime o que ESTÁ NA TELA, igual ao copiar: filtrou por
+                        faixa de preço, imprime aquela faixa. No feirão isso
+                        importa — ninguém quer 37 folhas quando vai levar 10
+                        carros pro pátio da frente. */}
+                    <button className="btn-secondary" disabled={!filtered.length}
+                        title={filtered.length
+                            ? `Imprime uma folha por veículo (${filtered.length}) pra colar no vidro`
+                            : 'Nenhum veículo na lista'}
+                        onClick={() => {
+                            const html = montarFichas(filtered, {
+                                nome:   companySettings?.company_name,
+                                logo:   companySettings?.logo_url,
+                                site:   companySettings?.site_url,
+                                moeda:  companySettings?.moeda,
+                                locale: companySettings?.locale,
+                            });
+                            const ok = imprimirFichas(html, {
+                                titulo: `Fichas — ${companySettings?.company_name ?? 'estoque'}`,
+                            });
+                            if (ok) {
+                                addToast(`${filtered.length} ficha${filtered.length !== 1 ? 's' : ''} aberta${filtered.length !== 1 ? 's' : ''} pra impressão.`, 'success');
+                            }
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <Printer size={17} /> Imprimir fichas
                     </button>
                     <button className="btn-secondary" onClick={() => setShowConsulta(true)} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <Search size={17} /> Consultar placa
