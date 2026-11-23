@@ -117,12 +117,18 @@ function fichaDeUmCarro(car, loja, qr) {
 
   return `
 <section class="ficha">
+  ${loja.logo ? `
+  <div class="marca">
+    <img class="logo" src="${esc(loja.logo)}" alt="">
+    ${loja.evento ? `<span class="marca-evento">${esc(loja.evento)}</span>` : ''}
+  </div>` : ''}
+
   <header class="topo">
     <div class="identidade">
       <h1>${esc(titulo)}</h1>
       ${versao ? `<p class="versao">${esc(versao)}</p>` : ''}
     </div>
-    ${loja.logo ? `<img class="logo" src="${esc(loja.logo)}" alt="">` : ''}
+    ${!loja.logo && loja.nome ? `<span class="loja-texto">${esc(loja.nome)}</span>` : ''}
   </header>
 
   ${fotos.length ? `
@@ -143,7 +149,10 @@ function fichaDeUmCarro(car, loja, qr) {
 
   ${loja.condicoes ? `
   <div class="condicoes">
-    ${loja.evento ? `<span class="selo">${esc(loja.evento)}</span>` : ''}
+    ${/* O nome do evento já aparece na faixa da marca quando há logo. Repetir
+          duas vezes na mesma folha é ruído — aqui ele só entra como reserva,
+          pra loja sem logo cadastrada não perder a referência do evento. */''}
+    ${(loja.evento && !loja.logo) ? `<span class="selo">${esc(loja.evento)}</span>` : ''}
     <p>${esc(loja.condicoes)}</p>
   </div>` : ''}
 
@@ -179,9 +188,33 @@ export async function montarFichas(carros, loja = {}) {
 
 /** O CSS da folha, exportado pra pré-visualização poder usar o mesmo. */
 export const CSS_FICHA = `
+  /* Identidade da loja.
+     Trocar estas duas variaveis muda a ficha inteira — e e o unico lugar a
+     mexer quando a proxima loja tiver outra cor. */
+  :root { --marca: #f4661b; --tinta: #08080a; }
+
   @page { size: A4 portrait; margin: 12mm; }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color: #111; }
+  body { margin: 0; font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color: var(--tinta); }
+
+  /* Faixa da marca.
+     O logo da DSC e texto CLARO com o carro laranja — no papel branco o nome
+     sumiria e sobraria so o carro. Entao ele vive numa faixa escura, que e
+     como o site dele aparece.
+     Faixa, e nao pagina inteira escura: 38 folhas de fundo preto gastam uma
+     fortuna de toner e saem borradas na maioria das impressoras. Marca pelo
+     destaque, nao por inundar a folha de tinta. */
+  .marca {
+    background: var(--tinta); border-radius: 2mm;
+    padding: 4mm 5mm; margin-bottom: 6mm;
+    display: flex; align-items: center; justify-content: space-between; gap: 6mm;
+  }
+  .marca .logo { height: 11mm; max-width: 62mm; object-fit: contain; }
+  .marca-evento {
+    color: var(--marca); font-size: 9.5pt; font-weight: 800;
+    letter-spacing: 1.6px; text-transform: uppercase; text-align: right;
+  }
+  .loja-texto { font-size: 11pt; color: #666; white-space: nowrap; }
 
   /* Uma ficha por folha. O "avoid" no conteudo impede que o navegador parta a
      ficha ao meio quando a foto e alta. */
@@ -195,7 +228,6 @@ export const CSS_FICHA = `
   .topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 10mm; }
   .identidade h1 { font-size: 27pt; line-height: 1.05; margin: 0; letter-spacing: -0.5px; }
   .versao { font-size: 12pt; color: #555; margin: 3px 0 0; text-transform: uppercase; letter-spacing: 0.5px; }
-  .logo { max-height: 20mm; max-width: 42mm; object-fit: contain; }
 
   /* A foto encolheu de 108mm pra 72mm. Ela mostra o que a pessoa ja esta
      vendo — o espaco rende mais nas condicoes e no QR, que sao o que ela NAO
@@ -208,11 +240,13 @@ export const CSS_FICHA = `
   /* O preco e o maior elemento da folha de proposito: e o que a pessoa procura
      primeiro, e normalmente de dois metros de distancia. */
   .preco {
-    margin-top: auto; padding: 5mm 0 3mm; border-top: 2.5pt solid #111;
+    margin-top: auto; padding: 5mm 0 3mm; border-top: 3pt solid var(--marca);
     display: flex; align-items: baseline; justify-content: space-between;
   }
   .preco .rotulo { font-size: 11pt; text-transform: uppercase; letter-spacing: 2px; color: #666; }
-  .preco strong { font-size: 42pt; line-height: 1; letter-spacing: -1.5px; }
+  /* Preco na cor da marca: e o maior elemento da folha e o que a pessoa
+     procura primeiro, entao e ele que carrega a identidade — nao o fundo. */
+  .preco strong { font-size: 42pt; line-height: 1; letter-spacing: -1.5px; color: var(--marca); }
 
   .specs { display: flex; gap: 2.5mm; margin-top: 4mm; }
   .spec { flex: 1; border: 1pt solid #ddd; border-radius: 2mm; padding: 2.5mm 2mm 3mm; text-align: center; }
@@ -221,23 +255,22 @@ export const CSS_FICHA = `
 
   .condicoes {
     margin-top: 4mm; padding: 3.5mm 4mm; border-radius: 2mm;
-    background: #111; color: #fff;
+    background: var(--tinta); color: #f2f2f4;
   }
   .condicoes .selo {
-    display: inline-block; font-size: 8pt; font-weight: 700; letter-spacing: 1.5px;
-    text-transform: uppercase; border: 1pt solid rgba(255,255,255,.55);
-    border-radius: 1mm; padding: 0.8mm 2mm; margin-bottom: 2mm;
+    display: inline-block; font-size: 8pt; font-weight: 800; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--marca); margin-bottom: 1.5mm;
   }
   .condicoes p { margin: 0; font-size: 10.5pt; line-height: 1.45; }
 
   .chamada {
     margin-top: 4mm; display: flex; align-items: center; gap: 4mm;
-    border: 1pt solid #ddd; border-radius: 2mm; padding: 3mm 4mm;
+    border: 1.5pt solid var(--marca); border-radius: 2mm; padding: 3mm 4mm;
   }
   .chamada .qr { width: 26mm; height: 26mm; flex-shrink: 0; }
-  .chamada-texto strong { display: block; font-size: 12pt; }
+  .chamada-texto strong { display: block; font-size: 12pt; color: var(--marca); }
   .chamada-texto p { margin: 1mm 0 0; font-size: 9.5pt; color: #555; line-height: 1.4; }
-  .chamada-texto .fone { font-size: 13pt; font-weight: 700; color: #111; margin-top: 1.5mm; letter-spacing: 0.3px; }
+  .chamada-texto .fone { font-size: 13pt; font-weight: 700; color: var(--tinta); margin-top: 1.5mm; letter-spacing: 0.3px; }
 
   .rodape {
     margin-top: 4mm; padding-top: 2.5mm; border-top: 0.75pt solid #ddd;
