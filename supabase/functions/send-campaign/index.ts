@@ -251,6 +251,7 @@ serve(async (req) => {
           name: send.customer_name,
           texto: renderizarCorpo(campaign.template?.body_text, bodyParameters),
           campaignId: campaign_id,
+          phoneNumberId,
         });
         sentCount++;
       } catch (e) {
@@ -560,8 +561,9 @@ function renderizarCorpo(bodyText: string | null | undefined, params: { text: st
 
 async function registrarDisparoNaConversa(
   supabase: DB,
-  { userId, phone, name, texto, campaignId }: {
-    userId: string; phone: string; name?: string | null; texto: string; campaignId: string;
+  { userId, phone, name, texto, campaignId, phoneNumberId }: {
+    userId: string; phone: string; name?: string | null; texto: string;
+    campaignId: string; phoneNumberId: string;
   },
 ) {
   try {
@@ -590,21 +592,57 @@ async function registrarDisparoNaConversa(
       }
     }
 
-    const { data: conv } = convId
-      ? { data: { id: convId } }
-      : await supabase
+    // onConflict TEM que casar o índice único inteiro.
+    //
+    // O índice é `(user_id, channel, customer_phone, phone_number_id)`, quatro
+    // colunas. Com `user_id,customer_phone` o Postgres devolve 42P10 ("no
+    // unique or exclusion constraint matching the ON CONFLICT specification"),
+    // o upsert não grava nada e — como supabase-js NÃO lança, devolve
+    // `{data, error}` — o `conv?.id` saía undefined e o insert da mensagem era
+    // simplesmente pulado. Sem exceção, sem log, sem sintoma.
+    //
+    // Custo real, medido em 23/11: de 174 disparos entregues, só 10 apareceram
+    // nas Conversas — e justamente os 10 que já tinham conversa aberta, que nem
+    // passam por aqui. Os outros 164 chegaram no WhatsApp do cliente e o bot
+    // não fazia ideia do que tinha sido prometido quando ele respondesse.
+    let conv: { id: string } | null = convId ? { id: convId } : null;
+
+    if (!conv) {
+      const { data: criada, error: erroConv } = await supabase
         .from('conversations')
         .upsert(
-          { user_id: userId, customer_phone: phone, customer_name: name || null, last_message_at: agora },
-          { onConflict: 'user_id,customer_phone' },
+          {
+            user_id: userId,
+            customer_phone: phone,
+            channel: 'whatsapp',
+            phone_number_id: phoneNumberId,
+            customer_name: name || null,
+            last_message_at: agora,
+          },
+          { onConflict: 'user_id,channel,customer_phone,phone_number_id' },
         )
         .select('id')
-        .single();
+        .maybeSingle();
 
-    if (conv?.id) {
-      await supabase.from('messages').insert({
-        conversation_id: conv.id, role: 'bot', content: texto, campaign_id: campaignId,
-      });
+      // O erro do upsert era descartado. Agora é alto: foi o silêncio dele que
+      // escondeu 164 disparos fora do CRM.
+      if (erroConv) {
+        console.error('[send-campaign] upsert da conversa falhou:', erroConv.code, erroConv.message);
+        return;
+      }
+      conv = criada ?? null;
+    }
+
+    if (!conv?.id) {
+      console.error('[send-campaign] conversa nao resolvida para o disparo — mensagem NAO registrada');
+      return;
+    }
+
+    const { error: erroMsg } = await supabase.from('messages').insert({
+      conversation_id: conv.id, role: 'bot', content: texto, campaign_id: campaignId,
+    });
+    if (erroMsg) {
+      console.error('[send-campaign] insert da mensagem do disparo falhou:', erroMsg.code, erroMsg.message);
     }
   } catch (e) {
     // Registro é acessório: se falhar, o disparo já saiu e não deve ser desfeito.
