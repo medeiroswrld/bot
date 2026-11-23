@@ -2696,6 +2696,73 @@ function notaDeDisparo(disparo: DisparoRecente | null, jaTratado: boolean): stri
 // Essas mensagens JÁ estão no histórico — o modelo só não repara que acabou de
 // mandá-las. Então vão de novo aqui no fim, com a idade explícita. Mesma
 // posição que resolveu o anúncio e o disparo.
+// ─── a conta dos dias, feita pelo servidor ───────────────────────────────────
+//
+// 23/11, caso real e caro: o cliente disse "amanhã dá uma passada aí" e o bot
+// respondeu *"Amanhã é dia do MEGA BLACK DSC SEMINOVOS, então a loja atende o
+// dia inteiro, das 9h às 21h. Já anoto seu nome pra amanhã?"*. Era segunda —
+// amanhã era TERÇA, 24/11, e o feirão começa quinta, 26. O cliente ia aparecer
+// num dia sem feirão, com a loja no horário normal, achando que tinha visita
+// anotada.
+//
+// O prompt tinha os dias certos ("quinta-feira, 26/11 · sexta-feira, 27/11…") e
+// a data de hoje. Faltava a ARITMÉTICA: o modelo precisava concluir que
+// 23 + 1 = 24 não está na lista. Errou.
+//
+// Então a conta sai daqui pronta. É a mesma lição do resto da semana: o que o
+// servidor consegue decidir, o servidor decide — modelo não faz conta de
+// calendário no meio de uma venda.
+function notaDiasDoEvento(evento: EventoLoja | null, hojeIso: string): string {
+  if (!evento) return '';
+
+  const rotulo = (iso: string) => {
+    const d = new Date(`${iso}T12:00:00Z`);
+    const [, mes, dia] = iso.split('-');
+    return `${DIAS_DA_SEMANA[d.getUTCDay()]}, ${dia}/${mes}`;
+  };
+  const maisDias = (iso: string, n: number) => {
+    const d = new Date(`${iso}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const amanhaIso = maisDias(hojeIso, 1);
+  const dentro    = (iso: string) => iso >= evento.data_inicio && iso <= evento.data_fim;
+  const hojeEh    = dentro(hojeIso);
+  const amanhaEh  = dentro(amanhaIso);
+  const nome      = String(evento.nome || 'evento').trim();
+  const lista     = diasDoEvento(evento, hojeIso);
+
+  // Evento já encerrado: some a nota inteira, pra não ficar afirmando coisa
+  // sobre um feirão que acabou.
+  if (lista.length === 0 && !hojeEh) return '';
+
+  const diasAte = Math.round(
+    (Date.parse(`${evento.data_inicio}T12:00:00Z`) - Date.parse(`${hojeIso}T12:00:00Z`)) / 86400000,
+  );
+
+  const linhas = [
+    `- HOJE é ${rotulo(hojeIso)}.`,
+    `- AMANHÃ é ${rotulo(amanhaIso)}.`,
+    `- Os dias do ${nome} são: ${lista.join(' · ')}.`,
+    `- HOJE ${hojeEh ? '**É**' : '**NÃO é**'} dia do ${nome}.`,
+    `- AMANHÃ ${amanhaEh ? '**É**' : '**NÃO é**'} dia do ${nome}.`,
+  ];
+
+  if (!hojeEh && diasAte > 0) {
+    linhas.push(`- O primeiro dia do ${nome} é ${rotulo(evento.data_inicio)} — daqui a ${diasAte} dia(s).`);
+  }
+  if (!amanhaEh) {
+    linhas.push(
+      `- Se o cliente falar "amanhã", ele quer dizer ${rotulo(amanhaIso)}, que NÃO é dia do ${nome}:`
+      + ` nesse dia a loja abre no horário NORMAL dela, não das ${evento.hora_inicio} às ${evento.hora_fim}.`
+      + ` NUNCA diga que amanhã é dia do ${nome}, e NÃO agende como se fosse.`,
+    );
+  }
+
+  return `(sistema: A CONTA DOS DIAS JÁ ESTÁ FEITA. Use estas linhas como verdade e NÃO calcule data por conta própria:\n${linhas.join('\n')})`;
+}
+
 function notaDeEco(
   mensagens: { role: string; content: unknown; created_at?: unknown }[],
 ): string {
@@ -4232,9 +4299,15 @@ serve((req) => withRequest(req, 'process-conversation', async (base, requestId) 
   // decide o empate é a última lida.
   const notaEco = notaDeEco(orderedMessages);
 
+  // A conta dos dias vem logo depois da de horário: as duas respondem "que dia
+  // é hoje e o que isso significa", e separá-las deixava o modelo com a hora na
+  // mão e a data no chute.
+  const notaDias = notaDiasDoEvento(eventoVigente, hojeNaLoja);
+
   history.push({
     role: 'user',
     content: notaDeHorario((settings ?? {}) as Record<string, unknown>, eventoHoje)
+      + (notaDias ? `\n\n${notaDias}` : '')
       + (notaAnuncio ? `\n\n${notaAnuncio}` : '')
       + (notaDisparo ? `\n\n${notaDisparo}` : '')
       + (notaEco ? `\n\n${notaEco}` : ''),
