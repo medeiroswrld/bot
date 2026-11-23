@@ -1419,13 +1419,39 @@ const Inventory = () => {
                         title={filtered.length
                             ? `Imprime uma folha por veículo (${filtered.length}) pra colar no vidro`
                             : 'Nenhum veículo na lista'}
-                        onClick={() => {
-                            const html = montarFichas(filtered, {
-                                nome:   companySettings?.company_name,
-                                logo:   companySettings?.logo_url,
-                                site:   companySettings?.site_url,
-                                moeda:  companySettings?.moeda,
-                                locale: companySettings?.locale,
+                        onClick={async () => {
+                            // Evento vigente: a faixa de condições só existe
+                            // quando a loja tem feirão no ar. Falhar aqui NÃO
+                            // cancela a impressão — a ficha sem a faixa ainda
+                            // serve, e a loja pode estar imprimindo na véspera.
+                            let evento = null;
+                            try {
+                                const { data } = await supabase
+                                    .from('eventos')
+                                    .select('nome, condicoes')
+                                    .eq('ativo', true)
+                                    .gte('data_fim', new Date().toISOString().slice(0, 10))
+                                    .order('data_inicio', { ascending: true })
+                                    .limit(1)
+                                    .maybeSingle();
+                                evento = data ?? null;
+                            } catch { /* segue sem a faixa */ }
+
+                            // As condições vêm com uma por linha no cadastro.
+                            // Na faixa viram uma linha só: quebra de linha ali
+                            // empurraria a chamada do QR pra fora da folha.
+                            const condicoes = String(evento?.condicoes ?? '')
+                                .split('\n').map((s) => s.trim()).filter(Boolean).join(' · ');
+
+                            const html = await montarFichas(filtered, {
+                                nome:     companySettings?.company_name,
+                                logo:     companySettings?.logo_url,
+                                site:     companySettings?.site_url,
+                                moeda:    companySettings?.moeda,
+                                locale:   companySettings?.locale,
+                                telefone: companySettings?.whatsapp_number,
+                                evento:   evento?.nome ?? '',
+                                condicoes,
                             });
                             const ok = imprimirFichas(html, {
                                 titulo: `Fichas — ${companySettings?.company_name ?? 'estoque'}`,

@@ -5,13 +5,21 @@
 // ninguém. Lista impressa é catálogo — serve pro vendedor, não pro cliente
 // andando no pátio num sábado de feirão.
 //
-// As decisões de layout vêm daí:
-//   - o PREÇO é o maior elemento da folha. É a primeira coisa que a pessoa
-//     procura, e geralmente de dois metros de distância;
-//   - as especificações são rótulo em cima, valor embaixo, em caixa — dá pra
-//     bater o olho e achar "km" sem ler a folha inteira;
-//   - campo vazio NÃO vira linha em branco nem "—": a caixa some. Ficha com
-//     buraco parece desleixo da loja, e o cliente repara.
+// O QUE A FOLHA PRIORIZA, e por quê:
+//
+// A pessoa está OLHANDO o carro. Então a foto é o item de MENOR valor da
+// folha — ela mostra o que a pessoa já está vendo. O que ela não consegue
+// saber olhando é preço, ano, quilometragem, e COMO AGIR sem ter que caçar um
+// vendedor no meio de um pátio cheio.
+//
+// Daí a ordem: preço gigante (a pergunta nº 1, lida de longe), especificações
+// em caixas de bater o olho, as condições do evento, e um QR que abre o
+// WhatsApp JÁ falando daquele carro. Esse QR é o que transforma papel em lead:
+// quem não quer falar com vendedor, quem passou no domingo à noite com a loja
+// fechada, e quem só quer pensar em casa — todos viram conversa.
+//
+// Campo vazio NÃO vira linha em branco nem "—": a caixa some. Ficha com buraco
+// parece desleixo da loja, e o cliente repara.
 
 const semValor = (v) => v === null || v === undefined || String(v).trim() === '';
 
@@ -44,25 +52,68 @@ const primeirasImagens = (car, quantas = 2) => {
   return imgs.map((i) => (typeof i === 'string' ? i : i?.url)).filter(Boolean).slice(0, quantas);
 };
 
-function fichaDeUmCarro(car, loja) {
+const soDigitos = (v) => String(v ?? '').replace(/\D/g, '');
+
+// Número pro wa.me: precisa de DDI. Telefone brasileiro guardado sem o 55
+// (11 dígitos) ganha o prefixo; com 12 ou 13 já vem completo.
+const paraWhatsApp = (telefone) => {
+  const d = soDigitos(telefone);
+  if (d.length === 0) return '';
+  if (d.length <= 11) return `55${d}`;
+  return d;
+};
+
+const tituloDoCarro = (car) => [car.brand, car.model].filter(Boolean)
+  .map((s) => String(s).trim()).join(' ').replace(/\s+/g, ' ');
+
+/**
+ * QR do WhatsApp daquele carro, como data: URI.
+ *
+ * Import DINÂMICO: a biblioteca só entra quando alguém imprime, e não pesa o
+ * sistema no dia a dia de quem nunca usa a ficha.
+ *
+ * Devolve '' em qualquer falha — e a ficha então cai pro número escrito. QR
+ * quebrado NÃO pode impedir a loja de imprimir na véspera do feirão.
+ */
+async function qrDoCarro(car, telefone) {
+  const numero = paraWhatsApp(telefone);
+  if (!numero) return '';
+  try {
+    const { default: QRCode } = await import('qrcode');
+    const texto = `Olá! Tenho interesse no ${tituloDoCarro(car)}${car.year ? ` ${car.year}` : ''}.`;
+    const url = `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`;
+    return await QRCode.toDataURL(url, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: 420,          // folgado: QR impresso pequeno demais não lê
+      color: { dark: '#111111', light: '#FFFFFF' },
+    });
+  } catch {
+    return '';
+  }
+}
+
+function fichaDeUmCarro(car, loja, qr) {
   const fotos = primeirasImagens(car, 2);
-  const titulo = [car.brand, car.model].filter(Boolean).join(' ').toUpperCase();
+  const titulo = tituloDoCarro(car).toUpperCase();
   const versao = String(car.version ?? '').trim();
 
-  // Ano: "2019" quando ano de fabricação e modelo são iguais, "2019/2020"
-  // quando diferem. É assim que a placa e o anúncio escrevem, e o cliente
-  // confere um contra o outro.
+  // Ano: "2019" quando fabricação e modelo são iguais, "2019/2020" quando
+  // diferem. É como a placa e o anúncio escrevem, e o cliente confere um
+  // contra o outro.
   const anoFab = String(car.year ?? '').trim();
   const anoMod = String(car.model_year ?? '').trim();
   const ano = anoFab && anoMod && anoFab !== anoMod ? `${anoFab}/${anoMod}` : (anoFab || anoMod);
 
   const specs = [
-    ['Ano',          ano],
+    ['Ano',           ano],
     ['Quilometragem', km(car.mileage)],
-    ['Câmbio',       car.transmission],
-    ['Combustível',  car.fuel],
-    ['Cor',          car.color],
+    ['Câmbio',        car.transmission],
+    ['Combustível',   car.fuel],
+    ['Cor',           car.color],
   ].filter(([, v]) => !semValor(v));
+
+  const telefoneVisivel = String(loja.telefone ?? '').trim();
 
   return `
 <section class="ficha">
@@ -77,7 +128,7 @@ function fichaDeUmCarro(car, loja) {
   ${fotos.length ? `
   <div class="fotos ${fotos.length > 1 ? 'duas' : 'uma'}">
     ${fotos.map((u, i) => `<img src="${esc(u)}" alt="" class="${i === 0 ? 'principal' : 'secundaria'}">`).join('')}
-  </div>` : '<div class="sem-foto">Sem foto cadastrada</div>'}
+  </div>` : ''}
 
   <div class="preco">
     <span class="rotulo">Valor</span>
@@ -90,6 +141,22 @@ function fichaDeUmCarro(car, loja) {
       <div class="spec"><span>${esc(r)}</span><strong>${esc(v)}</strong></div>`).join('')}
   </div>` : ''}
 
+  ${loja.condicoes ? `
+  <div class="condicoes">
+    ${loja.evento ? `<span class="selo">${esc(loja.evento)}</span>` : ''}
+    <p>${esc(loja.condicoes)}</p>
+  </div>` : ''}
+
+  ${(qr || telefoneVisivel) ? `
+  <div class="chamada">
+    ${qr ? `<img class="qr" src="${qr}" alt="">` : ''}
+    <div class="chamada-texto">
+      <strong>Gostou deste?</strong>
+      <p>${qr ? 'Aponte a câmera do celular e fale com a gente agora — já vem com este veículo na mensagem.' : 'Fale com a gente pelo WhatsApp.'}</p>
+      ${telefoneVisivel ? `<p class="fone">${esc(telefoneVisivel)}</p>` : ''}
+    </div>
+  </div>` : ''}
+
   <footer class="rodape">
     <span>${esc(loja.nome ?? '')}</span>
     ${loja.site ? `<span>${esc(loja.site)}</span>` : ''}
@@ -97,10 +164,86 @@ function fichaDeUmCarro(car, loja) {
 </section>`;
 }
 
-/** Monta o HTML das fichas — uma por carro, uma por página. */
-export function montarFichas(carros, loja = {}) {
-  return (carros ?? []).map((c) => fichaDeUmCarro(c, loja)).join('\n');
+/**
+ * Monta o HTML das fichas — uma por carro, uma por página.
+ *
+ * É assíncrona por causa do QR, que é gerado por veículo (cada um leva o nome
+ * do próprio carro na mensagem). Os QRs saem TODOS de uma vez, não um a um:
+ * com 38 carros em série a espera era perceptível.
+ */
+export async function montarFichas(carros, loja = {}) {
+  const lista = carros ?? [];
+  const qrs = await Promise.all(lista.map((c) => qrDoCarro(c, loja.telefone)));
+  return lista.map((c, i) => fichaDeUmCarro(c, loja, qrs[i])).join('\n');
 }
+
+/** O CSS da folha, exportado pra pré-visualização poder usar o mesmo. */
+export const CSS_FICHA = `
+  @page { size: A4 portrait; margin: 12mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color: #111; }
+
+  /* Uma ficha por folha. O "avoid" no conteudo impede que o navegador parta a
+     ficha ao meio quando a foto e alta. */
+  .ficha {
+    page-break-after: always; break-after: page;
+    page-break-inside: avoid; break-inside: avoid;
+    height: 273mm; display: flex; flex-direction: column;
+  }
+  .ficha:last-child { page-break-after: auto; break-after: auto; }
+
+  .topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 10mm; }
+  .identidade h1 { font-size: 27pt; line-height: 1.05; margin: 0; letter-spacing: -0.5px; }
+  .versao { font-size: 12pt; color: #555; margin: 3px 0 0; text-transform: uppercase; letter-spacing: 0.5px; }
+  .logo { max-height: 20mm; max-width: 42mm; object-fit: contain; }
+
+  /* A foto encolheu de 108mm pra 72mm. Ela mostra o que a pessoa ja esta
+     vendo — o espaco rende mais nas condicoes e no QR, que sao o que ela NAO
+     consegue descobrir olhando o carro. */
+  .fotos { display: flex; gap: 4mm; margin: 6mm 0 0; }
+  .fotos img { width: 100%; height: 72mm; object-fit: cover; border-radius: 3mm; background: #eee; }
+  .fotos.duas .principal  { flex: 2; }
+  .fotos.duas .secundaria { flex: 1; }
+
+  /* O preco e o maior elemento da folha de proposito: e o que a pessoa procura
+     primeiro, e normalmente de dois metros de distancia. */
+  .preco {
+    margin-top: auto; padding: 5mm 0 3mm; border-top: 2.5pt solid #111;
+    display: flex; align-items: baseline; justify-content: space-between;
+  }
+  .preco .rotulo { font-size: 11pt; text-transform: uppercase; letter-spacing: 2px; color: #666; }
+  .preco strong { font-size: 42pt; line-height: 1; letter-spacing: -1.5px; }
+
+  .specs { display: flex; gap: 2.5mm; margin-top: 4mm; }
+  .spec { flex: 1; border: 1pt solid #ddd; border-radius: 2mm; padding: 2.5mm 2mm 3mm; text-align: center; }
+  .spec span { display: block; font-size: 8pt; text-transform: uppercase; letter-spacing: 1px; color: #777; }
+  .spec strong { display: block; font-size: 12.5pt; margin-top: 1.5mm; }
+
+  .condicoes {
+    margin-top: 4mm; padding: 3.5mm 4mm; border-radius: 2mm;
+    background: #111; color: #fff;
+  }
+  .condicoes .selo {
+    display: inline-block; font-size: 8pt; font-weight: 700; letter-spacing: 1.5px;
+    text-transform: uppercase; border: 1pt solid rgba(255,255,255,.55);
+    border-radius: 1mm; padding: 0.8mm 2mm; margin-bottom: 2mm;
+  }
+  .condicoes p { margin: 0; font-size: 10.5pt; line-height: 1.45; }
+
+  .chamada {
+    margin-top: 4mm; display: flex; align-items: center; gap: 4mm;
+    border: 1pt solid #ddd; border-radius: 2mm; padding: 3mm 4mm;
+  }
+  .chamada .qr { width: 26mm; height: 26mm; flex-shrink: 0; }
+  .chamada-texto strong { display: block; font-size: 12pt; }
+  .chamada-texto p { margin: 1mm 0 0; font-size: 9.5pt; color: #555; line-height: 1.4; }
+  .chamada-texto .fone { font-size: 13pt; font-weight: 700; color: #111; margin-top: 1.5mm; letter-spacing: 0.3px; }
+
+  .rodape {
+    margin-top: 4mm; padding-top: 2.5mm; border-top: 0.75pt solid #ddd;
+    display: flex; justify-content: space-between; font-size: 9.5pt; color: #666;
+  }
+`;
 
 /**
  * Abre as fichas numa janela e manda imprimir.
@@ -119,57 +262,7 @@ export function imprimirFichas(html, { titulo = 'Fichas do estoque' } = {}) {
 
   w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <title>${esc(titulo)}</title>
-<style>
-  @page { size: A4 portrait; margin: 12mm; }
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color: #111; }
-
-  /* Uma ficha por folha. O "avoid" no conteudo impede que o navegador parta a
-     ficha ao meio quando a foto e alta. */
-  .ficha {
-    page-break-after: always; break-after: page;
-    page-break-inside: avoid; break-inside: avoid;
-    height: 273mm; display: flex; flex-direction: column;
-  }
-  .ficha:last-child { page-break-after: auto; break-after: auto; }
-
-  .topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 12mm; }
-  .identidade h1 { font-size: 30pt; line-height: 1.05; margin: 0; letter-spacing: -0.5px; }
-  .versao { font-size: 13pt; color: #555; margin: 4px 0 0; text-transform: uppercase; letter-spacing: 0.5px; }
-  .logo { max-height: 22mm; max-width: 45mm; object-fit: contain; }
-
-  .fotos { display: flex; gap: 4mm; margin: 7mm 0 0; }
-  .fotos img { width: 100%; object-fit: cover; border-radius: 3mm; background: #eee; }
-  .fotos.uma img { height: 108mm; }
-  /* Com duas, a primeira manda: ela é a frente do carro, a outra é apoio. */
-  .fotos.duas .principal  { height: 108mm; flex: 2; }
-  .fotos.duas .secundaria { height: 108mm; flex: 1; }
-  .sem-foto {
-    height: 108mm; margin: 7mm 0 0; display: flex; align-items: center; justify-content: center;
-    border: 1.5pt dashed #bbb; border-radius: 3mm; color: #888; font-size: 13pt;
-  }
-
-  /* O preço é o maior elemento da folha de propósito: é o que a pessoa procura
-     primeiro, e normalmente de longe. */
-  .preco {
-    margin-top: auto; padding: 6mm 0 4mm; border-top: 2.5pt solid #111;
-    display: flex; align-items: baseline; justify-content: space-between;
-  }
-  .preco .rotulo { font-size: 12pt; text-transform: uppercase; letter-spacing: 2px; color: #666; }
-  .preco strong { font-size: 44pt; line-height: 1; letter-spacing: -1.5px; }
-
-  .specs { display: flex; gap: 3mm; margin-top: 5mm; }
-  .spec {
-    flex: 1; border: 1pt solid #ddd; border-radius: 2mm; padding: 3mm 3mm 3.5mm; text-align: center;
-  }
-  .spec span { display: block; font-size: 8.5pt; text-transform: uppercase; letter-spacing: 1px; color: #777; }
-  .spec strong { display: block; font-size: 13pt; margin-top: 1.5mm; }
-
-  .rodape {
-    margin-top: 5mm; padding-top: 3mm; border-top: 0.75pt solid #ddd;
-    display: flex; justify-content: space-between; font-size: 10pt; color: #666;
-  }
-</style></head><body>${html}</body></html>`);
+<style>${CSS_FICHA}</style></head><body>${html}</body></html>`);
   w.document.close();
 
   const imprimir = () => setTimeout(() => { try { w.print(); } catch { /* usuário fechou a janela */ } }, 150);
