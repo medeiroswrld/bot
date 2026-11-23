@@ -2416,7 +2416,11 @@ function blocoDoEvento(evento: EventoLoja | null, hojeIso: string): string {
     + blocoCondicoes
     + `\n\n### Como conduzir\n\n`
     + `- Se o cliente perguntar do ${nome}, responda com os dias e o horário acima. Eles são a verdade; não invente outro dia nem outro horário.\n`
-    + `- Se o cliente demonstrar interesse em visitar, ou perguntar de preço/desconto/condição, mencione o ${nome} UMA vez, com naturalidade, e convide pra vir num desses dias. Não repita isso em toda mensagem e não transforme a conversa em propaganda.\n`
+    + `- **O OBJETIVO de toda conversa nestes dias é sair com um DIA marcado.** Enquanto não houver dia marcado, a conversa não acabou — por mais bem atendido que o cliente tenha sido.\n`
+    + `- **GATILHOS que obrigam você a oferecer o dia**, assim que acontecer qualquer um: o cliente citar um modelo, dar uma faixa de preço, pedir a lista do estoque, perguntar de parcela, financiamento ou troca. Não espere ele pedir pra visitar — quem pede sozinho é a minoria.\n`
+    + `- Ofereça no FIM da mesma mensagem em que você responde o que ele pediu, em uma frase. Exemplo do tamanho certo, depois de mostrar os carros da faixa dele: "E esses dias são do nosso ${nome}, com primeira parcela em até 90 dias. Qual dia fica melhor pra você?"\n`
+    + `- Se ele não responder sobre o dia, NÃO repita a cada mensagem. Volte a oferecer quando algo NOVO acontecer: ele escolher um carro, pedir simulação, falar de troca, ou voltar depois de um tempo.\n`
+    + `- **Conversa longa sem nenhuma menção ao ${nome} é ERRO.** Caso real de 23/11: o cliente deu faixa de preço, pediu a lista do estoque e citou três modelos em 15 minutos, e o evento não foi citado uma única vez. Ele veio de um convite do ${nome} e saiu sem data marcada.\n`
     + `- **NOS DIAS DO ${nome.toUpperCase()}, NÃO PERGUNTE HORÁRIO.** Não chame ver_horarios_disponiveis e não ofereça lista de horários. Pergunte só QUAL DIA e chame **agendar_visita** com a data e o nome, SEM o campo horario. Depois confirme falando apenas do dia ("te esperamos no dia 28!").\n`
     + `  Por quê: no fim de semana o cliente ainda não sabe a que horas vai conseguir sair, trava na pergunta e a conversa morre sem agendamento. Nesses dias a loja atende o dia inteiro, então o dia basta.\n`
     + `  Se o cliente ESPONTANEAMENTE disser a hora que pretende vir ("devo chegar umas 15h"), aí sim passe o horario — mas nunca peça.\n`
