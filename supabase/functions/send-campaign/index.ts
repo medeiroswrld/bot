@@ -252,6 +252,7 @@ serve(async (req) => {
           texto: renderizarCorpo(campaign.template?.body_text, bodyParameters),
           campaignId: campaign_id,
           phoneNumberId,
+          waMessageId: result.messageId,
         });
         sentCount++;
       } catch (e) {
@@ -561,9 +562,9 @@ function renderizarCorpo(bodyText: string | null | undefined, params: { text: st
 
 async function registrarDisparoNaConversa(
   supabase: DB,
-  { userId, phone, name, texto, campaignId, phoneNumberId }: {
+  { userId, phone, name, texto, campaignId, phoneNumberId, waMessageId }: {
     userId: string; phone: string; name?: string | null; texto: string;
-    campaignId: string; phoneNumberId: string;
+    campaignId: string; phoneNumberId: string; waMessageId?: string | null;
   },
 ) {
   try {
@@ -638,8 +639,20 @@ async function registrarDisparoNaConversa(
       return;
     }
 
+    // `wa_message_id` + `wa_status` são o que faz o disparo ganhar os vistos.
+    //
+    // Não precisa de máquina nova: o whatsapp-webhook já recebe os `statuses`
+    // da Meta, acha a linha POR ESTE id e sobe `wa_status` pra delivered/read
+    // (com guarda de ordem, pra status atrasado não rebaixar). Sem gravar o id
+    // aqui, a mensagem do disparo era a única da conversa sem visto nenhum —
+    // e o lojista não tinha como saber se chegou.
     const { error: erroMsg } = await supabase.from('messages').insert({
-      conversation_id: conv.id, role: 'bot', content: texto, campaign_id: campaignId,
+      conversation_id: conv.id,
+      role: 'bot',
+      content: texto,
+      campaign_id: campaignId,
+      wa_message_id: waMessageId ?? null,
+      wa_status: waMessageId ? 'sent' : null,
     });
     if (erroMsg) {
       console.error('[send-campaign] insert da mensagem do disparo falhou:', erroMsg.code, erroMsg.message);
