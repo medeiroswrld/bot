@@ -124,42 +124,101 @@ serve(async (req) => {
       }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const publicoBruto = await resolveAudience(supabase, campaign);
-    const {
-      lista: recipients, excluidosIdade, excluidosJaReceberam,
-      excluidosDuplicados, excluidosPeloLimite, excluidosSemTelefone,
-    } = await refinarPublico(supabase, campaign, publicoBruto);
+    // ── Lote e retomada ───────────────────────────────────────────────────
+    //
+    // 23/11: o "Convite Feirão" parou em 56 de 200 e a função devolveu HTTP
+    // 546 — morta por limite de recurso. Cada envio custa 1,1s de pausa mais
+    // quatro idas à rede, então 200 numa invocação só passa de 500s e o runtime
+    // corta no meio. A campanha ficava `sending` PRA SEMPRE com 131 pessoas em
+    // `pending`, sem erro nenhum na tela: ninguém descobriria sem abrir a
+    // tabela. 56 × 2,6s ≈ 145s, que bate com o corte.
+    //
+    // Agora cada invocação manda UM LOTE e devolve quantas faltam; o cron
+    // `continuar-campanhas` chama de novo até zerar. 30 × 2,6s ≈ 78s, com
+    // folga confortável.
+    const LOTE_ENVIO = 30;
 
-    console.log('[send-campaign] público', {
-      bruto: publicoBruto.length, final: recipients.length,
-      excluidosIdade, excluidosJaReceberam,
-      // Estes dois são o que protege o número: repetido nunca sai duas vezes, e
-      // o teto impede o disparo de uma base inteira num número recém-conectado.
-      excluidosDuplicados, excluidosPeloLimite,
-      // Quem nao tinha telefone de verdade (IGSID, lixo de importacao).
-      excluidosSemTelefone,
-    });
+    const { data: pendentes } = await supabase
+      .from('campaign_sends')
+      .select('id, customer_phone, customer_name')
+      .eq('campaign_id', campaign_id)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true })
+      .limit(LOTE_ENVIO);
 
-    if (recipients.length === 0) {
-      await supabase.from('campaigns')
-        .update({ status: 'completed', recipients_count: 0, completed_at: new Date().toISOString() })
-        .eq('id', campaign_id);
-      return new Response(JSON.stringify({ message: 'Nenhum destinatário', sent: 0 }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    // Retomando = já existem destinatários gravados esperando.
+    //
+    // Nesse caso o público NÃO é reconstruído, e isso é essencial: o teto
+    // (`limite`) e o "quem já recebeu" dariam outra lista, e sobraria gente
+    // pendente que não casa com ninguém do público novo — ficaria pendente pra
+    // sempre, de novo em silêncio.
+    const retomando = (pendentes?.length ?? 0) > 0;
+
+    let recipients: Recipient[] = [];
+    let sends: { id: string; customer_phone: string; customer_name: string | null }[] = [];
+
+    if (retomando) {
+      sends = pendentes!;
+      recipients = sends.map((s) => ({ phone: s.customer_phone, name: s.customer_name ?? 'cliente' }));
+
+      // O público do lembrete usa a data e a hora DAQUELA pessoa, e esses
+      // campos não existem em campaign_sends. Sem relê-los, quem caísse no
+      // segundo lote receberia o lembrete com a data em branco.
+      if (campaign.audience_type === 'evento_agendados') {
+        const { data: ags } = await supabase
+          .from('appointments')
+          .select('customer_phone, appointment_date, appointment_time')
+          .eq('user_id', campaign.user_id)
+          .in('customer_phone', sends.map((s) => s.customer_phone));
+        for (const r of recipients) {
+          const a = (ags ?? []).find((x: DB) => x.customer_phone === r.phone);
+          if (a) { r.appointment_date = a.appointment_date; r.appointment_time = a.appointment_time; }
+        }
+      }
+
+      console.log('[send-campaign] retomando campanha', { lote: sends.length });
+    } else {
+      const publicoBruto = await resolveAudience(supabase, campaign);
+      const {
+        lista, excluidosIdade, excluidosJaReceberam,
+        excluidosDuplicados, excluidosPeloLimite, excluidosSemTelefone,
+      } = await refinarPublico(supabase, campaign, publicoBruto);
+      recipients = lista;
+
+      console.log('[send-campaign] público', {
+        bruto: publicoBruto.length, final: recipients.length,
+        excluidosIdade, excluidosJaReceberam,
+        // Estes dois são o que protege o número: repetido nunca sai duas vezes, e
+        // o teto impede o disparo de uma base inteira num número recém-conectado.
+        excluidosDuplicados, excluidosPeloLimite,
+        // Quem nao tinha telefone de verdade (IGSID, lixo de importacao).
+        excluidosSemTelefone,
       });
+
+      if (recipients.length === 0) {
+        await supabase.from('campaigns')
+          .update({ status: 'completed', recipients_count: 0, completed_at: new Date().toISOString() })
+          .eq('id', campaign_id);
+        return new Response(JSON.stringify({ message: 'Nenhum destinatário', sent: 0 }), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      await supabase.from('campaigns')
+        .update({ status: 'sending', started_at: new Date().toISOString(), recipients_count: recipients.length })
+        .eq('id', campaign_id);
+
+      const sendsRows = recipients.map((r) => ({
+        campaign_id, customer_phone: r.phone, customer_name: r.name ?? null, lead_id: r.lead_id ?? null, status: 'pending',
+      }));
+      // customer_name entra no select porque o registro da conversa usa ele — sem
+      // isso a conversa nascia como "Sem nome" mesmo com o lead nomeado.
+      const { data: inseridos } = await supabase.from('campaign_sends')
+        .insert(sendsRows).select('id, customer_phone, customer_name');
+
+      // Só o primeiro lote sai agora. O resto fica `pending` e o cron pega.
+      sends = (inseridos ?? []).slice(0, LOTE_ENVIO);
     }
-
-    await supabase.from('campaigns')
-      .update({ status: 'sending', started_at: new Date().toISOString(), recipients_count: recipients.length })
-      .eq('id', campaign_id);
-
-    const sendsRows = recipients.map((r) => ({
-      campaign_id, customer_phone: r.phone, customer_name: r.name ?? null, lead_id: r.lead_id ?? null, status: 'pending',
-    }));
-    // customer_name entra no select porque o registro da conversa usa ele — sem
-    // isso a conversa nascia como "Sem nome" mesmo com o lead nomeado.
-    const { data: sends } = await supabase.from('campaign_sends')
-      .insert(sendsRows).select('id, customer_phone, customer_name');
 
     let sentCount = 0;
     let failedCount = 0;
@@ -205,11 +264,46 @@ serve(async (req) => {
       await new Promise((r) => setTimeout(r, DELAY_BETWEEN_SENDS_MS));
     }
 
+    // ── Fechamento ────────────────────────────────────────────────────────
+    //
+    // Os contadores são recontados da TABELA, não somados na memória. Com lote
+    // + retomada, `sent_count: sentCount` sobrescreveria o total com o que saiu
+    // só neste lote — foi por isso que a campanha de 23/11 mostrava "1 enviado"
+    // na tela enquanto 56 pessoas já tinham recebido.
+    const contar = async (st: string) => {
+      const { count } = await supabase
+        .from('campaign_sends')
+        .select('id', { count: 'exact', head: true })
+        .eq('campaign_id', campaign_id)
+        .eq('status', st);
+      return count ?? 0;
+    };
+
+    const restantes = await contar('pending');
+    const totalEnviados = (await contar('sent')) + (await contar('delivered')) + (await contar('read'));
+    const totalFalhas   = await contar('failed');
+
     await supabase.from('campaigns')
-      .update({ status: 'completed', sent_count: sentCount, failed_count: failedCount, completed_at: new Date().toISOString() })
+      .update({
+        status: restantes > 0 ? 'sending' : 'completed',
+        sent_count: totalEnviados,
+        failed_count: totalFalhas,
+        ...(restantes > 0 ? {} : { completed_at: new Date().toISOString() }),
+      })
       .eq('id', campaign_id);
 
-    return new Response(JSON.stringify({ success: true, sent: sentCount, failed: failedCount, total: recipients.length }), {
+    console.log('[send-campaign] lote concluido', {
+      loteEnviado: sentCount, loteFalhas: failedCount, restantes, totalEnviados, totalFalhas,
+    });
+
+    return new Response(JSON.stringify({
+      success: true,
+      lote_enviado: sentCount,
+      lote_falhas: failedCount,
+      restantes,
+      total_enviados: totalEnviados,
+      total_falhas: totalFalhas,
+    }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 
