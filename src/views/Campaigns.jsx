@@ -529,7 +529,7 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
 // ─── Página ───────────────────────────────────────────────────────────────────
 const Campaigns = () => {
     const navigate = useNavigate();
-    const { campaigns, deleteCampaign, companySettings } = useAppContext();
+    const { campaigns, deleteCampaign, sendCampaign, companySettings } = useAppContext();
     const [wizard, setWizard] = useState(false);
     // Disparo nao entra no teste de 7 dias (migration 107). A trava de verdade
     // e no servidor; isto aqui so evita o beco sem saida de montar a campanha
@@ -537,6 +537,10 @@ const Campaigns = () => {
     const semDisparo = companySettings?.disparos_contratado === false;
     const emTeste = companySettings?.assinatura_status === 'trial';
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+    // Campanha que o lojista pediu pra disparar/retomar — guardada inteira (e
+    // não só o id) porque a confirmação mostra o nome.
+    const [confirmFire, setConfirmFire] = useState(null);
+    const [disparando, setDisparando] = useState(false);
 
     const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
 
@@ -601,6 +605,24 @@ const Campaigns = () => {
                                     <td style={{ padding: '12px 16px' }}>{c.read_count}</td>
                                     <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>{fmtDate(c.created_at)}</td>
                                     <td style={{ padding: '12px 16px', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                                        {/* Disparar / retomar.
+                                            SÓ `draft` e `sending`, e isso é a parte importante:
+                                            • `draft`     — nunca saiu, seguro.
+                                            • `sending`   — travou no meio; até aqui NÃO HAVIA como
+                                              retomar pela tela, e campanha parada ficava `sending`
+                                              pra sempre em silêncio.
+                                            • `completed` fica de fora porque não há `pending`: a
+                                              função reconstruiria o público e mandaria TUDO de novo.
+                                            • `cancelled` fica de fora de propósito. Cancelar foi uma
+                                              decisão de parar; os `pending` dela são exatamente as
+                                              pessoas que alguém escolheu não incomodar. Um clique
+                                              aqui desfaria isso sem querer. */}
+                                        {(c.status === 'draft' || c.status === 'sending') && !semDisparo && (
+                                            <button className="inv-action-btn"
+                                                title={c.status === 'draft' ? 'Disparar esta campanha' : 'Retomar o envio parado'}
+                                                style={{ color: '#059669' }}
+                                                onClick={() => setConfirmFire(c)}><Send size={15} /></button>
+                                        )}
                                         <button className="inv-action-btn" title="Excluir" style={{ color: '#dc2626' }} onClick={() => setConfirmDeleteId(c.id)}><Trash2 size={15} /></button>
                                     </td>
                                 </tr>
@@ -611,6 +633,21 @@ const Campaigns = () => {
             </div>
 
             {wizard && <CampaignWizard onClose={() => setWizard(false)} />}
+            {confirmFire && (
+                <ConfirmModal
+                    message={confirmFire.status === 'draft'
+                        ? `Disparar "${confirmFire.name}" agora? As mensagens saem de verdade, e isso não tem como desfazer.`
+                        : `Retomar o envio de "${confirmFire.name}"? Só sai pra quem ainda está na fila — ninguém recebe duas vezes.`}
+                    onCancel={() => setConfirmFire(null)}
+                    onConfirm={async () => {
+                        if (disparando) return;
+                        setDisparando(true);
+                        const alvo = confirmFire.id;
+                        setConfirmFire(null);
+                        await sendCampaign(alvo);
+                        setDisparando(false);
+                    }} />
+            )}
             {confirmDeleteId && (
                 <ConfirmModal message="Excluir esta campanha e seu histórico de envios?"
                     onCancel={() => setConfirmDeleteId(null)}
