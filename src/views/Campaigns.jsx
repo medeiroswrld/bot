@@ -512,14 +512,27 @@ const CampaignWizard = ({ onClose }) => {
     );
 };
 
-const ConfirmModal = ({ message, onConfirm, onCancel }) => (
+/**
+ * Confirmação genérica.
+ *
+ * `confirmLabel` e `danger` nasceram porque o componente tinha "Excluir" e o
+ * vermelho CRAVADOS: reaproveitado pra confirmar um disparo, ele perguntava
+ * "Disparar agora?" e oferecia um botão vermelho escrito **Excluir**. Além de
+ * errado, é o tipo de coisa que faz a pessoa clicar em Cancelar com medo — ou
+ * pior, clicar achando que está apagando.
+ *
+ * O padrão continua sendo Excluir/vermelho pra não mexer em quem já usava.
+ */
+const ConfirmModal = ({ message, onConfirm, onCancel, confirmLabel = 'Excluir', danger = true }) => (
     <div className="modal-overlay" onClick={onCancel}>
         <div className="modal-content modal-sm" onClick={e => e.stopPropagation()}>
             <div style={{ padding: '1.5rem', textAlign: 'center' }}>
                 <p style={{ fontSize: '1rem', fontWeight: 600, marginBottom: '1.5rem', lineHeight: 1.4 }}>{message}</p>
                 <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
                     <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
-                    <button className="btn-primary" style={{ background: '#ef4444' }} onClick={onConfirm}>Excluir</button>
+                    <button className="btn-primary" style={{ background: danger ? '#ef4444' : '#059669' }} onClick={onConfirm}>
+                        {confirmLabel}
+                    </button>
                 </div>
             </div>
         </div>
@@ -638,6 +651,8 @@ const Campaigns = () => {
                     message={confirmFire.status === 'draft'
                         ? `Disparar "${confirmFire.name}" agora? As mensagens saem de verdade, e isso não tem como desfazer.`
                         : `Retomar o envio de "${confirmFire.name}"? Só sai pra quem ainda está na fila — ninguém recebe duas vezes.`}
+                    confirmLabel={confirmFire.status === 'draft' ? 'Disparar' : 'Retomar'}
+                    danger={false}
                     onCancel={() => setConfirmFire(null)}
                     onConfirm={async () => {
                         if (disparando) return;
