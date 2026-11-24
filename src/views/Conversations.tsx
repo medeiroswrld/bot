@@ -278,7 +278,16 @@ const VistoWhats = ({ status, erro }: { status: string | null; erro?: string | n
   );
 };
 
+// Nome amigável do envio ativo que não vem de campanha. A coluna guarda o
+// código; a tela mostra o que o lojista reconhece.
+const ROTULO_ENVIO_ATIVO: Record<string, string> = {
+  lista_espera: 'Lista de espera',
+  lembrete:     'Lembrete de visita',
+};
+
 const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; campanha?: CampanhaInfo }) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const envioAtivo = String((msg as any).envio_ativo ?? '').trim();
   const isCustomer = msg.role === 'customer';
   const isBot      = msg.role === 'bot';
   const time = new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -314,9 +323,24 @@ const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; cam
       <div style={{ maxWidth: '75%', background: bgColor, borderRadius: 12, padding: '8px 12px', boxShadow: '0 1px 2px rgba(0,0,0,0.06)' }}>
         {!isCustomer && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3, flexWrap: 'wrap' }}>
+            {/* Envio ativo sem campanha (aviso da lista de espera) também é
+                "Disparo" pro lojista: foi a loja falando primeiro, não o bot
+                respondendo. Chamar de "Bot" faria parecer conversa automática
+                e esconderia que alguém mandou aquilo de propósito. */}
             <span style={{ fontSize: '0.65rem', fontWeight: 700, color: labelColor }}>
-              {campanha ? 'Disparo' : isBot ? 'Bot' : 'Atendente'}
+              {(campanha || envioAtivo) ? 'Disparo' : isBot ? 'Bot' : 'Atendente'}
             </span>
+            {!campanha && envioAtivo && (
+              <span
+                title="Aviso enviado pela loja, fora de campanha"
+                style={{
+                  fontSize: '0.62rem', fontWeight: 700, padding: '1px 7px', borderRadius: 999,
+                  background: CAMPANHA_PADRAO.bg, color: CAMPANHA_PADRAO.cor,
+                }}
+              >
+                {ROTULO_ENVIO_ATIVO[envioAtivo] ?? envioAtivo}
+              </span>
+            )}
             {campanha && (
               <span
                 title={campanha.nome}
@@ -657,10 +681,13 @@ export default function Conversations() {
     if (!user?.id) return;
     let cancelado = false;
     (async () => {
+      // Campanha OU envio ativo sem campanha (aviso da lista de espera).
+      // Pro lojista as duas coisas são "a loja falou primeiro" — separar na
+      // tela só o faria procurar o aviso numa aba que nunca ia mostrá-lo.
       const { data, error } = await supabaseTyped
         .from('messages')
         .select('conversation_id')
-        .not('campaign_id', 'is', null);
+        .or('campaign_id.not.is.null,envio_ativo.not.is.null');
       if (cancelado) return;
       if (error) { console.error('[Conversations] disparos por conversa:', error.message); return; }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -96,6 +96,10 @@ async function registrarAvisoNaConversa(
       conversation_id: conv.id, role: 'bot', content: texto,
       wa_message_id: waMessageId ?? null,
       wa_status: waMessageId ? 'sent' : null,
+      // Marca que isto foi a LOJA falando primeiro, e não resposta do bot. É o
+      // que faz o aviso aparecer na aba Disparos — ele não tem campanha, então
+      // `campaign_id` sozinho nunca o pegaria.
+      envio_ativo: 'lista_espera',
     });
     if (erroMsg) {
       console.error('[notify-waiting-list] insert da mensagem falhou:', erroMsg.code, erroMsg.message);
