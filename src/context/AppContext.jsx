@@ -1630,7 +1630,20 @@ export const AppProvider = ({ children }) => {
         addToast(`Erro ao disparar: ${data?.error || error?.message || 'desconhecido'}`, 'error');
         return false;
       }
-      addToast(`Disparo concluido: ${data.sent} enviada(s), ${data.failed} falha(s).`, 'success');
+      // O send-campaign passou a mandar UM LOTE por chamada e devolver
+      // `restantes`. Com os nomes antigos (`sent`/`failed`) o aviso saía
+      // "undefined enviada(s)" — e, pior, dizia "concluído" com 131 pessoas
+      // ainda na fila.
+      const enviados  = Number(data?.total_enviados ?? data?.sent ?? 0);
+      const falhas    = Number(data?.total_falhas   ?? data?.failed ?? 0);
+      const restantes = Number(data?.restantes ?? 0);
+
+      addToast(
+        restantes > 0
+          ? `Lote enviado: ${enviados} no total, ${falhas} falha(s). Faltam ${restantes} — o envio continua.`
+          : `Disparo concluído: ${enviados} enviada(s), ${falhas} falha(s).`,
+        'success',
+      );
       return true;
     } catch (e) {
       console.error('[CAMPAIGNS] send erro:', e);

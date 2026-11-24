@@ -1,12 +1,110 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 import { sendWhatsAppTemplate } from '../_shared/sendTemplate.ts';
-import { resolveWhatsAppToken } from '../_shared/whatsapp.ts';
+import { resolveWhatsAppToken, variantesTelefoneBR } from '../_shared/whatsapp.ts';
 import { maskPhone } from '../_shared/maskPII.ts';
 
 import { buildCors } from '../_shared/cors.ts';
 import { dinheiro, numero } from '../_shared/dinheiro.ts';
 
+
+// Troca {{1}}, {{2}}… pelos valores que foram realmente enviados.
+// É o texto que o cliente leu — é ele que precisa ficar na conversa, não o
+// template cru com as chaves.
+function renderizarCorpo(body: string | null | undefined, params: Array<{ text?: string }>): string {
+  let texto = String(body ?? '');
+  params.forEach((p, i) => {
+    texto = texto.replaceAll(`{{${i + 1}}}`, String(p?.text ?? ''));
+  });
+  return texto;
+}
+
+/**
+ * Registra o aviso na conversa do cliente.
+ *
+ * POR QUE ISTO EXISTE:
+ * em 24/11 a loja avisou 6 pessoas da lista de espera e NADA apareceu no CRM —
+ * nem nas Conversas, nem na aba Disparos. As mensagens chegaram no WhatsApp do
+ * cliente e o sistema não sabia de nenhuma.
+ *
+ * Pior que não aparecer na tela: o BOT não sabia. Quando a pessoa responde
+ * "qual é mesmo o carro?", ele não tem o que foi prometido a ela. Mesmo
+ * defeito que o disparo tinha, em outra porta.
+ *
+ * O `onConflict` leva as QUATRO colunas do índice único
+ * (user_id, channel, customer_phone, phone_number_id). Com duas, o Postgres
+ * devolve 42P10, o supabase-js NÃO lança (devolve {data, error}) e a gravação
+ * falha em silêncio — foi exatamente assim que o disparo perdeu 164 mensagens.
+ */
+async function registrarAvisoNaConversa(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  { userId, phone, name, texto, phoneNumberId, waMessageId }: {
+    userId: string; phone: string; name?: string | null; texto: string;
+    phoneNumberId: string; waMessageId?: string | null;
+  },
+) {
+  try {
+    const agora = new Date().toISOString();
+
+    // Procura primeiro pelas duas formas do número (com e sem o nono dígito):
+    // quem já conversou tem a conversa gravada no formato que a Meta mandou, e
+    // sem isto o aviso abriria uma segunda conversa pra cliente conhecido.
+    let convId: string | null = null;
+    const variantes = variantesTelefoneBR(phone);
+    if (variantes.length > 1) {
+      const { data: existente } = await supabase
+        .from('conversations').select('id')
+        .eq('user_id', userId).in('customer_phone', variantes)
+        .order('last_message_at', { ascending: false, nullsFirst: false })
+        .limit(1).maybeSingle();
+      if (existente?.id) {
+        convId = existente.id;
+        await supabase.from('conversations').update({ last_message_at: agora }).eq('id', existente.id);
+      }
+    }
+
+    let conv: { id: string } | null = convId ? { id: convId } : null;
+
+    if (!conv) {
+      const { data: criada, error: erroConv } = await supabase
+        .from('conversations')
+        .upsert(
+          {
+            user_id: userId, customer_phone: phone, channel: 'whatsapp',
+            phone_number_id: phoneNumberId, customer_name: name || null, last_message_at: agora,
+          },
+          { onConflict: 'user_id,channel,customer_phone,phone_number_id' },
+        )
+        .select('id').maybeSingle();
+
+      if (erroConv) {
+        console.error('[notify-waiting-list] upsert da conversa falhou:', erroConv.code, erroConv.message);
+        return;
+      }
+      conv = criada ?? null;
+    }
+
+    if (!conv?.id) {
+      console.error('[notify-waiting-list] conversa nao resolvida — aviso NAO registrado');
+      return;
+    }
+
+    // `wa_message_id` + `wa_status` dão os vistos de entregue/lido: o
+    // whatsapp-webhook acha a linha por este id e sobe o status sozinho.
+    const { error: erroMsg } = await supabase.from('messages').insert({
+      conversation_id: conv.id, role: 'bot', content: texto,
+      wa_message_id: waMessageId ?? null,
+      wa_status: waMessageId ? 'sent' : null,
+    });
+    if (erroMsg) {
+      console.error('[notify-waiting-list] insert da mensagem falhou:', erroMsg.code, erroMsg.message);
+    }
+  } catch (e) {
+    // Registro é acessório: o aviso já saiu e não deve ser desfeito.
+    console.error('[notify-waiting-list] falha ao registrar na conversa:', e);
+  }
+}
 
 serve(async (req) => {
   const corsHeaders = buildCors(req);
@@ -110,19 +208,32 @@ serve(async (req) => {
       const firstName = String(interest.customer_name ?? 'cliente').split(' ')[0];
       try {
         console.log('[notify-waiting-list] enviando para', maskPhone(interest.customer_phone), 'modelo:', interest.model);
-        await sendWhatsAppTemplate({
+        // 4 variáveis: primeiro_nome, modelo_procurado, nome_empresa, descricao_carro
+        const bodyParameters = [
+          { type: 'text', text: firstName },
+          { type: 'text', text: String(interest.model ?? 'veículo') },
+          { type: 'text', text: companyName },
+          { type: 'text', text: carDescription },
+        ];
+
+        const envio = await sendWhatsAppTemplate({
           phone: interest.customer_phone,
           templateName: template.meta_template_name,
           language: template.language,
-          // 4 variáveis: primeiro_nome, modelo_procurado, nome_empresa, descricao_carro
-          bodyParameters: [
-            { type: 'text', text: firstName },
-            { type: 'text', text: String(interest.model ?? 'veículo') },
-            { type: 'text', text: companyName },
-            { type: 'text', text: carDescription },
-          ],
+          bodyParameters,
           phoneNumberId,
           token,
+        });
+
+        // O aviso entra na conversa do cliente. Sem isto ele some do CRM — e,
+        // pior, o bot atende a resposta sem saber o que foi prometido.
+        await registrarAvisoNaConversa(supabase, {
+          userId: car.user_id,
+          phone: interest.customer_phone,
+          name: interest.customer_name,
+          texto: renderizarCorpo(template.body_text, bodyParameters),
+          phoneNumberId,
+          waMessageId: envio?.messageId ?? null,
         });
 
         await supabase.from('vehicle_interests')
