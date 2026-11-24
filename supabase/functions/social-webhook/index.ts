@@ -194,6 +194,26 @@ serve(async (req) => {
   const agora = new Date().toISOString();
   let convId = conv?.id as string | undefined;
 
+  // Conversa encerrada REABRE quando o cliente volta a escrever.
+  //
+  // Fica aqui, logo depois de achar a conversa, e não junto de cada
+  // `last_message_at`: este arquivo tem dois caminhos de gravação (mídia e
+  // texto) e a reabertura precisa valer pros dois. Um só seria pior que nenhum
+  // — a conversa reabriria por foto e não por mensagem escrita.
+  //
+  // `closed` é arquivo, não mordaça: aqui o bot só se cala em `human` (linha
+  // do `statusAtual` abaixo), então sem esta linha a conversa ficaria fora da
+  // caixa de entrada com o bot respondendo por trás.
+  if (convId && String(conv?.status ?? '') === 'closed') {
+    await supabase
+      .from('conversations')
+      .update({ status: 'bot' })
+      .eq('id', convId)
+      // Condição no UPDATE: não atropela vendedor que assumiu no meio.
+      .eq('status', 'closed');
+    console.log(`[SW] conversa ${convId} estava encerrada — reaberta pelo cliente`);
+  }
+
   // Busca o nome quando ele FALTA — na criação, ou numa conversa antiga que
   // ficou sem. Antes só tentava ao criar: se a primeira tentativa falhasse (foi
   // o caso, com o host errado), a conversa ficava para sempre exibindo o ID

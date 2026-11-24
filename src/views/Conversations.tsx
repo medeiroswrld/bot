@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import {
   Bot, UserCheck, MessageCircle, Send, RefreshCw,
   PhoneCall, Search, Loader2, AlertCircle, Bell, BellOff, Trash2, Mic, ChevronLeft, CarFront,
+  Archive, ArchiveRestore, MessageSquarePlus,
 } from 'lucide-react';
 import { supabaseTyped } from '../lib/supabase-typed';
 import { estoqueEmTexto } from '../lib/estoqueTexto.js';
@@ -283,7 +284,14 @@ const VistoWhats = ({ status, erro }: { status: string | null; erro?: string | n
 const ROTULO_ENVIO_ATIVO: Record<string, string> = {
   lista_espera: 'Lista de espera',
   lembrete:     'Lembrete de visita',
+  iniciada:     'Iniciada pela loja',
 };
+
+/** Quantas variáveis {{n}} o corpo do template tem. */
+function contarVariaveis(corpo: string | null | undefined): number {
+  const achados = String(corpo ?? '').match(/\{\{(\d+)\}\}/g) ?? [];
+  return achados.reduce((max, m) => Math.max(max, Number(m.replace(/\D/g, '')) || 0), 0);
+}
 
 const Bubble = React.memo(function Bubble({ msg, campanha }: { msg: Message; campanha?: CampanhaInfo }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -536,6 +544,20 @@ export default function Conversations() {
   // diferente (chegou porque a loja chamou, não porque procurou), e misturado
   // com o orgânico não dá pra medir se a campanha converteu.
   const [soDisparos, setSoDisparos]       = useState(false);
+
+  // ── Nova conversa (a loja fala primeiro) ─────────────────────────────────
+  const [novaAberta, setNovaAberta]   = useState(false);
+  const [novoFone, setNovoFone]       = useState('');
+  const [novoNome, setNovoNome]       = useState('');
+  const [novoTexto, setNovoTexto]     = useState('');
+  const [novoTplId, setNovoTplId]     = useState('');
+  const [novoVars, setNovoVars]       = useState<Record<string, string>>({});
+  const [templatesOk, setTemplatesOk] = useState<Array<{ id: string; display_name: string; body_text: string | null; header_type: string | null }>>([]);
+  // null = ainda não sei (telefone curto). É diferente de 'fechada': mostrar o
+  // seletor de template antes de saber faria a loja gastar template à toa.
+  const [janela, setJanela]           = useState<'checando' | 'aberta' | 'fechada' | null>(null);
+  const [enviandoNova, setEnviandoNova] = useState(false);
+  const [erroNova, setErroNova]       = useState('');
   const [convsDeDisparo, setConvsDeDisparo] = useState<Set<string>>(new Set());
   const [searchRaw, setSearchRaw]         = useState('');
   const [search, setSearch]               = useState('');
@@ -1300,6 +1322,172 @@ export default function Conversations() {
     if (!error) setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, status: 'bot' } : c));
   };
 
+  /**
+   * Encerrar / reabrir — arquiva a conversa, SEM calar o bot.
+   *
+   * ── Encerrada não é conversa muda, e isso é de propósito ──────────────────
+   *
+   * O bot fica mudo em `human` e `pending`. `closed` NÃO entra nessa lista: se
+   * o cliente escrever de novo, o webhook devolve a conversa pro bot e ela
+   * reabre sozinha, como ticket de helpdesk.
+   *
+   * A escolha é por assimetria de risco, não por preguiça. Se algum caminho
+   * falhar em reabrir, o pior caso deste desenho é o bot atender uma conversa
+   * que a loja tinha arquivado — chato, e visível. Se `closed` calasse o bot, o
+   * pior caso seria cliente escrevendo e ninguém vendo: já aconteceu duas vezes
+   * neste sistema, em outubro, e nas duas sem gerar erro nenhum. Silêncio é o
+   * modo de falha mais caro deste produto.
+   *
+   * De graça junto: a view `conversas_para_followup` exige `bot` ou `human`,
+   * então encerrar também para o follow-up. "Encerrei, não manda mais nada"
+   * funciona sem código novo.
+   */
+  const encerrarConversa = async () => {
+    if (!selectedId) return;
+    const { error } = await supabaseTyped
+      .from('conversations').update({ status: 'closed' }).eq('id', selectedId);
+    if (error) return;
+    setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, status: 'closed' } : c));
+    // Sai da vista: com o filtro em "Todas" a encerrada não aparece mais, e
+    // manter o painel aberto numa conversa que saiu da lista confunde.
+    setSelectedId(null);
+  };
+
+  const reabrirConversa = async () => {
+    if (!selectedId) return;
+    const { error } = await supabaseTyped
+      .from('conversations').update({ status: 'bot' }).eq('id', selectedId);
+    if (!error) setConversations((prev) => prev.map((c) => c.id === selectedId ? { ...c, status: 'bot' } : c));
+  };
+
+  // ── Nova conversa ────────────────────────────────────────────────────────
+
+  const fecharNova = () => {
+    setNovaAberta(false);
+    setNovoFone(''); setNovoNome(''); setNovoTexto('');
+    setNovoTplId(''); setNovoVars({}); setJanela(null); setErroNova('');
+  };
+
+  // Só os aprovados. Template pendente ou recusado na lista seria um convite
+  // pra escolher o que a Meta vai rejeitar — e a recusa não aparece na tela.
+  useEffect(() => {
+    if (!novaAberta || !user?.id) return;
+    let cancelado = false;
+    (async () => {
+      const { data, error } = await db
+        .from('message_templates')
+        .select('id, display_name, body_text, header_type')
+        .eq('user_id', user.id)
+        .eq('status', 'approved')
+        .order('display_name');
+      if (cancelado) return;
+      if (error) { console.error('[Conversations] templates:', error.message); return; }
+      setTemplatesOk((data ?? []) as typeof templatesOk);
+    })();
+    return () => { cancelado = true; };
+  }, [novaAberta, user?.id]);
+
+  /**
+   * A janela de 24h decide tudo nesta tela.
+   *
+   * Dentro dela, texto livre é entregue e é de graça. Fora dela, a Meta só
+   * entrega template — e texto livre fora da janela devolve SUCESSO na API e
+   * simplesmente não chega. Por isso a tela pergunta isto antes de oferecer o
+   * campo de escrever: um textarea mostrado na hora errada é uma mensagem
+   * perdida sem aviso.
+   *
+   * A janela conta da última mensagem DO CLIENTE, não de `last_message_at`
+   * (que inclui as nossas).
+   */
+  useEffect(() => {
+    if (!novaAberta) return;
+    const digitos = novoFone.replace(/\D/g, '');
+    if (digitos.length < 10) { setJanela(null); return; }
+
+    setJanela('checando');
+    let cancelado = false;
+    const t = setTimeout(async () => {
+      // Casa pelos 8 últimos dígitos: o mesmo número aparece com e sem o nono
+      // dígito e com ou sem o 55, e comparar literal abriria conversa nova pra
+      // cliente que já existe.
+      const cauda = digitos.slice(-8);
+      const conv = conversations.find(
+        (c) => String(c.customer_phone ?? '').replace(/\D/g, '').slice(-8) === cauda,
+      );
+      if (!conv) { if (!cancelado) setJanela('fechada'); return; }
+
+      const { data } = await db
+        .from('messages')
+        .select('created_at')
+        .eq('conversation_id', conv.id)
+        .eq('role', 'customer')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelado) return;
+
+      const quando = data?.created_at ? Date.parse(String(data.created_at)) : NaN;
+      const horas = Number.isFinite(quando) ? (Date.now() - quando) / 3600000 : Infinity;
+      setJanela(horas >= 0 && horas < 23 ? 'aberta' : 'fechada');
+      if (!novoNome && conv.customer_name) setNovoNome(String(conv.customer_name));
+    }, 450);
+
+    return () => { cancelado = true; clearTimeout(t); };
+    // `conversations.length` e não a lista: a referência muda a cada realtime,
+    // e depender dela refaria a consulta a cada mensagem que chega.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [novaAberta, novoFone, conversations.length]);
+
+  const tplEscolhido = templatesOk.find((t) => t.id === novoTplId) ?? null;
+  const qtdVars = contarVariaveis(tplEscolhido?.body_text);
+
+  // Pré-visualização do que o CLIENTE vai ler. É o que impede template sair com
+  // "{{3}}" no meio da frase: o vendedor vê antes de mandar.
+  const previaTemplate = useMemo(() => {
+    let t = String(tplEscolhido?.body_text ?? '');
+    for (let i = 1; i <= qtdVars; i++) {
+      // split/join e não replaceAll: `replaceAll` não está no lib do tsconfig
+      // deste projeto, e com padrão literal os dois fazem a mesma coisa — sem
+      // o risco de escapar chaves num regex.
+      t = t.split(`{{${i}}}`).join(novoVars[String(i)] || `{{${i}}}`);
+    }
+    return t;
+  }, [tplEscolhido?.body_text, qtdVars, novoVars]);
+
+  const enviarNovaConversa = async () => {
+    if (!session?.access_token) return;
+    setEnviandoNova(true);
+    setErroNova('');
+    try {
+      const r = await fetch(`${supabaseUrl}/functions/v1/iniciar-conversa`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          phone: novoFone.replace(/\D/g, ''),
+          name: novoNome,
+          ...(janela === 'aberta'
+            ? { texto: novoTexto }
+            : { template_id: novoTplId, variaveis: novoVars }),
+        }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j?.error) {
+        setErroNova(String(j?.error ?? `Falhou (HTTP ${r.status})`));
+        return;
+      }
+      fecharNova();
+      // Recarrega pra conversa nova aparecer já na lista, com a mensagem.
+      await fetchConversations();
+    } catch (e) {
+      setErroNova(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEnviandoNova(false);
+    }
+  };
+
   const sendAgentMessage = async () => {
     const text = agentInput.trim();
     if (!text || !selectedId || !session?.access_token) return;
@@ -1379,6 +1567,10 @@ export default function Conversations() {
       if (String((c as { phone_number_id?: string | null }).phone_number_id ?? '') !== filtroNumero) return false;
     }
     if (filter && c.status !== filter) return false;
+    // "Todas" não mostra encerrada. Encerrar existe justamente pra tirar da
+    // caixa de entrada — se ela continuasse na lista, o botão não serviria pra
+    // nada. Quem quiser ver escolhe "Encerrada" no filtro.
+    if (!filter && c.status === 'closed') return false;
     if (search) {
       const q = search.toLowerCase();
       if (!(c.customer_name ?? '').toLowerCase().includes(q) && !c.customer_phone.toLowerCase().includes(q)) return false;
@@ -1472,6 +1664,22 @@ export default function Conversations() {
               style={{ width: '100%', boxSizing: 'border-box', paddingLeft: 28, paddingRight: 8, paddingTop: 6, paddingBottom: 6, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-card)', fontSize: '0.8rem', color: 'var(--text-primary)' }}
             />
           </div>
+          {/* Falar primeiro com alguém que não escreveu. Fica visível, e não
+              escondido num ícone, porque até aqui esse caminho não existia: o
+              vendedor saía do CRM e a conversa acontecia fora do sistema. */}
+          <button
+            type="button"
+            onClick={() => setNovaAberta(true)}
+            style={{
+              width: '100%', boxSizing: 'border-box', marginBottom: 8,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+              padding: '7px 10px', borderRadius: 6, cursor: 'pointer',
+              background: 'var(--primary-light, #e8f0fe)', border: '1px solid var(--primary)',
+              color: 'var(--primary)', fontSize: '0.8rem', fontWeight: 600,
+            }}
+          >
+            <MessageSquarePlus size={14} /> Iniciar conversa
+          </button>
           {/* Origem: todas x só quem veio de disparo.
               Vem ANTES do filtro de situação porque é uma pergunta anterior
               ("de que público eu estou falando?"), e só aparece quando existe
@@ -1668,8 +1876,10 @@ export default function Conversations() {
               )}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              {/* "Assumir" aparece para bot e pending; "Devolver" aparece para human e pending */}
-              {selectedConv.status !== 'human' && (
+              {/* "Assumir" aparece para bot e pending; "Devolver" aparece para human e pending.
+                  Encerrada não mostra nenhum dos dois: ali a única ação que faz
+                  sentido é reabrir. */}
+              {selectedConv.status !== 'human' && selectedConv.status !== 'closed' && (
                 <button type="button" onClick={takeOver}
                   style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6, cursor: 'pointer', background: '#f59e0b22', border: '1px solid #f59e0b', color: '#b45309', fontSize: '0.8rem', fontWeight: 600 }}>
                   <UserCheck size={14} /> Assumir conversa
@@ -1679,6 +1889,19 @@ export default function Conversations() {
                 <button type="button" onClick={returnToBot}
                   style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6, cursor: 'pointer', background: 'var(--primary-light, #e8f0fe)', border: '1px solid var(--primary)', color: 'var(--primary)', fontSize: '0.8rem', fontWeight: 600 }}>
                   <RefreshCw size={14} /> Devolver pro bot
+                </button>
+              )}
+              {selectedConv.status !== 'closed' ? (
+                <button type="button" onClick={encerrarConversa}
+                  title="Tira da caixa de entrada. Se o cliente escrever de novo, reabre sozinha."
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6, cursor: 'pointer', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 600 }}>
+                  <Archive size={14} /> Encerrar
+                </button>
+              ) : (
+                <button type="button" onClick={reabrirConversa}
+                  title="Volta a conversa pra caixa de entrada, com o bot atendendo"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6, cursor: 'pointer', background: 'var(--primary-light, #e8f0fe)', border: '1px solid var(--primary)', color: 'var(--primary)', fontSize: '0.8rem', fontWeight: 600 }}>
+                  <ArchiveRestore size={14} /> Reabrir
                 </button>
               )}
               <button type="button" onClick={() => setConfirmDeleteId(selectedConv.id)}
@@ -1839,7 +2062,7 @@ export default function Conversations() {
                 ? 'O bot está respondendo. Clique em "Assumir conversa" para intervir.'
                 : selectedConv.status === 'pending'
                   ? '⚠️ Cliente aguardando atendimento — o bot está em silêncio. Assuma para responder ou devolva ao bot.'
-                  : 'Conversa encerrada.'}
+                  : 'Conversa encerrada — saiu da caixa de entrada. Se o cliente escrever de novo, ela reabre sozinha e o bot atende.'}
             </div>
           )}
         </div>
@@ -1904,6 +2127,145 @@ export default function Conversations() {
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
               <button className="btn-secondary" onClick={() => setConfirmDeleteId(null)}>Cancelar</button>
               <button className="btn-primary" style={{ background: '#ef4444' }} onClick={deleteConversation}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ── Iniciar conversa ─────────────────────────────────────────────────
+        A tela é organizada em torno da janela de 24h, porque é ela que decide
+        se sai texto livre (grátis) ou template (pago) — e porque texto livre
+        fora da janela devolve sucesso na API e NÃO chega. Oferecer os dois
+        campos ao mesmo tempo seria entregar ao vendedor a chance de perder uma
+        mensagem sem nunca saber. */}
+    {novaAberta && (
+      <div className="modal-overlay" onClick={fecharNova}>
+        <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+          <div style={{ padding: '1.25rem 1.5rem' }}>
+            <h3 style={{ margin: '0 0 1rem', fontSize: '1.05rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <MessageSquarePlus size={18} style={{ color: 'var(--primary)' }} /> Iniciar conversa
+            </h3>
+
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+              Telefone (com DDD)
+            </label>
+            <input
+              autoFocus value={novoFone} onChange={(e) => setNovoFone(e.target.value)}
+              placeholder="15 99999-9999" inputMode="tel"
+              style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-primary)', fontSize: '0.875rem', marginBottom: 10 }}
+            />
+
+            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+              Nome
+            </label>
+            <input
+              value={novoNome} onChange={(e) => setNovoNome(e.target.value)}
+              placeholder="Como chamar a pessoa"
+              style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-primary)', fontSize: '0.875rem', marginBottom: 12 }}
+            />
+
+            {janela === 'checando' && (
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, margin: '0 0 10px' }}>
+                <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Vendo se a janela de 24h está aberta…
+              </p>
+            )}
+
+            {janela === 'aberta' && (
+              <>
+                <p style={{ fontSize: '0.75rem', color: '#047857', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 7, padding: '7px 10px', margin: '0 0 10px' }}>
+                  Esta pessoa escreveu nas últimas 24h — pode mandar o que quiser, e é de graça.
+                </p>
+                <textarea
+                  value={novoTexto} onChange={(e) => setNovoTexto(e.target.value)}
+                  rows={4} placeholder="Escreva a mensagem..."
+                  style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-primary)', fontSize: '0.875rem', resize: 'vertical', fontFamily: 'inherit' }}
+                />
+              </>
+            )}
+
+            {janela === 'fechada' && (
+              <>
+                <p style={{ fontSize: '0.75rem', color: '#92400e', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 7, padding: '7px 10px', margin: '0 0 10px' }}>
+                  Faz mais de 24h que esta pessoa não escreve (ou nunca escreveu). Fora dessa janela a Meta
+                  só entrega <strong>template aprovado</strong> — mensagem escrita à mão não chega, e não avisa.
+                </p>
+                {templatesOk.length === 0 ? (
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', margin: 0 }}>
+                    Esta conta não tem nenhum template aprovado. Dá pra criar em Configurações → Templates.
+                  </p>
+                ) : (
+                  <>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                      Template
+                    </label>
+                    <select
+                      value={novoTplId}
+                      onChange={(e) => {
+                        setNovoTplId(e.target.value);
+                        // Pré-preenche a 1ª variável com o primeiro nome: quase
+                        // todo template começa chamando a pessoa pelo nome.
+                        const primeiro = novoNome.trim().split(' ')[0];
+                        setNovoVars(primeiro ? { '1': primeiro } : {});
+                      }}
+                      style={{ width: '100%', boxSizing: 'border-box', padding: '8px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-primary)', fontSize: '0.875rem', marginBottom: 10 }}
+                    >
+                      <option value="">Escolha…</option>
+                      {templatesOk.map((t) => (
+                        <option key={t.id} value={t.id}>{t.display_name}</option>
+                      ))}
+                    </select>
+
+                    {tplEscolhido && Array.from({ length: qtdVars }, (_, i) => String(i + 1)).map((n) => (
+                      <div key={n} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', width: 34, flexShrink: 0 }}>
+                          {`{{${n}}}`}
+                        </span>
+                        <input
+                          value={novoVars[n] ?? ''}
+                          onChange={(e) => setNovoVars((p) => ({ ...p, [n]: e.target.value }))}
+                          style={{ flex: 1, padding: '6px 9px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg-main)', color: 'var(--text-primary)', fontSize: '0.83rem' }}
+                        />
+                      </div>
+                    ))}
+
+                    {tplEscolhido && (
+                      <div style={{ marginTop: 10, padding: '9px 11px', borderRadius: 7, background: 'var(--input-bg)', border: '1px solid var(--border)' }}>
+                        <p style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-secondary)', margin: '0 0 5px', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                          O cliente vai ler
+                        </p>
+                        <p style={{ fontSize: '0.83rem', color: 'var(--text-primary)', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                          {previaTemplate}
+                        </p>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
+            {erroNova && (
+              <p style={{ fontSize: '0.78rem', color: '#dc2626', background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 7, padding: '7px 10px', margin: '10px 0 0' }}>
+                {erroNova}
+              </p>
+            )}
+
+            <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', marginTop: '1.1rem' }}>
+              <button className="btn-secondary" onClick={fecharNova}>Cancelar</button>
+              <button
+                className="btn-primary"
+                disabled={
+                  enviandoNova
+                  || novoFone.replace(/\D/g, '').length < 10
+                  || (janela === 'aberta' ? !novoTexto.trim() : !novoTplId)
+                  || janela === 'checando' || janela === null
+                }
+                onClick={enviarNovaConversa}
+              >
+                {enviandoNova
+                  ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} />
+                  : janela === 'fechada' ? 'Enviar template' : 'Enviar'}
+              </button>
             </div>
           </div>
         </div>

@@ -2634,7 +2634,11 @@ async function buscarUltimoDisparo(
       .from('messages')
       .select('content, created_at')
       .eq('conversation_id', conversationId)
-      .not('campaign_id', 'is', null)
+      // Campanha OU qualquer outro envio ativo da loja (aviso de lista de
+      // espera, conversa iniciada à mão). Perguntar só por `campaign_id`
+      // deixava o bot sem o texto que a loja acabou de mandar nesses casos —
+      // o mesmo defeito de filtro que escondia esses envios da aba Disparos.
+      .or('campaign_id.not.is.null,envio_ativo.not.is.null')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();

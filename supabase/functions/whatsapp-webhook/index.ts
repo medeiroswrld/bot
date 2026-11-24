@@ -283,6 +283,16 @@ async function acharOuCriarConversa(
           // O nome do perfil só preenche vazio: o que já está lá pode ter vindo
           // do cadastro da loja, que costuma ser mais completo.
           customer_name: existente.customer_name || senderName || null,
+          // Conversa encerrada REABRE quando o cliente volta a escrever.
+          //
+          // `closed` é arquivo, não mordaça: o bot só fica mudo em `human` e
+          // `pending`. Sem esta linha a conversa ficaria fora da caixa de
+          // entrada com o bot respondendo por trás — o lojista não veria a
+          // conversa acontecendo.
+          //
+          // Espalhado por spread, e não fixo, porque escrever `status` sempre
+          // atropelaria um vendedor que assumiu (`human` viraria `bot`).
+          ...(String(existente.status ?? '') === 'closed' ? { status: 'bot' } : {}),
         })
         .eq('id', existente.id)
         .select()
@@ -347,6 +357,26 @@ async function acharOuCriarConversa(
     }
     return null;
   }
+
+  // Mesma reabertura do caminho acima, para quem casou pelo telefone literal.
+  //
+  // Não dá pra pôr `status` no upsert: o ON CONFLICT escreve TODAS as colunas
+  // passadas, então ele viraria `bot` em cima de um vendedor que assumiu. Por
+  // isso vem depois, e só quando a linha voltou encerrada.
+  if (String((nova as { status?: string }).status ?? '') === 'closed') {
+    const { data: reaberta } = await supabase
+      .from('conversations')
+      .update({ status: 'bot' })
+      .eq('id', nova.id)
+      // Condição no UPDATE: se outra mensagem reabriu no mesmo instante, ou um
+      // vendedor assumiu entre o upsert e aqui, não atropela.
+      .eq('status', 'closed')
+      .select()
+      .single();
+    console.log(`[WH] conversa ${nova.id} estava encerrada — reaberta pelo cliente`);
+    return (reaberta ?? { ...nova, status: 'bot' }) as ConvRow;
+  }
+
   return nova as ConvRow;
 }
 
