@@ -10,6 +10,31 @@ import { podeDisparar, COLUNAS_DISPARO } from '../_shared/botGuards.ts';
 // Rate limit: ~1s entre envios pra não estourar o limite da Meta
 const DELAY_BETWEEN_SENDS_MS = 1100;
 
+/**
+ * Quem REALMENTE recebeu uma campanha anterior.
+ *
+ * ── Por que não é só 'sent' (queimou em 24/11) ────────────────────────────
+ *
+ * `campaign_sends.status` AVANÇA: a linha nasce `pending`, vira `sent` no
+ * envio e o whatsapp-webhook a promove pra `delivered` e depois `read` quando
+ * a Meta confirma. Ou seja, `sent` é um estado de PASSAGEM — quem recebeu de
+ * verdade quase nunca está nele.
+ *
+ * Medido na campanha do feirão de 23/11: 137 `delivered`, 34 `read`, e apenas
+ * **3** `sent`. O filtro "pular quem já recebeu ESTE template" perguntava
+ * `.eq('status','sent')` e por isso reconheceu 3 de 174. No disparo seguinte,
+ * 129 das 150 pessoas eram repetidas — e as 23 que chegaram a sair tinham
+ * TODAS recebido o mesmo convite no dia anterior.
+ *
+ * Isso não custa só template: mandar a mesma mensagem duas vezes em 24h é o
+ * que gera denúncia, e denúncia de cliente foi exatamente o motivo de a Meta
+ * negar 6 de 6 templates desta loja em 20/11.
+ *
+ * `failed` fica de fora porque não chegou, e `pending` porque nem saiu — essa
+ * gente PRECISA entrar no próximo disparo.
+ */
+const STATUS_RECEBIDO = ['sent', 'delivered', 'read'];
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DB = any;
 interface Recipient {
@@ -427,7 +452,7 @@ async function refinarPublico(
 
     if (ids.length) {
       let sq = supabase.from('campaign_sends')
-        .select('customer_phone').in('campaign_id', ids).eq('status', 'sent');
+        .select('customer_phone').in('campaign_id', ids).in('status', STATUS_RECEBIDO);
       if (excluir === 'qualquer') {
         const dias = Number(filter.excluir_dias) || 7;
         sq = sq.gte('sent_at', new Date(Date.now() - dias * 86400000).toISOString());

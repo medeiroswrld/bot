@@ -23,6 +23,11 @@ const fmtBRL = (n) => `R$ ${Number(n).toLocaleString('pt-BR', { minimumFractionD
 
 const varCount = (tpl) => (tpl?.body_variables?.length ?? 0);
 
+// Telefone só com dígitos. Mesma função do `refinarPublico` no send-campaign,
+// de propósito: "(15) 99999-9999" e "5515999999999" são a mesma pessoa, e a
+// tela tem que contar igual ao que o servidor vai mandar.
+const soDigitos = (p) => String(p ?? '').replace(/\D/g, '');
+
 const StatusBadge = ({ status }) => {
     const c = CAMP_STATUS[status] ?? CAMP_STATUS.draft;
     return <span className="status-badge" style={{ background: c.bg, color: c.color }}>{c.label}</span>;
@@ -74,13 +79,23 @@ const CampaignWizard = ({ onClose }) => {
             const ids = (camps || []).map(c => c.id);
             if (!ids.length) { if (!cancelado) setJaReceberam(new Set()); return; }
 
+            // `sent` é estado de PASSAGEM: o webhook promove pra `delivered` e
+            // `read`. Perguntar só por ele encontrava quase ninguém — na
+            // campanha de 23/11 eram 137 delivered, 34 read e 3 sent, então o
+            // filtro reconheceu 3 de 174 e o disparo seguinte repetiu 129
+            // pessoas. `failed` fica fora (não chegou) e `pending` também
+            // (nem saiu — essa gente precisa entrar no próximo).
             let sq = supabase.from('campaign_sends')
-                .select('customer_phone').in('campaign_id', ids).eq('status', 'sent');
+                .select('customer_phone').in('campaign_id', ids)
+                .in('status', ['sent', 'delivered', 'read']);
             if (excluirJaRecebeu === 'qualquer') {
                 sq = sq.gte('sent_at', new Date(Date.now() - (Number(excluirDias) || 7) * 86400000).toISOString());
             }
             const { data } = await sq;
-            if (!cancelado) setJaReceberam(new Set((data || []).map(s => String(s.customer_phone))));
+            // Por DÍGITOS, igual o servidor faz. Comparando a string crua, o
+            // contador da tela divergia do que ia sair de verdade sempre que o
+            // cadastro tinha máscara diferente do histórico.
+            if (!cancelado) setJaReceberam(new Set((data || []).map(s => soDigitos(s.customer_phone))));
         })();
         return () => { cancelado = true; };
     }, [excluirJaRecebeu, excluirDias, templateId]);
@@ -122,7 +137,7 @@ const CampaignWizard = ({ onClose }) => {
     // são 30 e saem 12.
     const publicoFinal = useMemo(() => publicoBase.filter(l => {
         if (idade !== 'todos' && classificarIdade(l) !== idade) return false;
-        if (excluirJaRecebeu !== 'nenhum' && jaReceberam.has(String(l.phone))) return false;
+        if (excluirJaRecebeu !== 'nenhum' && jaReceberam.has(soDigitos(l.phone))) return false;
         return true;
     }), [publicoBase, idade, excluirJaRecebeu, jaReceberam]);
 
