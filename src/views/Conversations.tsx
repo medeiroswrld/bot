@@ -287,6 +287,32 @@ const ROTULO_ENVIO_ATIVO: Record<string, string> = {
   iniciada:     'Iniciada pela loja',
 };
 
+/**
+ * Põe uma conversa na lista: substitui se já existe, insere se não, e reordena.
+ *
+ * POR QUE NÃO DÁ PRA SÓ EMPILHAR NO INSERT (queimou em 24/11):
+ * o handler de INSERT fazia `[nova, ...prev]` sem checar. Num disparo, a loja
+ * viu a MESMA pessoa três vezes na lista enquanto o banco tinha uma conversa
+ * só — o evento chegou mais de uma vez e cada cópia virou uma linha. O handler
+ * de mensagens já se protegia assim; o de conversas, não.
+ *
+ * E por que o UPDATE também passa por aqui: ele usava `.map`, que descarta
+ * silenciosamente a linha que não está na lista. Conversa que recebeu UPDATE
+ * sem estar carregada simplesmente não aparecia até alguém recarregar a tela.
+ *
+ * Idempotente de propósito: não importa quantas vezes o mesmo evento chegue,
+ * nem em que ordem — perseguir o ciclo de vida da inscrição do realtime é bem
+ * mais arriscado que deixar a aplicação do evento ser repetível.
+ */
+function aplicarConversa(prev: Conversation[], row: Conversation): Conversation[] {
+  const existe = prev.some((c) => c.id === row.id);
+  const lista = existe
+    ? prev.map((c) => (c.id === row.id ? row : c))
+    : [row, ...prev];
+  return lista.sort((a, b) =>
+    String(b.last_message_at ?? '').localeCompare(String(a.last_message_at ?? '')));
+}
+
 /** Quantas variáveis {{n}} o corpo do template tem. */
 function contarVariaveis(corpo: string | null | undefined): number {
   const achados = String(corpo ?? '').match(/\{\{(\d+)\}\}/g) ?? [];
@@ -1186,7 +1212,7 @@ export default function Conversations() {
           console.log('[RT conversations] evento recebido:', eventType);
           if (eventType === 'INSERT') {
             const added = payload.new as Conversation;
-            setConversations((prev) => [added, ...prev]);
+            setConversations((prev) => aplicarConversa(prev, added));
           } else if (eventType === 'UPDATE') {
             const updated = payload.new as Conversation;
 
@@ -1219,11 +1245,7 @@ export default function Conversations() {
               setAlertConvIds((prev) => new Set([...prev, convId]));
             }
 
-            setConversations((prev) =>
-              prev
-                .map((c) => (c.id === updated.id ? updated : c))
-                .sort((a, b) => (b.last_message_at ?? '').localeCompare(a.last_message_at ?? '')),
-            );
+            setConversations((prev) => aplicarConversa(prev, updated));
           } else if (eventType === 'DELETE') {
             const removed = payload.old as { id: string };
             setConversations((prev) => prev.filter((c) => c.id !== removed.id));
