@@ -566,6 +566,49 @@ async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]>
     }
     // Base antiga importada pelo lojista. Fica separada dos leads que o bot
     // gerou pra dar pra disparar só pra ela — que é o motivo da importação.
+    // Quem chegou por ANÚNCIO, opcionalmente de UM anúncio só.
+    //
+    // `ad_referrals` guarda o `lead_id` desde 31/08 — a ligação já existia e
+    // nada a usava pra montar público. Na DSC eram 153 leads de anúncio com
+    // apenas 1 já alcançado por disparo.
+    //
+    // `filter.ad` é o `headline` do anúncio; vazio = todos. Separar importa
+    // porque os anúncios não pedem a mesma mensagem: quem clicou em "quero
+    // consignar meu veículo" quer VENDER, e receberia convite pra comprar.
+    case 'leads_by_ad': {
+      const anuncio = String(filter.ad ?? '').trim();
+      let q = supabase.from('ad_referrals')
+        .select('lead_id').eq('user_id', uid).not('lead_id', 'is', null);
+      if (anuncio) q = q.eq('headline', anuncio);
+      const { data: refs, error: erroRefs } = await q;
+      if (erroRefs) {
+        // Sem isto a falha viraria "nenhum destinatário" e a campanha fecharia
+        // como concluída sem mandar nada — calada, que é o modo de falha caro
+        // deste sistema.
+        console.error('[send-campaign] leitura de ad_referrals falhou:', erroRefs.code, erroRefs.message);
+        throw new Error(`Não consegui ler a origem dos anúncios: ${erroRefs.message}`);
+      }
+
+      const ids = [...new Set((refs ?? []).map((r: DB) => String(r.lead_id)))];
+      if (!ids.length) return [];
+
+      // Em lotes: o `in()` do PostgREST viaja na URL, e alguns milhares de
+      // UUIDs estouram o limite do servidor — com a requisição falhando
+      // inteira, não cortando. Hoje são 153; o lote é pro dia em que não for.
+      const LOTE_IDS = 200;
+      const todos: DB[] = [];
+      for (let i = 0; i < ids.length; i += LOTE_IDS) {
+        const { data, error } = await supabase
+          .from('leads').select('id, name, phone, created_at, client_type')
+          .in('id', ids.slice(i, i + LOTE_IDS)).not('phone', 'is', null);
+        if (error) {
+          console.error('[send-campaign] leitura de leads do anúncio falhou:', error.code, error.message);
+          throw new Error(`Não consegui ler os leads do anúncio: ${error.message}`);
+        }
+        todos.push(...(data ?? []));
+      }
+      return mapLeads(todos);
+    }
     case 'leads_by_source': {
       const sources = filter.sources ?? ['importacao'];
       const { data } = await supabase.from('leads').select('id, name, phone, created_at, client_type')

@@ -48,6 +48,14 @@ const CampaignWizard = ({ onClose }) => {
     const [daysInactive, setDaysInactive] = useState(30);
     const [interestModel, setInterestModel] = useState('');
     const [customPhones, setCustomPhones] = useState('');
+    // Público "veio de anúncio". `adEscolhido` é o headline; vazio = todos.
+    // Separado por anúncio porque eles não pedem a mesma mensagem — quem
+    // clicou em "quero consignar meu veículo" quer VENDER, e um convite de
+    // feirão pra comprar é a mensagem errada pra ele.
+    const [adEscolhido, setAdEscolhido] = useState('');
+    const [anuncios, setAnuncios] = useState([]);           // [{ headline, leads }]
+    const [leadsDeAnuncio, setLeadsDeAnuncio] = useState(new Set());
+    const [carregandoAds, setCarregandoAds] = useState(false);
     const [sending, setSending] = useState(false);
     // Refinamentos: combinam com QUALQUER público acima, em vez de virarem
     // opções novas na lista (senão "base importada" × "antigos" × "não recebeu"
@@ -100,6 +108,57 @@ const CampaignWizard = ({ onClose }) => {
         return () => { cancelado = true; };
     }, [excluirJaRecebeu, excluirDias, templateId]);
 
+    /**
+     * Carrega os anúncios que geraram lead, e quais leads vieram de cada um.
+     *
+     * Uma consulta só, trazendo `headline` + `lead_id`, e o agrupamento é
+     * feito aqui. Pedir a contagem por anúncio ao servidor seria uma chamada
+     * por anúncio, e a lista do seletor precisa dos dois números de qualquer
+     * jeito (quantos no total e quantos do escolhido).
+     */
+    useEffect(() => {
+        if (audienceType !== 'leads_by_ad') return;
+        let cancelado = false;
+        setCarregandoAds(true);
+        (async () => {
+            const { data, error } = await supabase
+                .from('ad_referrals')
+                .select('headline, lead_id')
+                .not('lead_id', 'is', null);
+            if (cancelado) return;
+            setCarregandoAds(false);
+            if (error) { console.error('[Campaigns] ad_referrals:', error.message); return; }
+
+            const porAnuncio = new Map();
+            for (const r of (data || [])) {
+                const h = String(r.headline ?? '').trim() || '(sem título)';
+                if (!porAnuncio.has(h)) porAnuncio.set(h, new Set());
+                porAnuncio.get(h).add(String(r.lead_id));
+            }
+            setAnuncios([...porAnuncio.entries()]
+                .map(([headline, ids]) => ({ headline, leads: ids.size }))
+                .sort((a, b) => b.leads - a.leads));
+        })();
+        return () => { cancelado = true; };
+    }, [audienceType]);
+
+    // Os lead_ids do anúncio escolhido (ou de todos). Derivado da mesma
+    // consulta acima, via `anuncios` — mas precisa dos ids, não da contagem,
+    // então relê. Barato: a tabela é pequena e isto só roda neste público.
+    useEffect(() => {
+        if (audienceType !== 'leads_by_ad') { setLeadsDeAnuncio(new Set()); return; }
+        let cancelado = false;
+        (async () => {
+            let q = supabase.from('ad_referrals').select('lead_id').not('lead_id', 'is', null);
+            if (adEscolhido) q = q.eq('headline', adEscolhido);
+            const { data, error } = await q;
+            if (cancelado) return;
+            if (error) { console.error('[Campaigns] leads do anúncio:', error.message); return; }
+            setLeadsDeAnuncio(new Set((data || []).map(r => String(r.lead_id))));
+        })();
+        return () => { cancelado = true; };
+    }, [audienceType, adEscolhido]);
+
     const audienceFilter = useMemo(() => {
         // Os refinamentos viajam junto com o filtro do público, pra qualquer tipo.
         const refino = {
@@ -111,11 +170,12 @@ const CampaignWizard = ({ onClose }) => {
             case 'leads_inactive': return { ...refino, days_inactive: Number(daysInactive) || 30 };
             case 'leads_by_interest_vehicle': return { ...refino, model: interestModel };
             case 'leads_by_source': return { ...refino, sources: ['importacao'] };
+            case 'leads_by_ad': return { ...refino, ad: adEscolhido };
             case 'evento_agendados': return { ...refino, so_futuras: true };
             case 'custom_phones': return { ...refino, phones: customPhones.split('\n').map(p => p.replace(/\D/g, '')).filter(Boolean) };
             default: return refino;
         }
-    }, [audienceType, statuses, daysInactive, interestModel, customPhones, idade, excluirJaRecebeu, excluirDias, limite]);
+    }, [audienceType, statuses, daysInactive, interestModel, customPhones, adEscolhido, idade, excluirJaRecebeu, excluirDias, limite]);
 
     // Público base, antes dos refinamentos (client-side, a partir do context).
     const publicoBase = useMemo(() => {
@@ -128,9 +188,10 @@ const CampaignWizard = ({ onClose }) => {
                 return withPhone.filter(l => new Date(l.date || 0).getTime() < cutoff);
             }
             case 'leads_by_source': return withPhone.filter(l => l.source === 'importacao');
+            case 'leads_by_ad': return withPhone.filter(l => leadsDeAnuncio.has(String(l.id)));
             default: return [];
         }
-    }, [audienceType, leads, statuses, daysInactive]);
+    }, [audienceType, leads, statuses, daysInactive, leadsDeAnuncio]);
 
     // Mesmas regras do refinarPublico no send-campaign — o contador tem que
     // bater com o que vai sair de verdade, senão o lojista dispara achando que
@@ -331,6 +392,7 @@ const CampaignWizard = ({ onClose }) => {
                         {[
                             ['all_leads', 'Todos os leads'],
                             ['leads_by_source', 'Base importada (clientes antigos)'],
+                            ['leads_by_ad', 'Veio de anúncio'],
                             ['leads_by_status', 'Leads em determinados status'],
                             ['leads_inactive', 'Leads inativos há X dias'],
                             ['leads_by_interest_vehicle', 'Lista de espera por modelo'],
@@ -359,6 +421,42 @@ const CampaignWizard = ({ onClose }) => {
                                 <input type="number" value={daysInactive} onChange={e => setDaysInactive(e.target.value)} min={1} style={{ maxWidth: 120 }} />
                             </div>
                         )}
+                        {audienceType === 'leads_by_ad' && (
+                            <div className="form-group">
+                                <label>Qual anúncio</label>
+                                {carregandoAds ? (
+                                    <p className="text-muted" style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> Lendo os anúncios...
+                                    </p>
+                                ) : anuncios.length === 0 ? (
+                                    <p className="text-muted" style={{ fontSize: '0.8rem' }}>
+                                        Nenhum lead veio de anúncio ainda. A origem começa a ser gravada quando alguém
+                                        clica num anúncio que abre o WhatsApp.
+                                    </p>
+                                ) : (
+                                    <>
+                                        <select value={adEscolhido} onChange={e => setAdEscolhido(e.target.value)}>
+                                            <option value="">Todos os anúncios</option>
+                                            {anuncios.map(a => (
+                                                <option key={a.headline} value={a.headline}>
+                                                    {a.headline} ({a.leads})
+                                                </option>
+                                            ))}
+                                        </select>
+                                        {/* O aviso existe porque "todos os anúncios" quase nunca é o
+                                            que a loja quer: quem clicou em "quero consignar meu
+                                            veículo" quer VENDER o carro, e receberia um convite pra
+                                            comprar. O número junto é o que faz a pessoa reparar. */}
+                                        <small className="text-muted" style={{ fontSize: '0.78rem', lineHeight: 1.5, display: 'block', marginTop: 6 }}>
+                                            Cada anúncio trouxe gente com intenção diferente — quem clicou em
+                                            consignar quer <strong>vender</strong>, não comprar. Escolher o anúncio
+                                            costuma valer mais que mandar pros {anuncios.reduce((s, a) => s + a.leads, 0)} de uma vez.
+                                        </small>
+                                    </>
+                                )}
+                            </div>
+                        )}
+
                         {audienceType === 'leads_by_interest_vehicle' && (
                             <div className="form-group" style={{ marginTop: 8 }}>
                                 <label>Modelo procurado</label>
