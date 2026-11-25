@@ -124,7 +124,7 @@ const StatusBadge = React.memo(function StatusBadge({ status }: { status: Conver
 // ─── ConvItem ─────────────────────────────────────────────────────────────────
 
 const ConvItem = React.memo(function ConvItem({
-  conv, lastMsg, active, isAlert, onClick, rotuloNumero,
+  conv, lastMsg, active, isAlert, onClick, rotuloNumero, anuncio,
 }: {
   conv: Conversation;
   lastMsg: Message | null;
@@ -134,6 +134,10 @@ const ConvItem = React.memo(function ConvItem({
   // Qual número NOSSO recebeu esta conversa. Só chega preenchido quando a loja
   // tem mais de um — com um só, seria a mesma etiqueta em toda linha.
   rotuloNumero?: string;
+  // Qual anúncio trouxe a pessoa. É o que o vendedor precisa saber ANTES de
+  // puxar assunto: quem clicou em "quero consignar meu veículo" quer vender o
+  // carro dele, e tratar como comprador é começar errado.
+  anuncio?: string;
 }) {
   const showAlert = isAlert && !active;
   return (
@@ -175,6 +179,19 @@ const ConvItem = React.memo(function ConvItem({
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
           <StatusBadge status={conv.status} />
           <AtendenteBadge nome={(conv as { atendente?: string | null }).atendente} />
+          {anuncio && (
+            <span
+              title={`Veio do anúncio: ${anuncio}`}
+              style={{
+                fontSize: '0.62rem', fontWeight: 700, padding: '1px 6px', borderRadius: 999,
+                background: '#ede9fe', color: '#6d28d9', border: '1px solid #c4b5fd',
+                flexShrink: 1, minWidth: 0, overflow: 'hidden',
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}
+            >
+              {anuncio}
+            </span>
+          )}
           {rotuloNumero && (
             <span
               title={`Cliente falou com o número ${rotuloNumero}`}
@@ -569,7 +586,13 @@ export default function Conversations() {
   // Serve pra análise: resposta a disparo é um público com comportamento
   // diferente (chegou porque a loja chamou, não porque procurou), e misturado
   // com o orgânico não dá pra medir se a campanha converteu.
-  const [soDisparos, setSoDisparos]       = useState(false);
+  // De onde veio a conversa. Três perguntas diferentes, não um booleano:
+  // "todas", "a loja falou primeiro" e "o cliente clicou num anúncio".
+  const [origem, setOrigem]               = useState<'todas' | 'disparos' | 'anuncio'>('todas');
+  // Qual anúncio, quando a origem é anúncio. Vazio = todos.
+  const [adEscolhido, setAdEscolhido]     = useState('');
+  // conversation_id -> headline do anúncio que trouxe a pessoa.
+  const [anuncioPorConversa, setAnuncioPorConversa] = useState<Map<string, string>>(new Map());
 
   // ── Nova conversa (a loja fala primeiro) ─────────────────────────────────
   const [novaAberta, setNovaAberta]   = useState(false);
@@ -740,6 +763,40 @@ export default function Conversations() {
       if (error) { console.error('[Conversations] disparos por conversa:', error.message); return; }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       setConvsDeDisparo(new Set(((data ?? []) as any[]).map((m) => String(m.conversation_id))));
+    })();
+    return () => { cancelado = true; };
+  }, [user?.id, conversations.length]);
+
+  /**
+   * Qual anúncio trouxe cada conversa.
+   *
+   * `ad_referrals` guarda isso desde 31/08 e a tela de Conversas nunca mostrou
+   * — o vendedor abria o atendimento sem saber o que a pessoa tinha clicado.
+   * É a informação mais útil que existe pra quem vai puxar assunto: quem veio
+   * de "quero consignar meu veículo" quer VENDER o carro, e tratar como
+   * comprador é começar errado.
+   *
+   * Uma linha por conversa: fica a PRIMEIRA (o anúncio que originou), não a
+   * última — quem clicou em dois anúncios chegou pelo primeiro.
+   */
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelado = false;
+    (async () => {
+      const { data, error } = await db
+        .from('ad_referrals')
+        .select('conversation_id, headline, created_at')
+        .not('conversation_id', 'is', null)
+        .order('created_at', { ascending: true });
+      if (cancelado) return;
+      if (error) { console.error('[Conversations] ad_referrals:', error.message); return; }
+      const mapa = new Map<string, string>();
+      for (const r of ((data ?? []) as Array<{ conversation_id: string; headline: string | null }>)) {
+        const id = String(r.conversation_id);
+        if (mapa.has(id)) continue;                 // mantém o primeiro
+        mapa.set(id, String(r.headline ?? '').trim() || '(sem título)');
+      }
+      setAnuncioPorConversa(mapa);
     })();
     return () => { cancelado = true; };
   }, [user?.id, conversations.length]);
@@ -1577,9 +1634,27 @@ export default function Conversations() {
   // deixaram passar — senão a aba anunciaria 174 e mostraria 3 com o filtro de
   // canal ligado.
   const totalDisparos = conversations.filter((c) => convsDeDisparo.has(c.id)).length;
+  const totalAnuncio  = conversations.filter((c) => anuncioPorConversa.has(c.id)).length;
+
+  // Anúncios que têm conversa carregada, com quantas cada um. Ordenado pelo
+  // maior: o seletor serve pra escolher um grupo, e o grupo grande é o que a
+  // loja procura primeiro.
+  const anunciosDaLista = useMemo(() => {
+    const conta = new Map<string, number>();
+    for (const c of conversations) {
+      const a = anuncioPorConversa.get(c.id);
+      if (a) conta.set(a, (conta.get(a) ?? 0) + 1);
+    }
+    return [...conta.entries()].sort((x, y) => y[1] - x[1]);
+  }, [conversations, anuncioPorConversa]);
 
   const filtered = conversations.filter((c) => {
-    if (soDisparos && !convsDeDisparo.has(c.id)) return false;
+    if (origem === 'disparos' && !convsDeDisparo.has(c.id)) return false;
+    if (origem === 'anuncio') {
+      const veioDe = anuncioPorConversa.get(c.id);
+      if (!veioDe) return false;
+      if (adEscolhido && veioDe !== adEscolhido) return false;
+    }
     if (filtroCanal !== 'todos') {
       // Conversa antiga pode nao ter canal gravado; nesses casos e WhatsApp.
       const canalDaConversa = String((c as { channel?: string }).channel ?? 'whatsapp');
@@ -1706,28 +1781,50 @@ export default function Conversations() {
               Vem ANTES do filtro de situação porque é uma pergunta anterior
               ("de que público eu estou falando?"), e só aparece quando existe
               disparo — com zero, seria um botão que não muda nada. */}
-          {totalDisparos > 0 && (
-            <div style={{
-              display: 'flex', gap: 2, padding: 2, borderRadius: 8, marginBottom: 7,
-              background: 'var(--input-bg)', border: '1px solid var(--border)',
-            }}>
-              {[
-                { v: false, label: `Todas (${conversations.length})` },
-                { v: true,  label: `Disparos (${totalDisparos})` },
-              ].map((opt) => (
-                <button key={String(opt.v)} type="button" onClick={() => setSoDisparos(opt.v)}
+          {(totalDisparos > 0 || totalAnuncio > 0) && (
+            <>
+              <div style={{
+                display: 'flex', gap: 2, padding: 2, borderRadius: 8, marginBottom: 7,
+                background: 'var(--input-bg)', border: '1px solid var(--border)',
+              }}>
+                {([
+                  { v: 'todas'    as const, label: `Todas (${conversations.length})`, mostra: true },
+                  { v: 'disparos' as const, label: `Disparos (${totalDisparos})`,     mostra: totalDisparos > 0 },
+                  { v: 'anuncio'  as const, label: `Anúncio (${totalAnuncio})`,       mostra: totalAnuncio > 0 },
+                ]).filter((o) => o.mostra).map((opt) => (
+                  <button key={opt.v} type="button" onClick={() => { setOrigem(opt.v); if (opt.v !== 'anuncio') setAdEscolhido(''); }}
+                    style={{
+                      flex: 1, padding: '5px 2px', fontSize: '0.7rem', borderRadius: 6,
+                      cursor: 'pointer', border: 'none', whiteSpace: 'nowrap',
+                      background: origem === opt.v ? 'var(--bg-card)' : 'transparent',
+                      color: origem === opt.v ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      fontWeight: origem === opt.v ? 700 : 500,
+                      boxShadow: origem === opt.v ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
+                    }}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Qual anúncio. Só na aba de anúncio, e só quando há mais de um
+                  — com um anúncio só, o seletor não escolheria nada. */}
+              {origem === 'anuncio' && anunciosDaLista.length > 1 && (
+                <select
+                  value={adEscolhido}
+                  onChange={(e) => setAdEscolhido(e.target.value)}
                   style={{
-                    flex: 1, padding: '5px 2px', fontSize: '0.7rem', borderRadius: 6,
-                    cursor: 'pointer', border: 'none', whiteSpace: 'nowrap',
-                    background: soDisparos === opt.v ? 'var(--bg-card)' : 'transparent',
-                    color: soDisparos === opt.v ? 'var(--text-primary)' : 'var(--text-secondary)',
-                    fontWeight: soDisparos === opt.v ? 700 : 500,
-                    boxShadow: soDisparos === opt.v ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
-                  }}>
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+                    width: '100%', boxSizing: 'border-box', marginBottom: 7,
+                    padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)',
+                    background: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: '0.72rem',
+                  }}
+                >
+                  <option value="">Todos os anúncios ({totalAnuncio})</option>
+                  {anunciosDaLista.map(([headline, qtd]) => (
+                    <option key={headline} value={headline}>{headline} ({qtd})</option>
+                  ))}
+                </select>
+              )}
+            </>
           )}
 
           {/* Situação do atendimento. Segmentado, sem borda por item: cinco
@@ -1831,6 +1928,7 @@ export default function Conversations() {
                 isAlert={alertConvIds.has(conv.id)}
                 onClick={() => selectConversation(conv.id)}
                 rotuloNumero={rotulosNumero[String((conv as { phone_number_id?: string | null }).phone_number_id ?? '')]}
+                anuncio={anuncioPorConversa.get(conv.id)}
               />
             ))}
         </div>
