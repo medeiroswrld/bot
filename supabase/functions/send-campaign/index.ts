@@ -546,6 +546,21 @@ async function resolveAudience(supabase: DB, campaign: DB): Promise<Recipient[]>
       // Só as visitas que ainda vão acontecer, quando pedido — lembrete de
       // visita que já passou é ruído.
       if (filter.so_futuras) aq = aq.gte('appointment_date', new Date().toISOString().slice(0, 10));
+
+      // UM DIA só. Num evento de vários dias, "todos os agendados" manda o
+      // lembrete de quinta pra quem marcou domingo — a pessoa aparece no dia
+      // errado, ou não aparece nenhum. A loja dispara um por dia de manhã.
+      if (filter.dia) aq = aq.eq('appointment_date', filter.dia);
+
+      // Só quem marcou SEM horário.
+      //
+      // Existe porque os dois lembretes são complementares, não concorrentes:
+      // `send-visit-reminders` cuida sozinho de quem tem hora marcada e PULA
+      // quem não tem (o template dele exige o parâmetro de horário, e o que
+      // está em `appointment_time` nesses casos é só a abertura do evento —
+      // ninguém combinou aquilo). Sem este filtro, quem tem hora receberia o
+      // automático E o manual no mesmo dia.
+      if (filter.so_sem_horario) aq = aq.eq('sem_horario', true);
       aq = aq.order('appointment_date', { ascending: true });
       const { data, error } = await aq;
       if (error) {
