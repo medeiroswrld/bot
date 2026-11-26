@@ -124,7 +124,7 @@ const StatusBadge = React.memo(function StatusBadge({ status }: { status: Conver
 // ─── ConvItem ─────────────────────────────────────────────────────────────────
 
 const ConvItem = React.memo(function ConvItem({
-  conv, lastMsg, active, isAlert, onClick, rotuloNumero, anuncio,
+  conv, lastMsg, active, isAlert, onClick, rotuloNumero, anuncio, trecho,
 }: {
   conv: Conversation;
   lastMsg: Message | null;
@@ -138,6 +138,9 @@ const ConvItem = React.memo(function ConvItem({
   // puxar assunto: quem clicou em "quero consignar meu veículo" quer vender o
   // carro dele, e tratar como comprador é começar errado.
   anuncio?: string;
+  // Pedaço da mensagem que casou com a busca. Preenchido só quando a conversa
+  // entrou na lista pelo TEXTO, não pelo nome.
+  trecho?: string;
 }) {
   const showAlert = isAlert && !active;
   return (
@@ -204,7 +207,20 @@ const ConvItem = React.memo(function ConvItem({
               {rotuloNumero}
             </span>
           )}
-          {lastMsg && (
+          {/* Buscando por texto, o trecho que CASOU vale mais que a última
+              mensagem: é ele que diz se vale abrir a conversa. */}
+          {trecho ? (
+            <span
+              title={trecho}
+              style={{
+                fontSize: '0.75rem', color: 'var(--text-primary)', overflow: 'hidden',
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+                background: '#fef9c3', borderRadius: 4, padding: '0 4px',
+              }}
+            >
+              {trecho}
+            </span>
+          ) : lastMsg && (
             <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
               {lastMsg.role !== 'customer' ? '← ' : ''}{lastMsg.content.substring(0, 50)}
             </span>
@@ -328,6 +344,22 @@ function aplicarConversa(prev: Conversation[], row: Conversation): Conversation[
     : [row, ...prev];
   return lista.sort((a, b) =>
     String(b.last_message_at ?? '').localeCompare(String(a.last_message_at ?? '')));
+}
+
+/**
+ * Um pedaço da mensagem em volta do termo buscado.
+ *
+ * Mostrar a mensagem inteira não serve: a resposta do bot tem parágrafos, e a
+ * linha da lista tem ~250px. O que o vendedor precisa ver é a FRASE onde o
+ * carro foi citado — é isso que diz se vale abrir a conversa.
+ */
+function trechoComTermo(texto: string, termo: string, volta = 34): string {
+  const limpo = texto.replace(/\s+/g, ' ').trim();
+  const i = limpo.toLowerCase().indexOf(termo.toLowerCase());
+  if (i < 0) return limpo.slice(0, 90);
+  const ini = Math.max(0, i - volta);
+  const fim = Math.min(limpo.length, i + termo.length + volta * 2);
+  return `${ini > 0 ? '…' : ''}${limpo.slice(ini, fim)}${fim < limpo.length ? '…' : ''}`;
 }
 
 /** Quantas variáveis {{n}} o corpo do template tem. */
@@ -610,6 +642,11 @@ export default function Conversations() {
   const [convsDeDisparo, setConvsDeDisparo] = useState<Set<string>>(new Set());
   const [searchRaw, setSearchRaw]         = useState('');
   const [search, setSearch]               = useState('');
+  // Conversas achadas pelo TEXTO das mensagens, com o trecho que casou.
+  // Separado do filtro de nome/telefone porque vem do servidor: as mensagens
+  // não estão todas carregadas na tela (são 65 mil).
+  const [achadosNaConversa, setAchadosNaConversa] = useState<Map<string, string>>(new Map());
+  const [buscandoTexto, setBuscandoTexto] = useState(false);
   const [alertConvIds, setAlertConvIds]   = useState<Set<string>>(new Set());
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [notifPerm,      setNotifPerm]      = useState<NotificationPermission>(
@@ -696,6 +733,58 @@ export default function Conversations() {
     const timer = setTimeout(() => setSearch(searchRaw), 300);
     return () => clearTimeout(timer);
   }, [searchRaw]);
+
+  /**
+   * Busca dentro do TEXTO das mensagens.
+   *
+   * POR QUE NO SERVIDOR: a tela carrega só a última mensagem de cada conversa.
+   * São 65 mil mensagens no banco (53 MB) — filtrar no navegador exigiria
+   * baixar tudo. O `ilike` roda em ~60ms com varredura, medido, então não
+   * precisa de índice ainda. Quando passar de uns 300 mil, é hora de um GIN
+   * trigram em `content` (o `pg_trgm` já está instalado).
+   *
+   * Isolamento por loja NÃO depende de eu filtrar aqui: a política
+   * `messages_select_own` do RLS exige que a conversa seja de `auth.uid()`.
+   *
+   * Mínimo de 3 letras: com uma ou duas, qualquer coisa casa e a lista
+   * inteira "acha" — o resultado atrapalharia em vez de ajudar.
+   */
+  useEffect(() => {
+    const termo = search.trim();
+    if (termo.length < 3) { setAchadosNaConversa(new Map()); setBuscandoTexto(false); return; }
+
+    let cancelado = false;
+    setBuscandoTexto(true);
+    (async () => {
+      // `%` e `_` são curingas do LIKE; sem escapar, buscar "100%" viraria
+      // "qualquer coisa". A vírgula quebraria a lista de argumentos do .or().
+      const limpo = termo.replace(/[%_,]/g, ' ').trim();
+      if (!limpo) { if (!cancelado) { setAchadosNaConversa(new Map()); setBuscandoTexto(false); } return; }
+
+      const { data, error } = await db
+        .from('messages')
+        .select('conversation_id, content, created_at')
+        .ilike('content', `%${limpo}%`)
+        .order('created_at', { ascending: false })
+        .limit(400);
+
+      if (cancelado) return;
+      setBuscandoTexto(false);
+      if (error) { console.error('[Conversations] busca em mensagens:', error.message); return; }
+
+      // Uma linha por conversa, a MAIS RECENTE (a consulta já vem ordenada):
+      // quem perguntou do Corolla três vezes interessa uma vez só, e o trecho
+      // útil é o último.
+      const mapa = new Map<string, string>();
+      for (const m of ((data ?? []) as Array<{ conversation_id: string; content: string | null }>)) {
+        const id = String(m.conversation_id);
+        if (mapa.has(id)) continue;
+        mapa.set(id, trechoComTermo(String(m.content ?? ''), limpo));
+      }
+      setAchadosNaConversa(mapa);
+    })();
+    return () => { cancelado = true; };
+  }, [search]);
 
   // ── Pending notification loop: toca ding a cada 5s enquanto houver conversas pendentes ──
   useEffect(() => {
@@ -1670,7 +1759,12 @@ export default function Conversations() {
     if (!filter && c.status === 'closed') return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!(c.customer_name ?? '').toLowerCase().includes(q) && !c.customer_phone.toLowerCase().includes(q)) return false;
+      const bateNome  = (c.customer_name ?? '').toLowerCase().includes(q)
+                     || c.customer_phone.toLowerCase().includes(q);
+      // OU no texto das mensagens. É o caso de uso que motivou isto: entrou um
+      // carro e a loja quer achar quem perguntou dele — o nome da pessoa não
+      // ajuda nada nessa busca.
+      if (!bateNome && !achadosNaConversa.has(c.id)) return false;
     }
     return true;
   });
@@ -1756,11 +1850,25 @@ export default function Conversations() {
           <div style={{ position: 'relative', marginBottom: 8 }}>
             <Search size={14} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)' }} />
             <input
-              type="text" placeholder="Buscar nome ou telefone..." value={searchRaw}
+              type="text" placeholder="Buscar nome, telefone ou o que foi dito..." value={searchRaw}
               onChange={(e) => setSearchRaw(e.target.value)}
-              style={{ width: '100%', boxSizing: 'border-box', paddingLeft: 28, paddingRight: 8, paddingTop: 6, paddingBottom: 6, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-card)', fontSize: '0.8rem', color: 'var(--text-primary)' }}
+              style={{ width: '100%', boxSizing: 'border-box', paddingLeft: 28, paddingRight: 28, paddingTop: 6, paddingBottom: 6, border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg-card)', fontSize: '0.8rem', color: 'var(--text-primary)' }}
             />
+            {buscandoTexto && (
+              <Loader2 size={13} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', animation: 'spin 1s linear infinite' }} />
+            )}
           </div>
+          {/* Quantas entraram pelo TEXTO. Sem isto, o lojista não sabe se a
+              lista encolheu porque ninguém falou do carro ou porque a busca
+              ainda não achou nada — e some depois de 3 letras, que é o mínimo
+              pra consultar. */}
+          {search.trim().length >= 3 && !buscandoTexto && (
+            <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0 0 7px' }}>
+              {achadosNaConversa.size > 0
+                ? `${achadosNaConversa.size} ${achadosNaConversa.size === 1 ? 'conversa cita' : 'conversas citam'} "${search.trim()}"`
+                : `Ninguém falou "${search.trim()}" nas mensagens`}
+            </p>
+          )}
           {/* Falar primeiro com alguém que não escreveu. Fica visível, e não
               escondido num ícone, porque até aqui esse caminho não existia: o
               vendedor saía do CRM e a conversa acontecia fora do sistema. */}
@@ -1929,6 +2037,7 @@ export default function Conversations() {
                 onClick={() => selectConversation(conv.id)}
                 rotuloNumero={rotulosNumero[String((conv as { phone_number_id?: string | null }).phone_number_id ?? '')]}
                 anuncio={anuncioPorConversa.get(conv.id)}
+                trecho={achadosNaConversa.get(conv.id)}
               />
             ))}
         </div>
