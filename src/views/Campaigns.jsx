@@ -81,6 +81,17 @@ const CampaignWizard = ({ onClose }) => {
         if (excluirJaRecebeu === 'nenhum') { setJaReceberam(new Set()); return; }
         let cancelado = false;
         (async () => {
+            // `tentado` lê a mesma view que o servidor (migration 125), que
+            // junta as quatro portas de template. Ler de fonte diferente da do
+            // servidor foi o que fez o contador divergir em 24/11.
+            if (excluirJaRecebeu === 'tentado') {
+                const { data, error } = await supabase
+                    .from('telefones_ja_alcancados').select('telefone');
+                if (cancelado) return;
+                if (error) { console.error('[Campaigns] telefones_ja_alcancados:', error.message); return; }
+                setJaReceberam(new Set((data || []).map(r => soDigitos(r.telefone))));
+                return;
+            }
             let cq = supabase.from('campaigns').select('id');
             if (excluirJaRecebeu === 'este_template' && templateId) cq = cq.eq('template_id', templateId);
             const { data: camps } = await cq;

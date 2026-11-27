@@ -452,7 +452,33 @@ async function refinarPublico(
   // sem WhatsApp — tentar de novo não entrega nada E a falha conta contra a
   // qualidade do número na Meta. Na DSC eram 33 assim, contra 88 nunca
   // tentados: incluir os dois daria 27% de falha num disparo só.
-  if (excluir === 'este_template' || excluir === 'qualquer' || excluir === 'tentado') {
+  // `tentado` lê a view `telefones_ja_alcancados` (migration 125), que junta
+  // as QUATRO portas de template rastreáveis: campanha, aviso da lista de
+  // espera, conversa iniciada à mão e lembrete de visita. `campaign_sends`
+  // sozinha conhece só a primeira — quem recebeu o aviso de um carro que
+  // entrou contava como "nunca recebeu nada" e levaria o disparo em cima.
+  //
+  // (Aniversário fica fora: aquela função manda template e não registra em
+  // lugar nenhum. Está anotado na migration.)
+  if (excluir === 'tentado') {
+    const { data: alcancados, error: erroView } = await supabase
+      .from('telefones_ja_alcancados')
+      .select('telefone')
+      .eq('user_id', campaign.user_id);
+
+    if (erroView) {
+      // Falhar alto, e não seguir com exclusão vazia: vazio aqui manda o
+      // disparo pra TODO MUNDO, que é o estrago que este filtro existe pra
+      // evitar. Melhor a campanha não sair do que sair errada.
+      console.error('[send-campaign] leitura de telefones_ja_alcancados falhou:', erroView.code, erroView.message);
+      throw new Error(`Não consegui conferir quem já foi alcançado: ${erroView.message}`);
+    }
+
+    const ja = new Set((alcancados ?? []).map((r: DB) => soDigitos(r.telefone)));
+    const antes = lista.length;
+    lista = lista.filter((r) => !ja.has(soDigitos(r.phone)));
+    excluidosJaReceberam = antes - lista.length;
+  } else if (excluir === 'este_template' || excluir === 'qualquer') {
     let cq = supabase.from('campaigns').select('id').eq('user_id', campaign.user_id);
     if (excluir === 'este_template') cq = cq.eq('template_id', campaign.template_id);
     const { data: camps } = await cq;
@@ -460,9 +486,7 @@ async function refinarPublico(
 
     if (ids.length) {
       let sq = supabase.from('campaign_sends')
-        .select('customer_phone').in('campaign_id', ids);
-      // `tentado` NÃO filtra status, de propósito: é o que inclui as falhas.
-      if (excluir !== 'tentado') sq = sq.in('status', STATUS_RECEBIDO);
+        .select('customer_phone').in('campaign_id', ids).in('status', STATUS_RECEBIDO);
       if (excluir === 'qualquer') {
         const dias = Number(filter.excluir_dias) || 7;
         sq = sq.gte('sent_at', new Date(Date.now() - dias * 86400000).toISOString());
