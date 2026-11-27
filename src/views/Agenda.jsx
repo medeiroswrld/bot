@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
     Plus, X, Clock, User, CarFront, Phone, CheckCircle, AlertCircle,
-    XCircle, CalendarCheck, RotateCcw, Trash2, PartyPopper
+    XCircle, CalendarCheck, RotateCcw, Trash2, PartyPopper, History
 } from 'lucide-react';
 import { supabase } from '../lib/supabase.js';
 
@@ -189,6 +189,9 @@ const Agenda = () => {
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
     // 'todas' | 'feirao' — qual parte da agenda está aberta.
     const [aba, setAba] = useState('todas');
+    // Arquivo dos dias vencidos: fechado por padrao — e justamente o que
+    // estava atravancando a lista.
+    const [passadasAbertas, setPassadasAbertas] = useState(false);
 
     // ── Eventos da loja (feirão) ──────────────────────────────────────────
     //
@@ -266,13 +269,33 @@ const Agenda = () => {
         return acc;
     }, {});
 
-    const sortedDates = Object.keys(grouped).sort();
+    /**
+     * Dias que já passaram saem da vista, e ficam num bloco à parte.
+     *
+     * POR QUE: a lista é ordenada por data crescente, então o passado vinha
+     * PRIMEIRO. Hoje (27/11) a DSC tem 14 visitas em 6 dias já vencidos — quem
+     * abria a agenda via novembro inteiro antes de chegar no dia de hoje.
+     *
+     * Não é exclusão: o bloco continua ali, fechado, com a contagem. O que
+     * passou ainda serve pra conferir quem veio e quem faltou.
+     *
+     * Quando o lojista escolhe uma data no filtro, a separação não se aplica —
+     * ele pediu AQUELE dia, e esconder o que ele pediu seria o filtro mentindo.
+     */
+    const todasAsDatas = Object.keys(grouped).sort();
+    const filtrandoPorData = Boolean(filterDate);
+    const datasFuturas  = filtrandoPorData ? todasAsDatas : todasAsDatas.filter(d => d >= todayStr);
+    // Mais recente primeiro: olhando pra trás, ontem interessa mais que mês passado.
+    const datasPassadas = filtrandoPorData ? [] : todasAsDatas.filter(d => d < todayStr).reverse();
+    const visitasPassadas = datasPassadas.reduce((n, d) => n + grouped[d].length, 0);
 
     const getDayLabel = (dateStr) => {
         if (dateStr === todayStr) return 'Hoje';
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        if (dateStr === tomorrow.toISOString().split('T')[0]) return 'Amanhã';
+        const d = new Date(`${todayStr}T12:00:00`);
+        d.setDate(d.getDate() + 1);
+        if (dateStr === d.toISOString().split('T')[0]) return 'Amanhã';
+        d.setDate(d.getDate() - 2);
+        if (dateStr === d.toISOString().split('T')[0]) return 'Ontem';
         return formatDateStr(dateStr);
     };
 
@@ -293,6 +316,60 @@ const Agenda = () => {
     const handleQuickStatus = (e, id, newStatus) => {
         e.stopPropagation();
         updateAppointmentStatus(id, newStatus);
+    };
+
+    /**
+     * Um dia da agenda. Função e não JSX repetido porque o mesmo bloco é
+     * usado nos dois lugares — o que vem pela frente e o arquivo do que já
+     * passou. Duplicar aqui garantiria que um dia os dois divergissem.
+     *
+     * Dia vencido vem apagado e sem cor: o lojista distingue de relance o que
+     * ainda vai acontecer do que já foi, sem precisar ler a data.
+     */
+    const renderDia = (date) => {
+        const passado = date < todayStr;
+        return (
+            <div key={date} className="day-group"
+                style={passado ? { opacity: 0.6, filter: 'grayscale(0.85)' } : undefined}>
+                <h3 className="day-title" style={passado ? { color: 'var(--text-secondary)' } : undefined}>
+                    {getDayLabel(date)}
+                </h3>
+                <div className="appointment-list">
+                    {grouped[date].slice().sort((a, b) => a.time.localeCompare(b.time)).map(appt => {
+                        const s = STATUS_CONFIG[appt.status] || STATUS_CONFIG.agendado;
+                        return (
+                            <div key={appt.id} className="appointment-card card" onClick={() => setSelectedAppt(appt)} style={{ cursor: 'pointer' }}>
+                                <div className="app-time">
+                                    <Clock size={16} /> {appt.sem_horario ? 'Dia todo' : appt.time}
+                                </div>
+                                <div className="app-details">
+                                    <p className="app-customer"><User size={14} /> {appt.customer}</p>
+                                    <p className="app-car"><CarFront size={14} /> {appt.car}</p>
+                                    {appt.phone && <p className="app-phone"><Phone size={12} /> {appt.phone}</p>}
+                                </div>
+                                <div className="app-actions">
+                                    {/* Só na aba "Todas": na aba do feirão seria o mesmo selo em todo card. */}
+                                    {aba === 'todas' && appt.evento_id && (
+                                        <span className="appointment-status"
+                                            style={{ background: 'rgba(168, 85, 247, 0.12)', color: '#a855f7' }}>
+                                            <PartyPopper size={12} /> {eventoPorId[appt.evento_id]?.nome || 'Feirão'}
+                                        </span>
+                                    )}
+                                    <span className={`appointment-status ${s.className}`}>{s.icon} {s.label}</span>
+                                    <div className="agenda-quick-actions">
+                                        <button className="agenda-action-btn confirm" title="Confirmar" onClick={e => handleQuickStatus(e, appt.id, 'confirmado')}><CheckCircle size={16} /></button>
+                                        <button className="agenda-action-btn done" title="Realizado" onClick={e => handleQuickStatus(e, appt.id, 'realizado')}><CalendarCheck size={16} /></button>
+                                        <button className="agenda-action-btn" title="Remarcar" onClick={e => { e.stopPropagation(); setRescheduleAppt(appt); }}><RotateCcw size={16} /></button>
+                                        <button className="agenda-action-btn cancel" title="Cancelar" onClick={e => handleQuickStatus(e, appt.id, 'cancelado')}><XCircle size={16} /></button>
+                                        <button className="agenda-action-btn cancel" title="Excluir" onClick={e => { e.stopPropagation(); setConfirmDeleteId(appt.id); }}><Trash2 size={16} /></button>
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
     };
 
     return (
@@ -355,60 +432,54 @@ const Agenda = () => {
 
             <div className="agenda-grid">
                 <div className="agenda-main">
-                    {sortedDates.length === 0 && (
+                    {/* Vazio é sobre o que vem PELA FRENTE. Ter 14 visitas
+                        vencidas no arquivo não torna a agenda cheia: não há
+                        nada a fazer com elas. O texto muda quando existe
+                        arquivo, pra não dizer "crie um agendamento" a quem
+                        claramente já criou vários. */}
+                    {datasFuturas.length === 0 && (
                         <div style={{ textAlign: 'center', padding: '4rem 2rem' }}>
                             {aba === 'feirao'
                                 ? <PartyPopper size={48} style={{ color: '#94a3b8', marginBottom: '1rem' }} />
                                 : <CalendarCheck size={48} style={{ color: '#94a3b8', marginBottom: '1rem' }} />}
                             <h3 style={{ fontWeight: 600, marginBottom: '0.5rem' }}>
-                                {aba === 'feirao' ? 'Nenhuma visita marcada no feirão ainda' : 'Agenda vazia para este filtro'}
+                                {aba === 'feirao' ? 'Nenhuma visita marcada no feirão ainda'
+                                    : datasPassadas.length > 0 ? 'Nada marcado daqui pra frente'
+                                    : 'Agenda vazia para este filtro'}
                             </h3>
                             <p className="text-muted">
                                 {aba === 'feirao'
                                     ? 'O bot marca aqui automaticamente toda visita que cair nos dias do evento.'
-                                    : 'Crie um novo agendamento para começar.'}
+                                    : datasPassadas.length > 0
+                                        ? 'As visitas que já aconteceram estão guardadas aqui embaixo.'
+                                        : 'Crie um novo agendamento para começar.'}
                             </p>
                         </div>
                     )}
-                    {sortedDates.map(date => (
-                        <div key={date} className="day-group">
-                            <h3 className="day-title">{getDayLabel(date)}</h3>
-                            <div className="appointment-list">
-                                {grouped[date].sort((a, b) => a.time.localeCompare(b.time)).map(appt => {
-                                    const s = STATUS_CONFIG[appt.status] || STATUS_CONFIG.agendado;
-                                    return (
-                                        <div key={appt.id} className="appointment-card card" onClick={() => setSelectedAppt(appt)} style={{ cursor: 'pointer' }}>
-                                            <div className="app-time">
-                                                <Clock size={16} /> {appt.sem_horario ? 'Dia todo' : appt.time}
-                                            </div>
-                                            <div className="app-details">
-                                                <p className="app-customer"><User size={14} /> {appt.customer}</p>
-                                                <p className="app-car"><CarFront size={14} /> {appt.car}</p>
-                                                {appt.phone && <p className="app-phone"><Phone size={12} /> {appt.phone}</p>}
-                                            </div>
-                                            <div className="app-actions">
-                                                {/* Só na aba "Todas": na aba do feirão seria o mesmo selo em todo card. */}
-                                                {aba === 'todas' && appt.evento_id && (
-                                                    <span className="appointment-status"
-                                                        style={{ background: 'rgba(168, 85, 247, 0.12)', color: '#a855f7' }}>
-                                                        <PartyPopper size={12} /> {eventoPorId[appt.evento_id]?.nome || 'Feirão'}
-                                                    </span>
-                                                )}
-                                                <span className={`appointment-status ${s.className}`}>{s.icon} {s.label}</span>
-                                                <div className="agenda-quick-actions">
-                                                    <button className="agenda-action-btn confirm" title="Confirmar" onClick={e => handleQuickStatus(e, appt.id, 'confirmado')}><CheckCircle size={16} /></button>
-                                                    <button className="agenda-action-btn done" title="Realizado" onClick={e => handleQuickStatus(e, appt.id, 'realizado')}><CalendarCheck size={16} /></button>
-                                                    <button className="agenda-action-btn" title="Remarcar" onClick={e => { e.stopPropagation(); setRescheduleAppt(appt); }}><RotateCcw size={16} /></button>
-                                                    <button className="agenda-action-btn cancel" title="Cancelar" onClick={e => handleQuickStatus(e, appt.id, 'cancelado')}><XCircle size={16} /></button>
-                                                    <button className="agenda-action-btn cancel" title="Excluir" onClick={e => { e.stopPropagation(); setConfirmDeleteId(appt.id); }}><Trash2 size={16} /></button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    ))}
+                    {/* Dia já vencido fica cinza e meio apagado — o olho separa
+                        na hora o que ainda vai acontecer do que já foi. */}
+                    {datasFuturas.map(date => renderDia(date))}
+
+                    {datasPassadas.length > 0 && (
+                        <>
+                            <button
+                                type="button"
+                                onClick={() => setPassadasAbertas(v => !v)}
+                                style={{
+                                    width: '100%', marginTop: datasFuturas.length ? '1.5rem' : 0,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                                    padding: '9px 12px', borderRadius: 8, cursor: 'pointer',
+                                    background: 'transparent', border: '1px dashed var(--border)',
+                                    color: 'var(--text-secondary)', fontSize: '0.82rem', fontWeight: 600,
+                                }}
+                            >
+                                <History size={15} />
+                                {passadasAbertas ? 'Esconder' : 'Ver'} os dias que já passaram
+                                {' '}({visitasPassadas} {visitasPassadas === 1 ? 'visita' : 'visitas'})
+                            </button>
+                            {passadasAbertas && datasPassadas.map(date => renderDia(date))}
+                        </>
+                    )}
                 </div>
 
                 <div className="agenda-sidebar">

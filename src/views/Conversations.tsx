@@ -347,6 +347,46 @@ function aplicarConversa(prev: Conversation[], row: Conversation): Conversation[
 }
 
 /**
+ * Etiqueta do dia, igual à do WhatsApp: "Hoje", "Ontem", o dia da semana na
+ * última semana, e a data cheia antes disso.
+ *
+ * Sem isto, a conversa é uma fita contínua onde só aparece a hora — e uma
+ * mensagem das 14:30 pode ser de hoje ou de setembro. O vendedor não tem como
+ * saber se "amanhã eu passo aí" foi dito ontem ou há dois meses.
+ */
+function rotuloDoDia(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  // Compara só a data, no fuso de quem está olhando: usar a diferença em
+  // milissegundos erraria "ontem" para qualquer mensagem perto da meia-noite.
+  const soData = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate());
+  const dias = Math.round((soData(new Date()).getTime() - soData(d).getTime()) / 86400000);
+  if (dias === 0) return 'Hoje';
+  if (dias === 1) return 'Ontem';
+  if (dias > 1 && dias < 7) {
+    const s = d.toLocaleDateString('pt-BR', { weekday: 'long' });
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+/** A data vira uma pílula centrada entre os balões, como no WhatsApp. */
+const DivisorDeData = React.memo(function DivisorDeData({ rotulo }: { rotulo: string }) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', margin: '14px 0 10px' }}>
+      <span style={{
+        fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.02em',
+        padding: '3px 11px', borderRadius: 999,
+        background: 'var(--bg-card)', color: 'var(--text-secondary)',
+        border: '1px solid var(--border)', textTransform: 'uppercase',
+      }}>
+        {rotulo}
+      </span>
+    </div>
+  );
+});
+
+/**
  * Um pedaço da mensagem em volta do termo buscado.
  *
  * Mostrar a mensagem inteira não serve: a resposta do bot tem parágrafos, e a
@@ -2147,13 +2187,23 @@ export default function Conversations() {
               ? <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 40 }}><Loader2 size={24} style={{ animation: 'spin 1s linear infinite', color: 'var(--primary)' }} /></div>
               : messages.length === 0
                 ? <div style={{ textAlign: 'center', color: 'var(--text-secondary)', paddingTop: 40, fontSize: '0.85rem' }}>Nenhuma mensagem ainda.</div>
-                : messages.map((msg) => (
-                    <Bubble
-                      key={msg.id}
-                      msg={msg}
-                      campanha={msg.campaign_id ? campanhas[msg.campaign_id] : undefined}
-                    />
-                  ))}
+                : messages.map((msg, i) => {
+                    // Divisor quando VIRA o dia. Comparado contra a mensagem
+                    // anterior, não contra hoje: é a troca de dia dentro da
+                    // conversa que marca o corte.
+                    const anterior = i > 0 ? messages[i - 1] : null;
+                    const rotulo = rotuloDoDia(msg.created_at);
+                    const mudouODia = !anterior || rotuloDoDia(anterior.created_at) !== rotulo;
+                    return (
+                      <React.Fragment key={msg.id}>
+                        {mudouODia && rotulo && <DivisorDeData rotulo={rotulo} />}
+                        <Bubble
+                          msg={msg}
+                          campanha={msg.campaign_id ? campanhas[msg.campaign_id] : undefined}
+                        />
+                      </React.Fragment>
+                    );
+                  })}
             <div ref={messagesEndRef} />
           </div>
 
