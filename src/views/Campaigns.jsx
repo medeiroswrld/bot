@@ -94,8 +94,11 @@ const CampaignWizard = ({ onClose }) => {
             // pessoas. `failed` fica fora (não chegou) e `pending` também
             // (nem saiu — essa gente precisa entrar no próximo).
             let sq = supabase.from('campaign_sends')
-                .select('customer_phone').in('campaign_id', ids)
-                .in('status', ['sent', 'delivered', 'read']);
+                .select('customer_phone').in('campaign_id', ids);
+            // `tentado` não filtra status, igual ao servidor: é o que faz as
+            // falhas entrarem na exclusão. O contador tem que bater com o que
+            // vai sair de verdade.
+            if (excluirJaRecebeu !== 'tentado') sq = sq.in('status', ['sent', 'delivered', 'read']);
             if (excluirJaRecebeu === 'qualquer') {
                 sq = sq.gte('sent_at', new Date(Date.now() - (Number(excluirDias) || 7) * 86400000).toISOString());
             }
@@ -520,6 +523,11 @@ const CampaignWizard = ({ onClose }) => {
                                         ['nenhum', 'Pode repetir'],
                                         ['este_template', 'Pular quem já recebeu ESTE template'],
                                         ['qualquer', 'Pular quem recebeu qualquer disparo recente'],
+                                        // Mais largo que os outros: tira até quem a loja tentou e
+                                        // a mensagem não chegou. É o "manda só pra quem nunca
+                                        // recebeu nada" — e evita insistir em número sem WhatsApp,
+                                        // que não entrega e ainda derruba a qualidade do número.
+                                        ['tentado', 'Só quem nunca recebeu NADA (nem tentativa)'],
                                     ].map(([val, label]) => (
                                         <button key={val} type="button" className={`inv-filter-btn ${excluirJaRecebeu === val ? 'active' : ''}`} onClick={() => setExcluirJaRecebeu(val)}>
                                             {label}

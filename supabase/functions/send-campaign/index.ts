@@ -444,7 +444,15 @@ async function refinarPublico(
   const excluir = filter.excluir_ja_recebeu ?? 'nenhum';
   let excluidosJaReceberam = 0;
 
-  if (excluir === 'este_template' || excluir === 'qualquer') {
+  // `tentado` é mais largo que `qualquer`: tira quem a loja já TENTOU alcançar,
+  // tenha chegado ou não.
+  //
+  // Serve pro caso "manda pra quem nunca recebeu nada". Quem levou
+  // `Message undeliverable` não recebeu de verdade, mas quase sempre é número
+  // sem WhatsApp — tentar de novo não entrega nada E a falha conta contra a
+  // qualidade do número na Meta. Na DSC eram 33 assim, contra 88 nunca
+  // tentados: incluir os dois daria 27% de falha num disparo só.
+  if (excluir === 'este_template' || excluir === 'qualquer' || excluir === 'tentado') {
     let cq = supabase.from('campaigns').select('id').eq('user_id', campaign.user_id);
     if (excluir === 'este_template') cq = cq.eq('template_id', campaign.template_id);
     const { data: camps } = await cq;
@@ -452,7 +460,9 @@ async function refinarPublico(
 
     if (ids.length) {
       let sq = supabase.from('campaign_sends')
-        .select('customer_phone').in('campaign_id', ids).in('status', STATUS_RECEBIDO);
+        .select('customer_phone').in('campaign_id', ids);
+      // `tentado` NÃO filtra status, de propósito: é o que inclui as falhas.
+      if (excluir !== 'tentado') sq = sq.in('status', STATUS_RECEBIDO);
       if (excluir === 'qualquer') {
         const dias = Number(filter.excluir_dias) || 7;
         sq = sq.gte('sent_at', new Date(Date.now() - dias * 86400000).toISOString());
