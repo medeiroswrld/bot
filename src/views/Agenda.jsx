@@ -329,10 +329,10 @@ const Agenda = () => {
     const renderDia = (date) => {
         const passado = date < todayStr;
         return (
-            <div key={date} className="day-group"
-                style={passado ? { opacity: 0.6, filter: 'grayscale(0.85)' } : undefined}>
-                <h3 className="day-title" style={passado ? { color: 'var(--text-secondary)' } : undefined}>
+            <div key={date} className={`day-group${passado ? ' passado' : ''}`}>
+                <h3 className="day-title">
                     {getDayLabel(date)}
+                    {passado && <span className="selo-passou">já passou</span>}
                 </h3>
                 <div className="appointment-list">
                     {grouped[date].slice().sort((a, b) => a.time.localeCompare(b.time)).map(appt => {

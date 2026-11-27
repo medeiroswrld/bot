@@ -1334,3 +1334,35 @@ html .introjs-dark {
 }
 
 .introjs-arrow { display: none; }   /* o fio faz o trabalho dela */
+
+/* ── Dia da agenda que já passou ─────────────────────────────────────────────
+   Cor DIFERENTE, não apagado. A primeira tentativa usou opacity + grayscale e
+   não resolveu: deixava tudo pálido sem mudar cor nenhuma, e de quebra matava
+   a cor dos selos "Realizado" / "Não compareceu" — justamente o que se olha
+   num dia que já foi.
+   Aqui o dia vira uma caixa cinza de contorno tracejado, e a barra do título
+   troca o accent (que marca o que ainda vai acontecer) por cinza. */
+.day-group.passado {
+  background: var(--input-bg);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 14px 14px 2px;
+}
+.day-group.passado .day-title {
+  border-left-color: var(--text-secondary);
+  color: var(--text-secondary);
+  display: flex; align-items: center; gap: 8px;
+}
+/* O cartão perde o fundo próprio: dentro da caixa cinza, cada um com a própria
+   ficha branca faria o arquivo parecer mais importante que a agenda de hoje. */
+.day-group.passado .appointment-card {
+  background: transparent;
+  box-shadow: none;
+  border: 1px solid var(--border);
+}
+.day-group .selo-passou {
+  font-size: 0.6rem; font-weight: 800; letter-spacing: .04em;
+  padding: 2px 7px; border-radius: 999px;
+  background: var(--border); color: var(--text-secondary);
+  text-transform: uppercase;
+}
