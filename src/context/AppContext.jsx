@@ -234,8 +234,12 @@ export const AppProvider = ({ children }) => {
           ...c,
           images: sortedImages.map(img => img.image_url),
           km: c.mileage || 0,
-          status: c.status === 'sold' ? 'vendido' : 'disponivel',
-          // O status do banco tem quatro valores e este mapa achata pra dois.
+          // `arquivado` NÃO pode ser achatado em "disponível": é justamente o
+          // carro que saiu do pátio, e a tela precisa separá-lo do resto.
+          status: c.status === 'sold' ? 'vendido'
+                : c.status === 'arquivado' ? 'arquivado'
+                : 'disponivel',
+          // O status do banco tem cinco valores e este mapa achata quase tudo.
           // `status_real` preserva o original, que é o que distingue o carro
           // recém-chegado da troca ('incoming') de um pronto pra vender.
           status_real: c.status,
@@ -1175,6 +1179,45 @@ export const AppProvider = ({ children }) => {
     };
     const x = limpar(a), y = limpar(b);
     return x.length >= 10 && x === y;
+  };
+
+  /**
+   * Arquiva ou desarquiva um veículo.
+   *
+   * Arquivar é PAUSA, não desfecho: o consignado que o dono levou embora e
+   * pode trazer de volta. O cadastro fica inteiro — fotos, preço, descrição,
+   * histórico — e voltar é um clique.
+   *
+   * Sai de toda vitrine sem eu tocar em nada: o bot e o feed do site filtram
+   * por lista branca em ('available','reserved'), então o status novo já nasce
+   * fora dos dois.
+   *
+   * Desarquivar devolve pra `available`, não pro status anterior. `reserved`
+   * tinha a ver com um cliente que a essa altura já esfriou, e `incoming`
+   * descreve a chegada na troca, que já aconteceu — ressuscitar qualquer um
+   * dos dois contaria uma história que não é mais verdade.
+   */
+  const arquivarCarro = async (inventoryId, arquivar = true) => {
+    if (!user?.id) return false;
+    try {
+      const { error } = await supabase
+        .from('cars')
+        .update({ status: arquivar ? 'arquivado' : 'available' })
+        .eq('id', inventoryId)
+        .eq('user_id', user.id);
+      if (error) throw error;
+
+      setInventory(prev => prev.map(c => c.id === inventoryId
+        ? { ...c, status: arquivar ? 'arquivado' : 'disponivel',
+                  status_real: arquivar ? 'arquivado' : 'available' }
+        : c));
+      addToast(arquivar ? 'Veículo arquivado — saiu do site e do bot.' : 'Veículo de volta ao estoque.', 'success');
+      return true;
+    } catch (e) {
+      console.error('[INVENTORY] arquivar:', e);
+      addToast('Não consegui mudar o arquivamento deste veículo.', 'error');
+      return false;
+    }
   };
 
   const sellCar = async (inventoryId, salePrice, saleDate, sellerName, comprador = null, veiculo = null, leadIdComprador = null) => {
@@ -2213,6 +2256,7 @@ export const AppProvider = ({ children }) => {
     updateInventoryCar,
     removeInventoryCar,
     sellCar,
+    arquivarCarro,
 
     // Leads
     addLead,

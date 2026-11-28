@@ -971,7 +971,13 @@ export default function Conversations() {
         // O erro precisa aparecer: engoli-lo foi o que transformou uma falha de
         // consulta em spinner eterno.
         if (error) { setErroCarros(error.message); setCarros([]); return; }
-        const lista = (data ?? []).filter((c) => (c as { status?: string }).status !== 'sold');
+        // Fora: vendido e ARQUIVADO. O arquivado não está no pátio — mandar a
+        // foto dele pro cliente marca uma visita pra ver um carro que não
+        // existe ali. NULL continua passando (carro cadastrado antes da coluna).
+        const lista = (data ?? []).filter((c) => {
+          const st = (c as { status?: string }).status;
+          return st !== 'sold' && st !== 'arquivado';
+        });
         setCarros(lista as Array<Record<string, unknown>>);
         if (!lista.length) setErroCarros('Nenhum veículo disponível no estoque.');
       });

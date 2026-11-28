@@ -4,7 +4,7 @@ import {
     Plus, Search, Eye, Pencil, Trash2, Image as ImageIcon,
     X, Gauge, Tag, CheckCircle2, ShoppingCart, Package, Camera,
     Video, Loader2
-, CalendarDays, Printer, ArrowLeftRight, Lock, Copy } from 'lucide-react';
+, CalendarDays, Printer, ArrowLeftRight, Lock, Copy, Archive, ArchiveRestore } from 'lucide-react';
 import { useAppContext, getTodayStr } from '../context/AppContext.jsx';
 import { montarContrato, dadosDoContrato, imprimirContrato, formatarCPF, cpfValido } from '../lib/contrato.js';
 import { useModelosContrato, SeletorModelo } from '../lib/useModelosContrato.jsx';
@@ -1315,7 +1315,7 @@ const ConfirmModal = ({ message, onConfirm, onCancel }) => (
 
 
 const Inventory = () => {
-    const { inventory, addInventoryCar, updateInventoryCar, removeInventoryCar, sellCar, waitingListTemplateReady, notifyWaitingListMatch, companySettings, addToast } = useAppContext();
+    const { inventory, addInventoryCar, updateInventoryCar, removeInventoryCar, sellCar, arquivarCarro, waitingListTemplateReady, notifyWaitingListMatch, companySettings, addToast } = useAppContext();
     const { dinheiro, numero } = useDinheiro();
     const [search, setSearch] = useState('');
     const [filterStatus, setFilterStatus] = useState('todos');
@@ -1329,8 +1329,14 @@ const Inventory = () => {
     const [confirmDeleteId, setConfirmDeleteId] = useState(null);
     const [matchModalData, setMatchModalData] = useState(null);
 
+    const arquivados = inventory.filter(c => c.status === 'arquivado').length;
+
     const filtered = inventory.filter(c => {
         const matchSearch = `${c.brand} ${c.model} ${c.version} ${c.year}`.toLowerCase().includes(search.toLowerCase());
+        // "Todos" é todos os que ESTÃO no pátio. Arquivado é o carro que saiu —
+        // mostrá-lo junto desfaria o motivo de arquivar. Só aparece no filtro
+        // próprio, que é também o caminho pra trazer de volta.
+        if (c.status === 'arquivado' && filterStatus !== 'arquivado') return false;
         const matchStatus = filterStatus === 'todos' || c.status === filterStatus;
         return matchSearch && matchStatus;
     });
@@ -1492,7 +1498,14 @@ const Inventory = () => {
                     <input type="text" placeholder="Buscar por marca, modelo ou versão..." value={search} onChange={e => setSearch(e.target.value)} />
                 </div>
                 <div className="inv-filters">
-                    {[['todos', 'Todos'], ['disponivel', 'Disponíveis'], ['reservado', 'Reservados']].map(([key, label]) => (
+                    {[
+                        ['todos', 'Todos'],
+                        ['disponivel', 'Disponíveis'],
+                        ['reservado', 'Reservados'],
+                        // Só aparece quando existe algum — com zero seria um
+                        // botão que não muda nada.
+                        ...(arquivados > 0 ? [['arquivado', `Arquivados (${arquivados})`]] : []),
+                    ].map(([key, label]) => (
                         <button key={key} className={`inv-filter-btn ${filterStatus === key ? 'active' : ''}`} onClick={() => setFilterStatus(key)}>{label}</button>
                     ))}
                 </div>
@@ -1560,9 +1573,20 @@ const Inventory = () => {
                                 );
                             })()}
                             <div className="inv-card-actions">
-                                <button className="inv-action-btn sell" onClick={() => setSellCarObj(car)} title="Registrar a venda deste veículo">
-                                    <ShoppingCart size={16} /> Vender
-                                </button>
+                                {/* Arquivado não se vende: ele não está no pátio.
+                                    No lugar do botão de venda entra o de trazer
+                                    de volta, que é a única ação que faz sentido. */}
+                                {car.status === 'arquivado' ? (
+                                    <button className="inv-action-btn" onClick={() => arquivarCarro(car.id, false)}
+                                        title="Trazer de volta pro estoque, pro site e pro bot"
+                                        style={{ color: '#059669', fontWeight: 600 }}>
+                                        <ArchiveRestore size={16} /> Desarquivar
+                                    </button>
+                                ) : (
+                                    <button className="inv-action-btn sell" onClick={() => setSellCarObj(car)} title="Registrar a venda deste veículo">
+                                        <ShoppingCart size={16} /> Vender
+                                    </button>
+                                )}
                                 <button className="inv-action-btn" onClick={() => setViewCar(car)} title="Ver detalhes"><Eye size={16} /></button>
                                 {/* Ficha SÓ deste carro. Existe porque o caso
                                     comum não é imprimir o pátio inteiro: é o
@@ -1580,6 +1604,15 @@ const Inventory = () => {
                                     <Printer size={16} />
                                 </button>
                                 <button className="inv-action-btn" onClick={() => setEditCar(car)} title="Editar"><Pencil size={16} /></button>
+                                {car.status !== 'arquivado' && (
+                                    <button
+                                        className="inv-action-btn"
+                                        onClick={() => arquivarCarro(car.id, true)}
+                                        title="Arquivar: tira do site e do bot sem perder o cadastro. Pro consignado que o dono levou."
+                                    >
+                                        <Archive size={16} />
+                                    </button>
+                                )}
                                 <button
                                     className="inv-action-btn"
                                     onClick={() => handleDelete(car.id)}
